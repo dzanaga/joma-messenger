@@ -380,6 +380,7 @@ impl Joma {
 
         let status = div()
             .flex()
+            .flex_wrap()
             .items_center()
             .gap(px(8.))
             .child(div().text_color(t.green).child(G_PHONE))
@@ -409,7 +410,7 @@ impl Joma {
             .border_b_1()
             .border_color(t.border)
             .bg(t.panel)
-            .child(div().flex().items_center().justify_between().px(px(12.)).py(px(6.)).child(status).child(controls));
+            .child(div().flex().flex_wrap().items_center().justify_between().gap(px(6.)).px(px(12.)).py(px(6.)).child(status).child(controls));
         if let Some(image) = stage_image {
             let bg = t.bar;
             let stage = canvas(

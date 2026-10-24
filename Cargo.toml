@@ -25,3 +25,14 @@ hypr-ipc = { git = "https://github.com/omacom/gliff", rev = "58c742452ded3f10a2c
 [profile.release]
 lto = "thin"
 debug = "line-tables-only"
+
+# The software codec and its pixel kernels are unusable unoptimised; keep them fast in
+# debug builds too (the rest of the tree stays at opt-level 0).
+[profile.dev.package.openh264-sys2]
+opt-level = 3
+[profile.dev.package.openh264]
+opt-level = 3
+[profile.dev.package.gliff-sw]
+opt-level = 3
+[profile.dev.package.gliff-proto]
+opt-level = 3

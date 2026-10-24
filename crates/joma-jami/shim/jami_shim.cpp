@@ -419,6 +419,8 @@ dispatch(const std::string& m, const Json::Value& a)
         return removeExposedService(str(a, 0), str(a, 1));
     if (m == "getExposedServices")
         return toJson(getExposedServices(str(a, 0)));
+    if (m == "queryPeerServices")
+        return queryPeerServices(str(a, 0), str(a, 1));
     if (m == "openServiceTunnel")
         return openServiceTunnel(str(a, 0), str(a, 1), str(a, 2), str(a, 3), str(a, 4), (uint16_t) num(a, 5));
     if (m == "closeServiceTunnel")

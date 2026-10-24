@@ -366,6 +366,12 @@ pub fn exposed_services(account: &str) -> Result<Vec<Details>> {
     typed("getExposedServices", json!([account]))
 }
 
+/// Ask a peer which services it exposes to us; the answer arrives as
+/// [`Event::PeerServices`] with the returned request id.
+pub fn query_peer_services(account: &str, peer: &str) -> Result<u32> {
+    typed("queryPeerServices", json!([account, peer]))
+}
+
 /// Open a local listener (0: any port) forwarding to a peer device's service. The port
 /// arrives as [`Event::TunnelOpened`]; returns the tunnel id.
 pub fn open_tunnel(account: &str, peer: &str, device: &str, service: &str, name: &str) -> Result<String> {

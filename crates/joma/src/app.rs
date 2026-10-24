@@ -253,8 +253,14 @@ impl Joma {
         static STARTED: AtomicBool = AtomicBool::new(false);
         if !STARTED.swap(true, Ordering::SeqCst) {
             let tx = self.tx.clone();
-            // Test profiles never open the microphone, camera or speakers.
-            let flags = if own_profile() && std::env::var_os("JOMA_MEDIA").is_none() { joma_jami::flags::NO_LOCAL_MEDIA } else { 0 };
+            // No NO_LOCAL_* flags: libjami keeps audio inputs in its video manager, which
+            // NO_LOCAL_VIDEO leaves out, and then crashes when a call starts. Test profiles
+            // silence audio through ALSA instead (scripts/test-profile.sh).
+            let flags = if std::env::var_os("JOMA_JAMI_LOG").is_some() {
+                joma_jami::flags::DEBUG | joma_jami::flags::CONSOLE_LOG
+            } else {
+                0
+            };
             if let Err(e) = joma_jami::start(flags, move |ev| {
                 let _ = tx.unbounded_send(AppMsg::Jami(ev));
             }) {
@@ -447,6 +453,10 @@ impl Joma {
                     self.after(after, cx);
                     cx.notify();
                 }
+                return;
+            }
+            Event::PeerServices { request, peer, services, .. } => {
+                self.desk.peer_services(&acc, *request, peer, services);
                 return;
             }
             Event::TunnelOpened { tunnel, port, .. } => {
@@ -850,6 +860,11 @@ impl Joma {
     }
 
     fn start_portal(&mut self, call: String, cx: &mut Context<Self>) {
+        // A test profile must not open the real desktop's screen picker.
+        if own_profile() && std::env::var_os("JOMA_PORTAL").is_none() {
+            self.show_flash("portal share skipped in a test profile (JOMA_PORTAL=1 allows it)", cx);
+            return;
+        }
         self.desk.picking(&call);
         let tx = self.tx.clone();
         std::thread::spawn(move || {

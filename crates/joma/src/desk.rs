@@ -31,6 +31,8 @@ pub enum Sharing {
 
 pub enum Viewing {
     Off,
+    /// Asking the sharer's daemon which device advertises the service.
+    Querying { request: u32, uri: String, service: String, device: String, token: String },
     Opening { tunnel: String, token: String },
     On { viewer: Viewer, tunnel: String, accepted: bool },
 }
@@ -220,10 +222,12 @@ impl Desk {
                     let _ = joma_jami::close_tunnel(account, tunnel);
                 }
                 s.viewing = Viewing::Off;
-                let from = if uri.is_empty() { peer.to_owned() } else { uri };
-                match joma_jami::open_tunnel(account, &from, &device, &service, "joma-desk") {
-                    Ok(tunnel) => self.session(call).viewing = Viewing::Opening { tunnel, token },
-                    Err(e) => send(account, call, &DeskMsg::Decline { reason: e.to_string() }),
+                let uri = if uri.is_empty() { peer.to_owned() } else { uri };
+                // The daemon names the device that advertises the service (the id format
+                // it wants); the offer's device is the fallback.
+                match joma_jami::query_peer_services(account, &uri) {
+                    Ok(request) => self.session(call).viewing = Viewing::Querying { request, uri, service, device, token },
+                    Err(_) => self.open(account, call, &uri, &device, &service, token),
                 }
             }
             DeskMsg::Accept => {
@@ -247,6 +251,39 @@ impl Desk {
             }
         }
         (None, After::Nothing)
+    }
+
+    fn open(&mut self, account: &str, call: &str, uri: &str, device: &str, service: &str, token: String) {
+        tracing::info!(%uri, %device, %service, "opening the desktop-share tunnel");
+        match joma_jami::open_tunnel(account, uri, device, service, "joma-desk") {
+            Ok(tunnel) => self.session(call).viewing = Viewing::Opening { tunnel, token },
+            Err(e) => {
+                self.session(call).viewing = Viewing::Off;
+                send(account, call, &DeskMsg::Decline { reason: e.to_string() });
+            }
+        }
+    }
+
+    /// The peer's service list arrived: open the tunnel to the advertising device.
+    pub fn peer_services(&mut self, account: &str, request: u32, peer: &str, services: &str) {
+        let list: Vec<serde_json::Value> = serde_json::from_str(services).unwrap_or_default();
+        let found = self.sessions.iter().find_map(|(call, s)| match &s.viewing {
+            Viewing::Querying { request: r, uri, service, device, token }
+                if *r == request || (request == 0 && crate::model::bare_uri(uri) == crate::model::bare_uri(peer)) =>
+            {
+                let advertised = list
+                    .iter()
+                    .find(|v| v.get("id").and_then(|i| i.as_str()) == Some(service.as_str()))
+                    .and_then(|v| v.get("device").and_then(|d| d.as_str()))
+                    .filter(|d| !d.is_empty())
+                    .map(str::to_owned);
+                Some((call.clone(), uri.clone(), advertised.unwrap_or_else(|| device.clone()), service.clone(), token.clone()))
+            }
+            _ => None,
+        });
+        if let Some((call, uri, device, service, token)) = found {
+            self.open(account, &call, &uri, &device, &service, token);
+        }
     }
 
     /// The tunnel to a sharer is up: start viewing through it.
