@@ -1,0 +1,184 @@
+---
+title: "Joma: what got built overnight, and what needs your call"
+date: 2026-10-25
+lang: en
+---
+
+# How to read
+
+Under each question there is a `- [ ] A:` line.
+
+- **Tick it without writing anything:** you agree.
+- **Tick it and add a detail:** you agree, with that detail.
+- **Leave it unticked and write:** I revise the proposal, and redo what is already built
+  if needed.
+
+Everything marked **[built]** already exists in the repository as described. Nothing was
+pushed or published, nothing was installed on your system, and your Jami account was not
+touched: all tests ran on two throwaway accounts (`alice`, `bob`) under
+`/tmp/claude-1000/jt/`, inside a hidden nested Hyprland.
+
+# Where we are
+
+`~/Projects/joma-messenger`, 5 commits on `main`, 37 tests passing.
+
+| | What | State |
+|---|---|---|
+| J0 | libjami bridge; conversations, requests, messages; the GPUI interface in Omarchy's style | **built, verified** between alice and bob over the real Jami network |
+| J1 | Calls: place, answer, hang up, mute, camera, remote video | **built**; audio calls verified; remote video not tested (no camera in tests) |
+| J2 | Quick Messages: in-app bar, `joma quick` popup, `joma send`, Omarchy bar plugin | **built**; popup and CLI verified; the bar plugin passes `qmllint` but is not installed |
+| J3 | Joma desktop share on gliff's pipeline, over a Jami tunnel; Jami share as fallback | **built**; Joma share **verified** (bob watches alice's desktop through Jami); fallback not tested |
+| J4 | Packaging, desktop entry, Hyprland bindings, omatwin | planned |
+| J5 | Remote control, clipboard, output picker, file transfers, group calls, settings | planned |
+
+<!-- -->
+
+Screenshots of the runs are in `/tmp/claude-1000/jt/` (`shot8.png` messages, `call2.png`
+a call with the Joma handshake, `desk4.png` the desktop share, `quick.png` the popup).
+
+# A. Architecture
+
+**Q1. Joma runs libjami inside its own process, on the same data as the Jami app, so only
+one of the two can run at a time. OK?** [built]
+
+This is how the Qt client works too (Arch ships libjami, not the D-Bus `jamid`). Joma
+checks for a running `jami` and waits with a "Quit Jami, then retry" screen rather than
+risk two daemons on one account. The C++ API goes through a small shim that speaks JSON
+(one call entry, one signal callback), so the Rust side stays safe and the FFI is
+~400 lines.
+
+- [ ] A:
+
+**Q2. The Joma desktop share: gliff's crates as libraries (capture, Vulkan split, VA-API
+H.264, rate control), carried over a Jami service tunnel. OK?** [built]
+
+Following your correction, the gliff app is never spawned. Joma links gliff's
+`hypr-capture`, `gliff-vk`, `gliff-va`, `gliff-sw`, `gliff-proto` and `gliff-transport`
+as crates (git dependencies pinned to the commit I read). gliff's pure rate controller
+(`rate.rs`) is copied in, since it lives in a binary crate there. The bytes travel over
+Jami's own peer-to-peer channel: libjami's exposed services and tunnels
+(`addExposedService`, `openServiceTunnel`). That is the same ICE/TLS/TURN connection
+Jami uses, authorised by contact identity, and limited to the call peer. A token guards
+the loopback end.
+
+The tunnel is TCP-like, so it has gliff's known weakness on lossy, high-latency links
+(head-of-line stalls). Carrying the stream inside the call's RTP would avoid that, but
+needs a daemon fork.
+
+- [ ] A:
+
+**Q3. The handshake rides in-call messages (`application/x-joma-desk+json`): `Hello` when
+a call starts, `Offer` / `Accept` / `Decline` / `Stop`. The fallback to Jami's portal
+share happens when the peer never said `Hello`, declines, or stays silent for 15 s.
+OK?** [built]
+
+In the test both sides showed the **joma** badge within a second of answering.
+
+- [ ] A:
+
+**Q4. The wire format inside the tunnel is gliff's protocol, unchanged (plus a 33-byte
+token line first). OK?**
+
+This keeps us close to gliff: its client and server could talk to Joma's ends, and
+gliff's future features (AV1, UDP media) port over more easily. The alternative is our
+own framing, which buys nothing today.
+
+- [ ] A:
+
+# B. Desktop share details
+
+**Q5. View-only for now; remote control and clipboard next. How should control work?**
+
+gliff has both (`hypr-input`: virtual keyboard and pointer; a lazy clipboard). My
+proposal: the viewer asks for control, the sharer gets an accept prompt, and the sharer
+can take it back with a key (gliff's Shift+Esc). The clipboard stays off unless both
+turn it on.
+
+- [ ] A:
+
+**Q6. GPU tier on this machine.** gliff's own `gliff-probe gpu` finds no usable Vulkan
+device on renderD128 (the AMD Radeon 550 / Polaris), but the Intel HD 530 (renderD129)
+passes both VA-API encode and decode. The nested compositor renders on the AMD card, so
+capture fell back to shared memory and encoding to the CPU (4:2:0). Decoding ran on the
+Intel GPU when I pointed `GLIFF_RENDER_NODE` at it. Debug builds reach about 11 fps;
+release should be much faster, but I couldn't measure it for lack of disk space.
+**Should Joma pick the render node itself (any node that passes the probe), or leave
+it to `GLIFF_RENDER_NODE`?** And can we test between this machine and zavito next?
+
+- [ ] A:
+
+**Q7. The quality ladder's resolution steps are not applied yet** (frame rate and chroma
+steps are). OK to leave this for later?
+
+- [ ] A:
+
+# C. Quick Messages
+
+**Q8. Quick Messages is three things on one socket: the in-app bar (Ctrl+., Alt+1…9),
+the `joma quick` popup, and an Omarchy shell plugin (`omarchy-plugin/io.github.dzanaga.joma-quick`:
+an unread badge; the popup picks a contact and a message). Is that what you meant by
+"a plugin for quick messages"?** [built]
+
+The messages and favourites live in `~/.config/joma/quick.toml`; Ctrl+Shift+F stars a
+conversation.
+
+- [ ] A:
+
+**Q9. May I install it on this machine?** That means: link the plugin into
+`~/.config/omarchy/plugins/`, add the widget to the bar in `shell.json`, and add a
+Hyprland binding for `joma quick` (proposal: Super+Alt+M) with a float rule for the
+`joma-quick` window. Per your instructions I would record each piece with omatwin. **Should
+any of it also go to your other machines (offered, pending there)?**
+
+- [ ] A:
+
+# D. Using it for real
+
+**Q10. Switching your account to Joma.** You have the Jami app running with your real
+account. Trying Joma means quitting Jami and running `target/debug/joma` (or a release
+build). Everything stays in `~/.local/share/jami`, so you can go back to the Jami app at
+any time. Do you want a release build and a desktop entry ready, so you can try it
+tomorrow?
+
+- [ ] A:
+
+**Q11. Licence: GPL-3.0-or-later**, because Joma links libjami (GPL-3). gliff's MIT code
+fits inside it (its licence is kept in `crates/joma-desk/LICENSE-gliff`). OK?
+
+- [ ] A:
+
+**Q12. Packaging (J4):** a PKGBUILD in the repo, a GitHub repository (none exists yet;
+nothing pushed), then perhaps OPR next to gliff. Which order, and under which
+account?
+
+- [ ] A:
+
+# E. Next
+
+**Q13. Proposed order for the next sessions:**
+
+1. Release build and frame-rate measurement of the share (once disk allows).
+2. A test between two machines (this one and zavito), GPU tier on both ends.
+3. Video calls and the portal fallback tested for real (needs a camera and your session).
+4. Settings: display name and username registration, the quick-message editor, avatars.
+5. Remote control and clipboard (Q5).
+6. File transfers, group calls, search in messages.
+
+- [ ] A:
+
+# What happened on your machine tonight
+
+- **Disk:** /home was at 97%. I removed Vetro's `target/debug/incremental` (3.2 GB of
+  rebuildable caches) instead of a full `cargo clean`. Joma builds into Vetro's target dir
+  (sharing the GPUI build) with incremental compilation off. About 3.4 GB is free now.
+- **One test reached your desktop.** Before I gated it, the first desktop-share test fell
+  back to the portal, and `hyprland-preview-share-picker` opened on your real session for
+  about two minutes. I closed it; nothing was shared. Test profiles can no longer reach
+  the portal or your notification daemon. One or two test notifications ("hi alice…")
+  may also have shown before that fix.
+- **Two libjami findings:** `NO_LOCAL_AUDIO` and `NO_LOCAL_VIDEO` crash the daemon when a
+  call starts (the audio inputs live in the video manager). Tunnels need the device id
+  that `queryPeerServices` reports (64 hex digits), not `Account.deviceID`. Both are worked
+  around and noted in `docs/design/`.
+- **Left running:** nothing. I stopped the nested Hyprland and the test instances.
+  The test accounts stay in `/tmp/claude-1000/jt/` and go away on reboot.
