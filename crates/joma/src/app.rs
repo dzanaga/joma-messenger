@@ -921,7 +921,9 @@ impl Joma {
             }
             Request::QuickPopup => {
                 self.quick = QuickConfig::load();
-                crate::popup::open(cx.entity(), self, cx);
+                // Opening a window inside this update would block on Wayland.
+                let me = cx.entity();
+                cx.defer(move |cx| crate::popup::open(me, cx));
                 Reply::Done
             }
             Request::Quick => {

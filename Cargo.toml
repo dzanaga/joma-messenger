@@ -36,3 +36,7 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.gliff-proto]
 opt-level = 3
+[profile.dev.package.hypr-capture]
+opt-level = 3
+[profile.dev.package.joma-desk]
+opt-level = 3

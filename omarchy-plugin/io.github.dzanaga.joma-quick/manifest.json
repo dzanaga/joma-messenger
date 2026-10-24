@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.dzanaga.joma-quick",
+  "name": "Joma Quick",
+  "version": "0.1.0",
+  "author": "dzanaga",
+  "license": "GPL-3.0-or-later",
+  "description": "Unread Jami messages, and quick messages to your favourite contacts, through Joma.",
+  "kinds": ["service", "bar-widget"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Joma",
+    "description": "Unread count; pick a contact and send a quick message.",
+    "category": "Communication",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

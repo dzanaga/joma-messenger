@@ -20,19 +20,18 @@ pub struct QuickPopup {
     note: Option<String>,
 }
 
-/// Open the popup, or bring it forward.
-pub fn open(joma: Entity<Joma>, j: &mut Joma, cx: &mut App) {
-    if let Some(h) = j.quick_popup {
-        if h.update(cx, |p, window, cx| {
+/// Open the popup, or bring it forward. Call it outside an update of `joma`.
+pub fn open(joma: Entity<Joma>, cx: &mut App) {
+    if let Some(h) = joma.read(cx).quick_popup {
+        let brought = h.update(cx, |p, window, cx| {
             p.state = p.joma.read(cx).quick_state();
             window.activate_window();
-        })
-        .is_ok()
-        {
+        });
+        if brought.is_ok() {
             return;
         }
     }
-    let state = j.quick_state();
+    let state = joma.read(cx).quick_state();
     let bounds = Bounds::centered(None, size(px(560.), px(380.)), cx);
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -40,14 +39,15 @@ pub fn open(joma: Entity<Joma>, j: &mut Joma, cx: &mut App) {
         app_id: Some("joma-quick".into()),
         ..Default::default()
     };
+    let j = joma.clone();
     let handle = cx.open_window(options, |window, cx| {
         cx.new(|cx| {
             let focus = cx.focus_handle();
             window.focus(&focus);
-            QuickPopup { joma, state, target: 0, focus, note: None }
+            QuickPopup { joma: j, state, target: 0, focus, note: None }
         })
     });
-    j.quick_popup = handle.ok();
+    joma.update(cx, |j, _| j.quick_popup = handle.ok());
 }
 
 impl Focusable for QuickPopup {
