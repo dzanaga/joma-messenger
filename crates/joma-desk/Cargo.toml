@@ -18,7 +18,8 @@ gliff-sw.workspace = true
 hypr-capture.workspace = true
 hypr-ipc.workspace = true
 drm-fourcc = "2"
-ashpd = { version = "0.11", default-features = false, features = ["tokio"] }
+ashpd = { version = "0.11", default-features = false, features = ["async-std"] }
+futures = "0.3"
 
 [dev-dependencies]
 tracing-subscriber.workspace = true

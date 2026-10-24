@@ -1,7 +1,25 @@
 [package]
 name = "joma"
+description = "Joma: a Jami client for Omarchy, in Rust and GPUI"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
 
+[[bin]]
+name = "joma"
+path = "src/main.rs"
+
 [dependencies]
+gpui = "0.2.2"
+joma-jami = { path = "../joma-jami" }
+joma-theme = { path = "../joma-theme" }
+joma-desk = { path = "../joma-desk" }
+joma-quick = { path = "../joma-quick" }
+anyhow.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+futures = "0.3"
+image = "0.25"
+smallvec = { version = "1", features = ["union"] }
+libc = "0.2"

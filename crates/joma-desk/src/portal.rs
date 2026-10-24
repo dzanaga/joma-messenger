@@ -10,7 +10,7 @@ use std::os::fd::{AsRawFd, OwnedFd};
 use anyhow::{anyhow, Context, Result};
 use ashpd::desktop::screencast::{CursorMode, Screencast, SourceType};
 use ashpd::desktop::PersistMode;
-use tokio::sync::oneshot;
+use futures::channel::oneshot;
 
 /// A portal screencast session, kept open while the call shares it.
 pub struct PortalShare {
@@ -27,8 +27,8 @@ impl PortalShare {
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(OwnedFd, u32)>>();
         let (stop, stop_rx) = oneshot::channel::<()>();
         let thread = std::thread::Builder::new().name("joma-portal".into()).spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
-            rt.block_on(async move {
+            // ashpd runs on async-io here (the backend GPUI selects), so any executor drives it.
+            futures::executor::block_on(async move {
                 let session = async {
                     let proxy = Screencast::new().await?;
                     let session = proxy.create_session().await?;

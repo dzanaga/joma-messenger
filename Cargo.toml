@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/joma-jami", "crates/joma-theme", "crates/joma-desk", "crates/joma-plugins", "crates/joma"]
+members = ["crates/joma-jami", "crates/joma-theme", "crates/joma-desk", "crates/joma-quick", "crates/joma"]
 
 [workspace.package]
 edition = "2021"

@@ -1,0 +1,12 @@
+[package]
+name = "joma-quick"
+description = "Quick Messages: canned messages to favourite contacts, and Joma's IPC requests"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+toml = "0.8"
