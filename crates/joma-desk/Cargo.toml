@@ -1,0 +1,24 @@
+[package]
+name = "joma-desk"
+description = "Joma desktop share: gliff's Hyprland streaming pipeline between Jami peers"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+gliff-proto.workspace = true
+gliff-transport.workspace = true
+gliff-vk.workspace = true
+gliff-sw.workspace = true
+hypr-capture.workspace = true
+hypr-ipc.workspace = true
+drm-fourcc = "2"
+ashpd = { version = "0.11", default-features = false, features = ["tokio"] }
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

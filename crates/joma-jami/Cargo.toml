@@ -1,0 +1,16 @@
+[package]
+name = "joma-jami"
+description = "Safe Rust access to libjami (the Jami daemon library)"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+links = "jami"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+
+[build-dependencies]
+cc = "1"

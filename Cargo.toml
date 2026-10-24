@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = ["crates/joma-jami", "crates/joma-theme", "crates/joma-desk", "crates/joma-plugins", "crates/joma"]
+
+[workspace.package]
+edition = "2021"
+license = "GPL-3.0-or-later"
+version = "0.1.0"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = ["rt", "macros", "net", "io-util", "sync", "time"] }
+# gliff's streaming pipeline, used as libraries (pinned to the reviewed checkout).
+gliff-proto = { git = "https://github.com/omacom/gliff", rev = "58c742452ded3f10a2ce61f60eb4845f18205e29" }
+gliff-transport = { git = "https://github.com/omacom/gliff", rev = "58c742452ded3f10a2ce61f60eb4845f18205e29" }
+gliff-vk = { git = "https://github.com/omacom/gliff", rev = "58c742452ded3f10a2ce61f60eb4845f18205e29" }
+gliff-sw = { git = "https://github.com/omacom/gliff", rev = "58c742452ded3f10a2ce61f60eb4845f18205e29" }
+hypr-capture = { git = "https://github.com/omacom/gliff", rev = "58c742452ded3f10a2ce61f60eb4845f18205e29" }
+hypr-ipc = { git = "https://github.com/omacom/gliff", rev = "58c742452ded3f10a2ce61f60eb4845f18205e29" }
+
+[profile.release]
+lto = "thin"
+debug = "line-tables-only"

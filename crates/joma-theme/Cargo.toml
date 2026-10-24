@@ -1,0 +1,8 @@
+[package]
+name = "joma-theme"
+description = "The current Omarchy theme as Joma's palette"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
