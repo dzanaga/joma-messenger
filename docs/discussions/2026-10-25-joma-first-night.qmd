@@ -47,7 +47,7 @@ risk two daemons on one account. The C++ API goes through a small shim that spea
 (one call entry, one signal callback), so the Rust side stays safe and the FFI is
 ~400 lines.
 
-- [ ] A:
+- [x] A:
 
 **Q2. The Joma desktop share: gliff's crates as libraries (capture, Vulkan split, VA-API
 H.264, rate control), carried over a Jami service tunnel. OK?** [built]
@@ -65,7 +65,7 @@ The tunnel is TCP-like, so it has gliff's known weakness on lossy, high-latency 
 (head-of-line stalls). Carrying the stream inside the call's RTP would avoid that, but
 needs a daemon fork.
 
-- [ ] A:
+- [x] A:
 
 **Q3. The handshake rides in-call messages (`application/x-joma-desk+json`): `Hello` when
 a call starts, `Offer` / `Accept` / `Decline` / `Stop`. The fallback to Jami's portal
@@ -74,7 +74,7 @@ OK?** [built]
 
 In the test both sides showed the **joma** badge within a second of answering.
 
-- [ ] A:
+- [x] A:
 
 **Q4. The wire format inside the tunnel is gliff's protocol, unchanged (plus a 33-byte
 token line first). OK?**
@@ -83,7 +83,7 @@ This keeps us close to gliff: its client and server could talk to Joma's ends, a
 gliff's future features (AV1, UDP media) port over more easily. The alternative is our
 own framing, which buys nothing today.
 
-- [ ] A:
+- [x] A:
 
 # B. Desktop share details
 
@@ -94,7 +94,7 @@ proposal: the viewer asks for control, the sharer gets an accept prompt, and the
 can take it back with a key (gliff's Shift+Esc). The clipboard stays off unless both
 turn it on.
 
-- [ ] A:
+- [x] A:
 
 **Q6. GPU tier on this machine.** gliff's own `gliff-probe gpu` finds no usable Vulkan
 device on renderD128 (the AMD Radeon 550 / Polaris), but the Intel HD 530 (renderD129)
@@ -105,12 +105,13 @@ release should be much faster, but I couldn't measure it for lack of disk space.
 **Should Joma pick the render node itself (any node that passes the probe), or leave
 it to `GLIFF_RENDER_NODE`?** And can we test between this machine and zavito next?
 
-- [ ] A:
+- [x] A:i don't fully follow this. normally it should use the AMD card... let's test what's best and try a screen sharing call on 2 accounts, i'll set one up on zavito. how do we streamline installation process? perhaps build it and copy the binary there via ssh, also add an app launcher.  you should also create a cool icon. I propose a green exagon on gray/dark background, with a bit of neon effect, no inner fill and inside a J also green with neon effect and jetbrains font or omarchy font style. something like this.
+   
 
 **Q7. The quality ladder's resolution steps are not applied yet** (frame rate and chroma
 steps are). OK to leave this for later?
 
-- [ ] A:
+- [x] A:
 
 # C. Quick Messages
 
@@ -122,7 +123,7 @@ an unread badge; the popup picks a contact and a message). Is that what you mean
 The messages and favourites live in `~/.config/joma/quick.toml`; Ctrl+Shift+F stars a
 conversation.
 
-- [ ] A:
+- [x] A: it should show a list of online contacts, with pinned and/or unread messages on top. clicking opens a quick chat in the plugin with the latest messages and box to reply. buttons available to start a call or screen sharing or send files
 
 **Q9. May I install it on this machine?** That means: link the plugin into
 `~/.config/omarchy/plugins/`, add the widget to the bar in `shell.json`, and add a
@@ -130,7 +131,7 @@ Hyprland binding for `joma quick` (proposal: Super+Alt+M) with a float rule for 
 `joma-quick` window. Per your instructions I would record each piece with omatwin. **Should
 any of it also go to your other machines (offered, pending there)?**
 
-- [ ] A:
+- [x] A: let's pause omatwin on this, it's still just development and testing
 
 # D. Using it for real
 
@@ -140,18 +141,18 @@ build). Everything stays in `~/.local/share/jami`, so you can go back to the Jam
 any time. Do you want a release build and a desktop entry ready, so you can try it
 tomorrow?
 
-- [ ] A:
+- [x] A:
 
 **Q11. Licence: GPL-3.0-or-later**, because Joma links libjami (GPL-3). gliff's MIT code
 fits inside it (its licence is kept in `crates/joma-desk/LICENSE-gliff`). OK?
 
-- [ ] A:
+- [x] A:
 
 **Q12. Packaging (J4):** a PKGBUILD in the repo, a GitHub repository (none exists yet;
 nothing pushed), then perhaps OPR next to gliff. Which order, and under which
 account?
 
-- [ ] A:
+- [x] A: what's a OPR? I would start by creating a github repo on my account: joma-messenger
 
 # E. Next
 
@@ -164,7 +165,7 @@ account?
 5. Remote control and clipboard (Q5).
 6. File transfers, group calls, search in messages.
 
-- [ ] A:
+- [x] A: 
 
 # What happened on your machine tonight
 
