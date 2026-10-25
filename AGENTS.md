@@ -15,8 +15,10 @@
   data, config and socket) and `HOME=<dir>/home` after `scripts/test-profile.sh <dir>`
   (silent ALSA audio), inside the hidden nested Hyprland of `scripts/nest.sh`. A test
   profile skips notifications and the desktop portal.
-- Build: this machine is short on disk, so `.cargo/config.toml` (local, ignored) shares
-  Vetro's target dir with incremental compilation off. If space runs out, remove
-  `target/debug/incremental`, or ask before a full `cargo clean`.
+- Build: `.cargo/config.toml` (local, ignored) shares Vetro's target dir with incremental
+  compilation off. `target/debug` there is a symlink into `/run/media/dzanaga/builds`, a
+  btrfs image (zstd) on the external Samsung T5, attached by the user unit
+  `builds-disk.path`. If that path is missing, the drive is unplugged: say so rather than
+  rebuilding on /home, which is nearly full. Ask before a full `cargo clean`.
 - Commit after every change once tests pass (`cargo test --workspace`).
 - Docs and code in English.
