@@ -291,10 +291,6 @@ impl Model {
         c.peers.iter().any(|p| self.online.contains(p))
     }
 
-    pub fn total_unread(&self) -> u32 {
-        self.conversations.values().map(|c| c.unread).sum()
-    }
-
     /// A title for a conversation: its own, else its members' names.
     pub fn title_for(&self, infos: &Details, peers: &[String]) -> String {
         if let Some(t) = infos.get("title").filter(|t| !t.is_empty()) {

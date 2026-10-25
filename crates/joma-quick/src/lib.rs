@@ -27,6 +27,9 @@ pub struct QuickConfig {
     pub favorites: Vec<String>,
     /// How many recent conversations fill the list when `favorites` is short.
     pub recent: usize,
+    /// Conversations removed from the lists (Joma's "removed contacts"): kept in Jami,
+    /// hidden here until restored or deleted for good.
+    pub removed: Vec<String>,
 }
 
 impl Default for QuickConfig {
@@ -44,6 +47,7 @@ impl Default for QuickConfig {
             .to_vec(),
             favorites: Vec::new(),
             recent: 6,
+            removed: Vec::new(),
         }
     }
 }

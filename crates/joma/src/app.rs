@@ -74,6 +74,8 @@ pub enum Mode {
     Search,
     /// The input registers our username.
     Username,
+    /// The list shows the removed conversations, to restore or delete.
+    Removed,
 }
 
 /// A username the name server can take: 3 to 32 of a-z, 0-9, `-` and `_`, lower-cased.
@@ -136,6 +138,8 @@ pub struct Joma {
     pub onboard_name: Option<String>,
     /// A username to register once the new account is online.
     pending_username: Option<String>,
+    /// "Delete for good" was clicked once on this conversation, at this time.
+    pub confirm_delete: Option<(String, Instant)>,
     repaint_queued: Arc<AtomicBool>,
     composing_sent: Option<Instant>,
     /// Peers whose presence we follow.
@@ -312,6 +316,7 @@ impl Joma {
             adding: None,
             onboard_name: None,
             pending_username: None,
+            confirm_delete: None,
             repaint_queued: Arc::new(AtomicBool::new(false)),
             composing_sent: None,
             subscribed: HashSet::new(),
@@ -417,7 +422,7 @@ impl Joma {
                 self.lookup(r.get("from").map(String::as_str).unwrap_or(""));
             }
         }
-        self.selected = self.model.ordered().first().map(|c| c.id.clone());
+        self.selected = self.listed().first().map(|c| c.id.clone());
         if let Some(id) = self.selected.clone() {
             self.select(id, cx);
         }
@@ -805,7 +810,9 @@ impl Joma {
         }
         if let Some((conv, text)) = &changed.incoming {
             let active = window.is_window_active();
-            if self.selected.as_deref() == Some(conv) && active {
+            if self.is_removed(conv) {
+                // A removed contact stays quiet until restored.
+            } else if self.selected.as_deref() == Some(conv) && active {
                 self.mark_read(conv);
             } else {
                 let title = self.model.conversations.get(conv).map(|c| c.title.clone()).unwrap_or_default();
@@ -824,7 +831,7 @@ impl Joma {
             raise(window);
         }
         if self.selected.is_none() {
-            if let Some(id) = self.model.ordered().first().map(|c| c.id.clone()) {
+            if let Some(id) = self.listed().first().map(|c| c.id.clone()) {
                 self.select(id, cx);
             }
         }
@@ -935,8 +942,25 @@ impl Joma {
     }
 
     /// Conversations shown in the sidebar, filtered in search mode.
+    pub fn is_removed(&self, conv: &str) -> bool {
+        self.quick.removed.iter().any(|r| r == conv)
+    }
+
+    /// Conversations newest first, without the removed ones.
+    pub fn listed(&self) -> Vec<&crate::model::Conversation> {
+        self.model.ordered().into_iter().filter(|c| !self.is_removed(&c.id)).collect()
+    }
+
+    /// Unread messages outside the removed conversations.
+    pub fn listed_unread(&self) -> u32 {
+        self.listed().iter().map(|c| c.unread).sum()
+    }
+
     pub fn visible_conversations(&self) -> Vec<&crate::model::Conversation> {
-        let all = self.model.ordered();
+        if self.mode == Mode::Removed {
+            return self.model.ordered().into_iter().filter(|c| self.is_removed(&c.id)).collect();
+        }
+        let all = self.listed();
         if self.mode != Mode::Search {
             return all;
         }
@@ -983,6 +1007,68 @@ impl Joma {
         }
     }
 
+    /// Take a conversation off the lists; it stays in Jami and can be restored.
+    pub fn remove_from_list(&mut self, conv: &str, cx: &mut Context<Self>) {
+        if !self.is_removed(conv) {
+            self.quick.removed.push(conv.to_owned());
+            self.quick.favorites.retain(|f| f != conv);
+        }
+        self.save_quick(cx);
+        let title = self.model.conversations.get(conv).map(|c| c.title.clone()).unwrap_or_default();
+        if self.selected.as_deref() == Some(conv) && self.mode != Mode::Removed {
+            self.selected = self.listed().first().map(|c| c.id.clone());
+            if let Some(id) = self.selected.clone() {
+                self.select(id, cx);
+            }
+        }
+        self.show_flash(format!("{title} removed · the bin icon in the list restores it"), cx);
+    }
+
+    pub fn restore(&mut self, conv: &str, cx: &mut Context<Self>) {
+        self.quick.removed.retain(|r| r != conv);
+        self.save_quick(cx);
+        let title = self.model.conversations.get(conv).map(|c| c.title.clone()).unwrap_or_default();
+        self.show_flash(format!("{title} is back in the list"), cx);
+    }
+
+    /// Delete a removed conversation for good: the contact (for a one-to-one) and the
+    /// conversation leave Jami. A first click asks; a second within 5 s deletes.
+    pub fn delete_for_good(&mut self, conv: &str, cx: &mut Context<Self>) {
+        let armed = self.confirm_delete.as_ref().is_some_and(|(c, t)| c == conv && t.elapsed() < Duration::from_secs(5));
+        if !armed {
+            self.confirm_delete = Some((conv.to_owned(), Instant::now()));
+            self.show_flash("click delete again to delete for good (history included)", cx);
+            return;
+        }
+        self.confirm_delete = None;
+        let acc = self.model.account.clone();
+        let Some(c) = self.model.conversations.get(conv).cloned() else { return };
+        if c.peers.len() == 1 {
+            if let Err(e) = joma_jami::remove_contact(&acc, &c.peers[0], false) {
+                self.show_flash(format!("could not remove the contact: {e}"), cx);
+                return;
+            }
+        }
+        if let Err(e) = joma_jami::remove_conversation(&acc, conv) {
+            self.show_flash(format!("could not delete the conversation: {e}"), cx);
+            return;
+        }
+        self.model.conversations.remove(conv);
+        self.quick.removed.retain(|r| r != conv);
+        self.save_quick(cx);
+        if self.selected.as_deref() == Some(conv) {
+            self.selected = None;
+        }
+        self.show_flash(format!("{} deleted · add them again with + if needed", c.title), cx);
+    }
+
+    fn save_quick(&mut self, cx: &mut Context<Self>) {
+        if let Err(e) = self.quick.save() {
+            self.show_flash(format!("could not save the lists: {e}"), cx);
+        }
+        cx.notify();
+    }
+
     pub fn toggle_favorite(&mut self, cx: &mut Context<Self>) {
         if let Some(conv) = self.selected.clone() {
             self.quick.toggle_favorite(&conv);
@@ -1000,6 +1086,7 @@ impl Joma {
         self.configure_inputs(cx);
         match mode {
             Mode::Chat => window.focus(&self.composer.focus_handle(cx)),
+            Mode::Removed => window.focus(&self.focus),
             _ => window.focus(&self.input.focus_handle(cx)),
         }
         cx.notify();
@@ -1061,7 +1148,7 @@ impl Joma {
                 },
                 None => self.show_flash(format!("a username has {USERNAME_RULE}"), cx),
             },
-            Mode::Chat => {}
+            Mode::Chat | Mode::Removed => {}
         }
     }
 
@@ -1260,8 +1347,7 @@ impl Joma {
 
     pub fn quick_state(&self) -> QuickState {
         let candidates: Vec<Candidate> = self
-            .model
-            .ordered()
+            .listed()
             .iter()
             .filter(|c| !c.request)
             .map(|c| Candidate { id: c.id.clone(), unread: c.unread, online: self.model.is_online(c) })
@@ -1283,7 +1369,7 @@ impl Joma {
         QuickState {
             account: self.model.my_name.clone(),
             registered: self.model.registration == "REGISTERED",
-            unread: self.model.total_unread(),
+            unread: self.listed_unread(),
             targets,
             messages: self.quick.messages.clone(),
         }
@@ -1310,7 +1396,12 @@ impl Joma {
                 Reply::Done
             }
             Request::Quick => {
-                self.quick = QuickConfig::load();
+                // The file can change outside Joma (edited by hand, or another tool).
+                let quick = QuickConfig::load();
+                if quick != self.quick {
+                    self.quick = quick;
+                    cx.notify();
+                }
                 Reply::Quick(self.quick_state())
             }
             Request::Send { to, text } => {

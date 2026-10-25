@@ -243,6 +243,11 @@ pub fn accept_request(account: &str, conversation: &str) -> Result<()> {
     call("acceptConversationRequest", json!([account, conversation])).map(drop)
 }
 
+/// Leave a conversation and drop it from this device.
+pub fn remove_conversation(account: &str, conversation: &str) -> Result<bool> {
+    typed("removeConversation", json!([account, conversation]))
+}
+
 pub fn decline_request(account: &str, conversation: &str) -> Result<()> {
     call("declineConversationRequest", json!([account, conversation])).map(drop)
 }

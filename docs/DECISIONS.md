@@ -22,6 +22,9 @@
   asked first; peers without Joma get a call with the microphone off. (User, 2026-10-25.)
 - D-12 No `joma quick` window, no quick messages under the bar chat: the bar panel is
   the quick way in. (User, 2026-10-25.)
+- D-13 Removing a contact only hides it in Joma (`removed` in quick.toml); deleting for
+  good is a second step from the removed list (removeContact without ban, then
+  removeConversation). (User, 2026-10-25.)
 
 ## Decided
 

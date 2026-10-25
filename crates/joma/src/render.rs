@@ -31,6 +31,8 @@ pub const G_CHECK: &str = "\u{f00c}";
 pub const G_TIMES: &str = "\u{f00d}";
 pub const G_EYE: &str = "\u{f06e}";
 pub const G_EXPAND: &str = "\u{f065}";
+pub const G_TRASH: &str = "\u{f1f8}";
+pub const G_UNDO: &str = "\u{f0e2}";
 
 /// Local "HH:MM" and a day key for separators.
 pub fn local_time(ts: i64) -> (String, i64, String) {
@@ -150,7 +152,7 @@ impl Joma {
             "TRYING" | "INITIALIZING" => ("connecting", t.yellow),
             _ => ("offline", t.red),
         };
-        let unread = self.model.total_unread();
+        let unread = self.listed_unread();
         div()
             .flex()
             .flex_none()
@@ -266,7 +268,31 @@ impl Joma {
                                 d.child(div().px(px(5.)).bg(t.accent).text_color(t.bar).child(c.unread.to_string()))
                             }),
                     )
-                    .child(div().text_color(t.muted).text_size(px(t.size - 1.5)).truncate().child(last)),
+                    .child(div().text_color(t.muted).text_size(px(t.size - 1.5)).truncate().child(last))
+                    .when(self.mode == Mode::Removed, |d| {
+                        let (a, b) = (c.id.clone(), c.id.clone());
+                        let armed = self.confirm_delete.as_ref().is_some_and(|(k, at)| *k == c.id && at.elapsed().as_secs() < 5);
+                        d.child(
+                            div()
+                                .flex()
+                                .gap(px(6.))
+                                .pt(px(4.))
+                                .child(button(SharedString::from(format!("restore-{}", c.id)), G_UNDO, "restore", t, false).on_click(cx.listener(
+                                    move |this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        this.restore(&a, cx);
+                                    },
+                                )))
+                                .child(
+                                    button(SharedString::from(format!("delete-{}", c.id)), G_TRASH, if armed { "sure? click again" } else { "delete for good" }, t, armed)
+                                        .text_color(t.red)
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            cx.stop_propagation();
+                                            this.delete_for_good(&b, cx);
+                                        })),
+                                ),
+                        )
+                    }),
             );
         }
         let header = |label: &str| {
@@ -306,10 +332,23 @@ impl Joma {
                             .child(
                                 button("btn-add", G_PLUS, "", t, self.mode == Mode::Add)
                                     .on_click(cx.listener(|this, _, window, cx| this.set_mode(Mode::Add, window, cx))),
-                            ),
+                            )
+                            .when(!self.quick.removed.is_empty() || self.mode == Mode::Removed, |d| {
+                                d.child(button("btn-removed", G_TRASH, "", t, self.mode == Mode::Removed).on_click(cx.listener(|this, _, window, cx| {
+                                    let next = if this.mode == Mode::Removed { Mode::Chat } else { Mode::Removed };
+                                    this.set_mode(next, window, cx);
+                                })))
+                            }),
                     ),
             )
-            .when(self.mode != Mode::Chat, |d| {
+            .when(self.mode == Mode::Removed, |d| {
+                d.child(div().px(px(10.)).pb(px(6.)).text_color(t.muted).text_size(px(t.size - 2.)).child(if self.quick.removed.is_empty() {
+                    "no removed contacts"
+                } else {
+                    "removed contacts: restore, or delete for good"
+                }))
+            })
+            .when(self.mode != Mode::Chat && self.mode != Mode::Removed, |d| {
                 d.child(
                     div()
                         .px(px(8.))
@@ -665,6 +704,10 @@ impl Joma {
                     .flex()
                     .gap(px(6.))
                     .child(button("fav", if fav { G_STAR } else { G_STAR_O }, "", t, fav).on_click(cx.listener(|this, _, _, cx| this.toggle_favorite(cx))))
+                    .when(!conv.request && !self.is_removed(&conv.id), |d| {
+                        let id = conv.id.clone();
+                        d.child(button("remove", G_TRASH, "", t, false).on_click(cx.listener(move |this, _, _, cx| this.remove_from_list(&id, cx))))
+                    })
                     .child(button("quick", G_BOLT, "quick", t, self.quick_open).on_click(cx.listener(|this, _, _, cx| {
                         this.quick_open = !this.quick_open;
                         cx.notify();
@@ -742,6 +785,7 @@ impl Joma {
                 Mode::Add => "enter: add · esc: cancel",
                 Mode::Search => "enter: open first · esc: cancel",
                 Mode::Username => "enter: register · esc: cancel",
+                Mode::Removed => "removed contacts · esc: back",
                 Mode::Chat => "alt+j/k: conversations · ctrl+n: add · ctrl+k: find · ctrl+shift+c/v: call · ctrl+shift+s: share · ctrl+.: quick",
             }),
         };
@@ -792,7 +836,7 @@ impl Render for Joma {
         // on screen (a request has no composer), the window itself takes the focus.
         let conv = self.selected.as_ref().and_then(|s| self.model.conversations.get(s));
         let composer_shown = self.gate == Gate::Ready && conv.is_some_and(|c| !c.request) && !self.stage;
-        let input_shown = self.gate == Gate::Onboarding || (self.gate == Gate::Ready && self.mode != Mode::Chat);
+        let input_shown = self.gate == Gate::Onboarding || (self.gate == Gate::Ready && !matches!(self.mode, Mode::Chat | Mode::Removed));
         let lost = (!composer_shown && self.composer.focus_handle(cx).is_focused(window))
             || (!input_shown && self.input.focus_handle(cx).is_focused(window))
             || window.focused(cx).is_none();

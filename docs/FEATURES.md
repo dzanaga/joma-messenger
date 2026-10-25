@@ -7,6 +7,13 @@ you by it. Without one, "choose a username" in the top bar registers it later. J
 writes the profile contacts receive (accounts made by Joma 0.2 and earlier had none, so
 contacts saw a 40-digit ID; it is added the next time the account comes online).
 
+## Removing contacts
+The bin in a conversation's header takes it off the lists (window, bar, notifications);
+it stays in Jami, and its messages keep arriving quietly. The bin next to + in the list
+shows the removed ones: **restore** puts one back, **delete for good** (click twice)
+removes the contact and the conversation from Jami; add them again with + if needed.
+The removed list is `removed` in `~/.config/joma/quick.toml`.
+
 ## Messages
 Conversations newest first, requests on top (accept with Ctrl+Enter). Add a contact by
 Jami username or ID (Ctrl+N). History, typing indicator, unread counts, desktop
@@ -60,7 +67,8 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
-- unreleased: usernames (at account creation, or "choose a username"); contacts see your
+- unreleased: removing contacts (a removed list to restore from or delete for good);
+  usernames (at account creation, or "choose a username"); contacts see your
   name instead of your ID (the missing profile is written; received profiles are read
   from the file the daemon names).
 - 0.2.0 (2026-10-25): remote video in calls works (it crashed Joma); the version next to
