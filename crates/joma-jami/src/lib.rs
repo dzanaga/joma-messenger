@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 use std::ffi::{c_char, c_void, CStr, CString};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
 use anyhow::{anyhow, bail, Result};
@@ -45,6 +46,8 @@ extern "C" {
 
 type Sink = Box<dyn Fn(Event) + Send + Sync>;
 static SINK: OnceLock<Sink> = OnceLock::new();
+/// Between [`start`] and [`stop`]: calls reach the daemon only then.
+static RUNNING: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn on_signal(json: *const c_char, _user: *mut c_void) {
     // SAFETY: the shim passes a NUL-terminated string that lives for this call.
@@ -65,17 +68,29 @@ pub fn start(flags: u16, sink: impl Fn(Event) + Send + Sync + 'static) -> Result
     if !unsafe { joma_jami_init(flags, on_signal, std::ptr::null_mut()) } {
         bail!("libjami failed to start");
     }
+    RUNNING.store(true, Ordering::SeqCst);
     Ok(())
 }
 
-/// Stop the daemon (unregisters accounts and closes calls).
+/// Stop the daemon (unregisters accounts and closes calls). Later calls fail, and it
+/// cannot start again in this process. Does nothing when it is not running.
 pub fn stop() {
-    // SAFETY: plain call into the daemon; safe to call once at shutdown.
-    unsafe { joma_jami_fini() }
+    if RUNNING.swap(false, Ordering::SeqCst) {
+        // SAFETY: plain call into the daemon, once: RUNNING guards it.
+        unsafe { joma_jami_fini() }
+    }
+}
+
+/// Is the daemon running (started and not stopped)?
+pub fn running() -> bool {
+    RUNNING.load(Ordering::SeqCst)
 }
 
 /// Run one daemon method by name with JSON arguments, returning its JSON result.
 pub fn call(method: &str, args: Value) -> Result<Value> {
+    if !running() {
+        bail!("{method}: the Jami daemon is not running");
+    }
     let req = CString::new(json!({ "m": method, "a": args }).to_string())?;
     // SAFETY: the shim returns a malloc'd NUL-terminated string that we free below.
     let out = unsafe { joma_jami_call(req.as_ptr()) };
@@ -348,6 +363,9 @@ pub struct SinkFrame {
 
 /// The newest frame of sink `id`, if it changed since `serial` (updated on success).
 pub fn sink_frame(id: &str, serial: &mut u64, buf: &mut Vec<u8>) -> Option<SinkFrame> {
+    if !running() {
+        return None;
+    }
     let cid = CString::new(id).ok()?;
     let (mut w, mut h) = (0i32, 0i32);
     loop {

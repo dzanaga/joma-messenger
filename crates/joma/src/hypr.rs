@@ -34,6 +34,11 @@ pub fn hide() -> bool {
     dispatch(&format!("hl.dsp.window.move({{ workspace = '{HIDDEN}', follow = false, window = 'address:{address}' }})"))
 }
 
+/// Is the main window hidden?
+pub fn hidden() -> bool {
+    main_window().is_some_and(|(_, workspace)| workspace == HIDDEN)
+}
+
 /// Bring the main window back to the current workspace if it is hidden.
 pub fn show() {
     let Some((address, workspace)) = main_window() else { return };
