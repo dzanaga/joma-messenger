@@ -78,12 +78,39 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "󰭹" + (root.unread > 0 ? " " + root.unread : "")
-    dimmed: !root.live || root.unread === 0
+    // The glyph is drawn below; the label only reserves room for the unread count.
+    text: " "
+    labelVisible: false
+    fixedWidth: glyph.width + (badge.visible ? badge.implicitWidth + Style.space(3) : 0) + scaledHorizontalMargin * 2
+    dimmed: !root.live
     tooltipText: !root.live ? "Joma is not running" : (root.unread > 0 ? root.unread + " unread in Joma" : "Joma")
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.LeftButton) root.toggle()
       else if (buttonCode === Qt.RightButton && root.svc) root.svc.openJoma()
+    }
+
+    Row {
+      anchors.centerIn: parent
+      spacing: Style.space(3)
+      JomaGlyph {
+        id: glyph
+        anchors.verticalCenter: parent.verticalCenter
+        width: Math.round(button.fontSize * 1.6)
+        height: width
+        neon: root.accent
+        opacity: root.unread > 0 || !root.live ? 1 : 0.8
+      }
+      Text {
+        id: badge
+        visible: root.unread > 0
+        anchors.verticalCenter: parent.verticalCenter
+        text: String(root.unread)
+        color: root.accent
+        font.family: root.fontFamily
+        font.pixelSize: button.fontSize
+        font.bold: true
+        renderType: Text.NativeRendering
+      }
     }
   }
 

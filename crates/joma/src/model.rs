@@ -13,6 +13,17 @@ pub struct Msg {
     pub text: String,
     pub ts: i64,
     pub kind: MsgKind,
+    /// The file a data-transfer message offers.
+    pub file: Option<FileRef>,
+}
+
+/// A file sent into a conversation; `id` is what the daemon downloads it by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileRef {
+    pub id: String,
+    pub name: String,
+    /// Bytes; 0 when unknown.
+    pub size: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +37,7 @@ impl Msg {
     /// The visible form of a swarm commit, or `None` for commits that are not shown
     /// (merges, edits, reactions, votes).
     pub fn from_swarm(m: &SwarmMessage) -> Option<Msg> {
+        let mut file = None;
         let (text, kind) = match m.kind.as_str() {
             "text/plain" => {
                 // An edited or deleted message keeps its id; the newest edition wins.
@@ -45,6 +57,11 @@ impl Msg {
             }
             "application/data-transfer+json" => {
                 let name = m.body.get("displayName").cloned().unwrap_or_default();
+                let size = m.body.get("totalSize").and_then(|s| s.parse().ok()).unwrap_or(0);
+                // A withdrawn file keeps its commit with an empty id.
+                if let Some(id) = m.body.get("fileId").filter(|f| !f.is_empty()) {
+                    file = Some(FileRef { id: id.clone(), name: name.clone(), size });
+                }
                 (format!("file · {name}"), MsgKind::Event)
             }
             "member" => {
@@ -61,7 +78,7 @@ impl Msg {
             "initial" => ("conversation started".to_owned(), MsgKind::Event),
             _ => return None,
         };
-        Some(Msg { id: m.id.clone(), author: m.author().to_owned(), text, ts: m.timestamp(), kind })
+        Some(Msg { id: m.id.clone(), author: m.author().to_owned(), text, ts: m.timestamp(), kind, file })
     }
 }
 
@@ -197,6 +214,8 @@ pub struct Changed {
     /// A message arrived from someone else in this conversation.
     pub incoming: Option<(String, String)>,
     pub incoming_call: Option<String>,
+    /// Files someone else just sent: (conversation, message id, file).
+    pub files: Vec<(String, String, FileRef)>,
     /// Names to resolve.
     pub lookup: Vec<String>,
     /// Conversations to (re)load.
@@ -325,10 +344,13 @@ impl Model {
                 let received = matches!(ev, Event::MessageReceived { .. });
                 if let Some(c) = self.conversations.get_mut(conversation) {
                     let added = c.merge([msg.clone()]);
-                    if added > 0 && received && !mine && msg.kind == MsgKind::Text {
+                    if added > 0 && received && !mine && (msg.kind == MsgKind::Text || msg.file.is_some()) {
                         c.unread += 1;
                         c.composing = false;
                         ch.incoming = Some((conversation.clone(), msg.text.clone()));
+                        if let Some(f) = &msg.file {
+                            ch.files.push((conversation.clone(), msg.id.clone(), f.clone()));
+                        }
                     }
                     ch.any = true;
                 } else {
@@ -468,6 +490,27 @@ mod tests {
         m.apply(&mine);
         assert_eq!(m.conversations["c1"].unread, 1);
         assert_eq!(m.conversations["c1"].messages.len(), 2);
+    }
+
+    #[test]
+    fn received_files_are_offered_once() {
+        let mut m = model();
+        let mut file = swarm("f1", "bob", "", 5);
+        file.kind = "application/data-transfer+json".into();
+        file.body.insert("displayName".into(), "notes.txt".into());
+        file.body.insert("totalSize".into(), "12".into());
+        file.body.insert("fileId".into(), "f1_abc.txt".into());
+        let ev = Event::MessageReceived { account: "acc".into(), conversation: "c1".into(), message: file.clone() };
+        let ch = m.apply(&ev);
+        assert_eq!(ch.files, vec![("c1".into(), "f1".into(), FileRef { id: "f1_abc.txt".into(), name: "notes.txt".into(), size: 12 })]);
+        assert!(m.apply(&ev).files.is_empty());
+        assert_eq!(m.conversations["c1"].unread, 1);
+        // Our own files are not downloaded back.
+        let mut mine = file;
+        mine.id = "f2".into();
+        mine.body.insert("author".into(), "me".into());
+        let ev = Event::MessageReceived { account: "acc".into(), conversation: "c1".into(), message: mine };
+        assert!(m.apply(&ev).files.is_empty());
     }
 
     #[test]

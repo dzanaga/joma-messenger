@@ -1,6 +1,7 @@
 //! Joma: a Jami client for Omarchy.
 //!
-//! `joma` opens the window (or raises the running one). The other commands talk to the
+//! `joma` opens the window (or raises the running one). Closing the window hides it and
+//! Joma keeps running in the background (see `hypr`); Ctrl+Q quits. The other commands talk to the
 //! running Joma: `joma quick` opens the quick-message popup, `joma quick --json` prints
 //! what the Omarchy bar plugin shows, `joma send <to> <text>` sends a message.
 //!
@@ -10,6 +11,7 @@
 mod app;
 mod composer;
 mod desk;
+mod hypr;
 mod ipc;
 mod model;
 mod popup;
@@ -32,6 +34,7 @@ const USAGE: &str = "usage: joma                      open Joma (or raise it)
        joma send-file <to> [path]
                                  send a file (without a path, Joma asks for one)
        joma open <to>            show a conversation in Joma
+       joma quit                 quit Joma (closing the window keeps it running)
        joma probe [--bench [--display-gpu]]
                                  the GPUs and codecs the desktop share can use
        joma --version";
@@ -54,6 +57,7 @@ fn cli(args: &[String]) -> Option<i32> {
         Some("quick") if args.get(1).map(String::as_str) == Some("--json") => Request::Quick,
         Some("quick") => Request::QuickPopup,
         Some("show") => Request::Show,
+        Some("quit") => Request::Quit,
         Some("chat") if args.len() >= 2 => Request::Chat { to: args[1].clone(), limit: args.get(2).and_then(|n| n.parse().ok()).unwrap_or(20) },
         Some("call") if args.len() >= 2 => Request::Call { to: args[1].clone(), video: args[2..].iter().any(|a| a == "--video") },
         Some("share") if args.len() == 2 => Request::ShareScreen { to: args[1].clone() },
@@ -221,6 +225,8 @@ fn main() {
         let tx = tx.clone();
         cx.open_window(options, move |window, cx| {
             let rx = rx.take().expect("one window");
+            // Closing hides the window and Joma keeps running; Ctrl+Q quits.
+            window.on_window_should_close(cx, |_, _| !hypr::hide());
             cx.new(|cx| Joma::new(tx.clone(), rx, window, cx))
         })
         .expect("failed to open the window");

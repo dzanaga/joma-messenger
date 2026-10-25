@@ -12,6 +12,12 @@
   through the running Joma's socket.
 - D-6 View-only desktop share for now; remote control and clipboard later.
 - D-7 Licence GPL-3.0-or-later (Joma links libjami, GPL-3).
+- D-8 Closing the window hides it on `special:joma`; Joma quits only on Ctrl+Q or
+  `joma quit`. (User, 2026-10-25: open it once, it stays in the background.)
+- D-9 Received files go to `~/Downloads/joma/`, by themselves up to 20 MB (the Jami app's
+  default). (User, 2026-10-25.)
+- D-10 The VA-API tier stays, opt-in only (`JOMA_VIDEO=va`), and never on the GPU that
+  drives the screen without asking.
 
 ## Decided
 

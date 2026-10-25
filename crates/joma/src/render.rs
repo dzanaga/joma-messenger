@@ -446,7 +446,7 @@ impl Joma {
         Some(panel.into_any_element())
     }
 
-    fn messages(&self, t: &Theme, conv: &Conversation) -> AnyElement {
+    fn messages(&self, t: &Theme, conv: &Conversation, cx: &mut Context<Self>) -> AnyElement {
         let mut list = div().id("messages").flex().flex_col().flex_1().overflow_y_scroll().track_scroll(&self.messages_scroll).px(px(14.)).py(px(8.));
         let mut last_day = None;
         let mut last_author = String::new();
@@ -479,7 +479,34 @@ impl Joma {
                 MsgKind::Text => row
                     .child(div().flex_none().w(px(96.)).truncate().text_color(color).child(if repeat { String::new() } else { who }))
                     .child(div().flex_1().min_w(px(0.)).text_color(if me { t.text } else { t.bright }).child(m.text.clone())),
-                MsgKind::Event => row.child(div().flex_1().text_color(t.muted).italic().child(format!("{who} · {}", m.text))),
+                MsgKind::Event => match m.file.clone() {
+                    // A file: click to open it, or to download one too big to come by itself.
+                    Some(file) => {
+                        let have = self.saved_file(&conv.id, &file.id).is_some();
+                        let hint = match (have, me, self.downloads.contains_key(&file.id)) {
+                            (true, _, _) => " · open".to_owned(),
+                            (false, true, _) => String::new(),
+                            (false, false, true) => " · downloading".to_owned(),
+                            (false, false, false) => format!(" · {} · download", size_label(file.size)),
+                        };
+                        let (conv_id, msg_id) = (conv.id.clone(), m.id.clone());
+                        row.child(
+                            div()
+                                .id(SharedString::from(format!("file-{}", m.id)))
+                                .flex_1()
+                                .text_color(t.muted)
+                                .italic()
+                                .when(!me || have, |d| {
+                                    d.cursor_pointer().hover(|d| d.text_color(t.accent)).on_click(cx.listener(move |this, _, _, cx| {
+                                        this.file_clicked(&conv_id, &msg_id, &file, cx);
+                                        cx.notify();
+                                    }))
+                                })
+                                .child(format!("{who} · {}{hint}", m.text)),
+                        )
+                    }
+                    None => row.child(div().flex_1().text_color(t.muted).italic().child(format!("{who} · {}", m.text))),
+                },
             });
         }
         if conv.composing {
@@ -571,7 +598,7 @@ impl Joma {
             if std::mem::take(&mut self.pinned_bottom) {
                 self.messages_scroll.scroll_to_bottom();
             }
-            self.messages(t, &conv)
+            self.messages(t, &conv, cx)
         };
 
         let quick = self.quick_open.then(|| {
@@ -732,5 +759,13 @@ impl Render for Joma {
             .child(self.top_bar(&t))
             .child(body)
             .child(self.status_line(&t))
+    }
+}
+
+fn size_label(bytes: u64) -> String {
+    match bytes {
+        0 => "size unknown".into(),
+        b if b < 1024 * 1024 => format!("{} KB", b.div_ceil(1024)),
+        b => format!("{:.1} MB", b as f64 / (1024.0 * 1024.0)),
     }
 }

@@ -19,7 +19,7 @@ use joma_quick::{Candidate, QuickConfig};
 use crate::composer::{Composer, Edited, Submit};
 use crate::desk::{After, Desk};
 use crate::ipc::Pending;
-use crate::model::{bare_uri, Call, CallState, Model};
+use crate::model::{bare_uri, Call, CallState, FileRef, Model};
 use crate::theme::Theme;
 
 actions!(
@@ -128,6 +128,39 @@ pub struct Joma {
     subscribed: HashSet<String>,
     /// Calls placed to share the desktop: the share starts once they connect.
     share_on_connect: HashSet<String>,
+    /// Files being or already downloaded this session: file id to where.
+    pub downloads: HashMap<String, std::path::PathBuf>,
+}
+
+/// Received files up to this size download by themselves (the Jami app's default).
+const AUTO_DOWNLOAD: u64 = 20 * 1024 * 1024;
+
+/// Where received files go: `~/Downloads/joma` (the XDG download dir, if set).
+fn download_dir() -> std::path::PathBuf {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
+    let base = std::process::Command::new("xdg-user-dir")
+        .arg("DOWNLOAD")
+        .env("HOME", &home)
+        .output()
+        .ok()
+        .map(|o| std::path::PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))
+        .filter(|p| p.is_absolute() && *p != home)
+        .unwrap_or_else(|| home.join("Downloads"));
+    base.join("joma")
+}
+
+/// `dir/name`, or `dir/name (2).ext` and so on when that exists. The name loses any path.
+fn free_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let name = std::path::Path::new(name).file_name().map(|n| n.to_string_lossy().into_owned()).filter(|n| !n.is_empty()).unwrap_or_else(|| "file".into());
+    let p = dir.join(&name);
+    if !p.exists() {
+        return p;
+    }
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s.to_owned(), format!(".{e}")),
+        _ => (name.clone(), String::new()),
+    };
+    (2..).map(|n| dir.join(format!("{stem} ({n}){ext}"))).find(|p| !p.exists()).expect("a free name")
 }
 
 /// Is the Jami Qt client running? It would share our accounts, and two daemons on the
@@ -144,6 +177,12 @@ pub fn qt_client_running() -> bool {
 /// Is this a test profile (its own XDG data dir), where the Qt client cannot interfere?
 fn own_profile() -> bool {
     std::env::var_os("JOMA_PROFILE").is_some()
+}
+
+/// Show the window, also when closing it had hidden it.
+fn raise(window: &mut Window) {
+    crate::hypr::show();
+    window.activate_window();
 }
 
 fn notify_desktop(title: &str, body: &str) {
@@ -235,6 +274,7 @@ impl Joma {
             quick_popup: None,
             subscribed: HashSet::new(),
             share_on_connect: HashSet::new(),
+            downloads: HashMap::new(),
         };
         j.configure_inputs(cx);
         j.boot(cx);
@@ -324,15 +364,25 @@ impl Joma {
         self.configure_inputs(cx);
     }
 
+    /// The daemon's folder for this account.
+    fn account_dir(&self) -> Option<std::path::PathBuf> {
+        let data = std::env::var_os("XDG_DATA_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")))?;
+        Some(data.join("jami").join(&self.model.account))
+    }
+
+    /// Where a file of a conversation is on disk, once received or sent: the daemon links
+    /// each one from its conversation folder (also those the Jami app downloaded).
+    pub fn saved_file(&self, conv: &str, file_id: &str) -> Option<std::path::PathBuf> {
+        let link = self.account_dir()?.join("conversation_data").join(conv).join(file_id);
+        let target = std::fs::read_link(&link).ok()?;
+        target.exists().then_some(target)
+    }
+
     /// Display names from the vCards the daemon keeps per peer.
     fn load_profiles(&mut self) {
-        let Some(data) = std::env::var_os("XDG_DATA_HOME")
-            .map(std::path::PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")))
-        else {
-            return;
-        };
-        let dir = data.join("jami").join(&self.model.account).join("profiles");
+        let Some(dir) = self.account_dir().map(|d| d.join("profiles")) else { return };
         for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
             let path = entry.path();
             let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
@@ -542,6 +592,16 @@ impl Joma {
             _ => vec![],
         };
         let changed = self.model.apply(&ev);
+        for (conv, interaction, file) in &changed.files {
+            if file.size > 0 && file.size <= AUTO_DOWNLOAD {
+                self.download(conv, interaction, file, cx);
+            }
+        }
+        if let Event::Transfer { account, file, code, .. } = &ev {
+            if *account == acc {
+                self.transfer_moved(file, *code, cx);
+            }
+        }
         for call in ended_calls {
             self.desk.end(&acc, &call);
             if self.model.calls.is_empty() {
@@ -601,7 +661,7 @@ impl Joma {
                     self.select(conv, cx);
                 }
             }
-            window.activate_window();
+            raise(window);
         }
         if self.selected.is_none() {
             if let Some(id) = self.model.ordered().first().map(|c| c.id.clone()) {
@@ -978,7 +1038,7 @@ impl Joma {
     fn ipc(&mut self, req: Request, window: &mut Window, cx: &mut Context<Self>) -> Reply {
         match req {
             Request::Show => {
-                window.activate_window();
+                raise(window);
                 Reply::Done
             }
             Request::QuickPopup => {
@@ -1049,13 +1109,17 @@ impl Joma {
                 },
                 Err(e) => e,
             },
+            Request::Quit => {
+                cx.defer(|cx| cx.quit());
+                Reply::Done
+            }
             Request::Open { to } => match self.target(&to) {
                 Ok(conv) => {
                     if self.mode != Mode::Chat {
                         self.set_mode(Mode::Chat, window, cx);
                     }
                     self.select(conv, cx);
-                    window.activate_window();
+                    raise(window);
                     Reply::Done
                 }
                 Err(e) => e,
@@ -1130,6 +1194,63 @@ impl Joma {
             });
         })
         .detach();
+    }
+}
+
+impl Joma {
+    /// Fetch a received file into the download folder.
+    pub fn download(&mut self, conv: &str, interaction: &str, file: &FileRef, cx: &mut Context<Self>) {
+        if self.downloads.contains_key(&file.id) {
+            return;
+        }
+        let dir = download_dir();
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            self.show_flash(format!("cannot create {}: {e}", dir.display()), cx);
+            return;
+        }
+        let path = free_path(&dir, &file.name);
+        match joma_jami::download_file(&self.model.account, conv, interaction, &file.id, &path.to_string_lossy()) {
+            Ok(_) => {
+                self.downloads.insert(file.id.clone(), path);
+            }
+            Err(e) => self.show_flash(format!("{}: {e}", file.name), cx),
+        }
+    }
+
+    /// A file message was clicked: open what was downloaded, or download it.
+    pub fn file_clicked(&mut self, conv: &str, interaction: &str, file: &FileRef, cx: &mut Context<Self>) {
+        if let Some(p) = self.saved_file(conv, &file.id) {
+            let _ = std::process::Command::new("xdg-open")
+                .arg(p)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+            return;
+        }
+        match self.downloads.get(&file.id) {
+            Some(_) => self.show_flash(format!("{} is still downloading", file.name), cx),
+            None => {
+                self.download(conv, interaction, file, cx);
+                self.show_flash(format!("downloading {}", file.name), cx);
+            }
+        }
+    }
+
+    /// libjami's `DataTransferEventCode`: 6 finished, 7 to 11 failed.
+    fn transfer_moved(&mut self, file: &str, code: i64, cx: &mut Context<Self>) {
+        let Some(path) = self.downloads.get(file).cloned() else { return };
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        match code {
+            6 => {
+                notify_desktop("File received", &format!("{name} · in {}", path.parent().map(|p| p.display().to_string()).unwrap_or_default()));
+                self.show_flash(format!("received {name}"), cx);
+            }
+            7..=11 => {
+                self.downloads.remove(file);
+                self.show_flash(format!("{name} did not arrive"), cx);
+            }
+            _ => {}
+        }
     }
 }
 

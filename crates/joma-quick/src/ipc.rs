@@ -33,6 +33,8 @@ pub enum Request {
     SendFile { to: String, path: Option<String> },
     /// Raise the window on a conversation.
     Open { to: String },
+    /// Quit Joma (closing its window only hides it).
+    Quit,
 }
 
 /// One conversation offered by Quick Messages.

@@ -54,7 +54,7 @@ leaving copies around):
 Private or public? (OPR is the Omarchy Package Repository, `omacom/omarchy-pkgs`, where
 gliff is published; a later step.)
 
-- [ ] A:
+- [x] A: private
 
 **Q2. zavito.** The permission system also stopped the copy to zavito. Two steps there:
 `sudo pacman -S jami-daemon` on zavito, then from here
@@ -66,29 +66,29 @@ your account here and one on zavito, with a desktop share each way. OK?
 **Q3. The bar panel, once you have tried it:** anything to change (what the list shows,
 the buttons, the size)? Offline contacts appear (dimmed) only to fill up to six rows.
 
-- [ ] A:
+- [x] A: we should have that zoma stays open in the background minimized when we close the main joma window, so that you open it once. if you close it, the toolbar stays active. also change the toolbar icon to a smaller version of the joma icon, but which follows the omarchy theme color for the neon color
 
 **Q4. The `joma quick` window** (the small GPUI popup) overlaps the bar panel now.
 Remove it, or keep it as a fallback for sessions without the Omarchy shell?
 
-- [ ] A:
+- [ ] A: what is the joma quick window? not sure i understand you here
 
 **Q5. Received files.** Sending works; receiving is not wired yet. Proposal: files up to
 the daemon's auto-accept size land in `~/Downloads/Joma/`, larger ones wait for a click.
 OK?
 
-- [ ] A:
+- [x] A: ok, but should be joma no capital J
 
 **Q6. The VA-API tier** (for GPUs gliff's Vulkan path refuses): keep it as an opt-in
 experiment, or remove it? Its only user here would be the Radeon, which is the GPU that
 crashed.
 
-- [ ] A:
+- [x] A: let's keep it for testing, no? or should we remove it?
 
 **Q7. Next:** remote control and clipboard as you approved this morning (viewer asks,
 sharer accepts, Shift+Esc takes it back), after the zavito test. OK?
 
-- [ ] A:
+- [x] A:
 
 # Open problems
 
