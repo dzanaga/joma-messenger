@@ -15,6 +15,7 @@ gliff-proto.workspace = true
 gliff-transport.workspace = true
 gliff-vk.workspace = true
 gliff-sw.workspace = true
+gliff-va.workspace = true
 hypr-capture.workspace = true
 hypr-ipc.workspace = true
 drm-fourcc = "2"

@@ -36,3 +36,16 @@ shader, or `gliff-sw`; each picture is read back once as BGRA for GPUI, and the 
 pointer is drawn over it (gliff never bakes the cursor into the video).
 
 Only viewing for now: no remote control, no clipboard (gliff has both; see the plan).
+
+## GPU tiers (2026-10-25)
+
+`joma_desk::gpu` picks the hardware: gliff's Vulkan + VA-API pipeline on the compositor's
+GPU, else on another GPU that passes, else gliff-sw on the CPU. `joma probe` lists what
+each render node offers and the tier picked; `joma probe --bench` times each tier.
+
+On this MacBook the Radeon 550 (Polaris, GFX8) drives the screen, but RADV offers
+`VK_EXT_image_drm_format_modifier` only from GFX9, so gliff's Vulkan path refuses it;
+the Intel HD 530 passes. The VA-API-only tier (`va.rs`: CPU colour conversion, hardware
+H.264) was written for such GPUs, but its first encode on the Radeon hung the VCE ring;
+the GPU reset failed and Hyprland went down. That tier is now opt-in (`JOMA_VIDEO=va`),
+and the benchmark leaves the display GPU alone unless asked.

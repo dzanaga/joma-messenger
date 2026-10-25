@@ -3044,6 +3044,7 @@ dependencies = [
  "gliff-proto",
  "gliff-sw",
  "gliff-transport",
+ "gliff-va",
  "gliff-vk",
  "hypr-capture",
  "hypr-ipc",

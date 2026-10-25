@@ -26,6 +26,8 @@ const USAGE: &str = "usage: joma                      open Joma (or raise it)
        joma quick --json         quick-message targets, as JSON
        joma send <to> <text…>    send a message (to: a conversation, a name or an ID)
        joma send-quick <to> <n>  send quick message n (1-9)
+       joma probe [--bench [--display-gpu]]
+                                 the GPUs and codecs the desktop share can use
        joma --version";
 
 fn cli(args: &[String]) -> Option<i32> {
@@ -38,6 +40,10 @@ fn cli(args: &[String]) -> Option<i32> {
         Some("--help" | "-h") => {
             println!("{USAGE}");
             return Some(0);
+        }
+        Some("probe") => {
+            let has = |f: &str| args[1..].iter().any(|a| a == f);
+            return Some(probe(has("--bench"), has("--display-gpu")));
         }
         Some("quick") if args.get(1).map(String::as_str) == Some("--json") => Request::Quick,
         Some("quick") => Request::QuickPopup,
@@ -88,6 +94,49 @@ fn use_profile() {
             unsafe { std::env::set_var(var, p) };
         }
     }
+}
+
+/// Print what each GPU offers the desktop share, the tiers Joma would pick, and with
+/// `--bench` how fast each tier encodes and decodes a desktop-sized stream. The benchmark
+/// leaves the GPU that drives the screen alone unless `--display-gpu` is given: a codec
+/// that hangs resets its GPU, and the desktop with it.
+fn probe(bench: bool, display_gpu: bool) -> i32 {
+    use joma_desk::gpu;
+    let _ = tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::new("error")).try_init();
+    for r in gpu::report() {
+        println!("{}{}", r.node.display(), if r.compositor { "  (the compositor's GPU)" } else { "" });
+        match &r.vulkan {
+            Ok(v) => println!("  gliff GPU pipeline: yes, {v}"),
+            Err(e) => println!("  gliff GPU pipeline: no ({e})"),
+        }
+        match &r.va {
+            Ok(v) => println!("  VA-API: {v}; H.264 encode {}, decode {}", yes(r.va_encode), yes(r.va_decode)),
+            Err(e) => println!("  VA-API: no ({e})"),
+        }
+    }
+    let at = |t: &gpu::Tier| t.node().map(|n| format!(" on {}", n.display())).unwrap_or_default();
+    let (e, d) = (gpu::encode_tier(), gpu::decode_tier());
+    println!("sharing uses: {}{}", e.label(), at(&e));
+    println!("watching uses: {}{}", d.label(), at(&d));
+    if !bench {
+        return 0;
+    }
+    let (w, h) = joma_desk::share::focused_screen().map(|s| (s.width, s.height)).unwrap_or((1920, 1080));
+    println!("benchmark: {w}x{h}, 120 changing frames");
+    for (name, r) in gpu::bench(w, h, 120, display_gpu) {
+        match r {
+            Ok(b) => println!(
+                "  {name:<36} encode {:6.1} ms ({:5.0} fps)  decode {:6.1} ms  {:6.1} KiB/frame",
+                b.encode_ms, 1000.0 / b.encode_ms.max(0.001), b.decode_ms, b.kbytes_per_frame
+            ),
+            Err(e) => println!("  {name:<36} failed: {e:#}"),
+        }
+    }
+    0
+}
+
+fn yes(b: bool) -> &'static str {
+    if b { "yes" } else { "no" }
 }
 
 fn main() {

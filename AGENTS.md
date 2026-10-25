@@ -15,6 +15,10 @@
   data, config and socket) and `HOME=<dir>/home` after `scripts/test-profile.sh <dir>`
   (silent ALSA audio), inside the hidden nested Hyprland of `scripts/nest.sh`. A test
   profile skips notifications and the desktop portal.
+- **Never run codec experiments on the GPU that drives the screen** without asking the
+  user first. A hung encoder resets its GPU, and a failed reset takes the desktop down:
+  this happened on 2026-10-25 (VA-API encode on the Radeon 550, see `crates/joma-desk/src/va.rs`).
+  `joma probe --bench` skips that GPU unless given `--display-gpu`.
 - Build: `.cargo/config.toml` (local, ignored) builds into
   `/run/media/dzanaga/builds/vetro-target`, shared with Vetro (GPUI is built once). That
   is a btrfs volume (zstd) on the user's external Samsung T5, attached by the user unit
