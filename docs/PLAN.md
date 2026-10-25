@@ -23,7 +23,7 @@ Design notes live in `docs/design/`. Decisions are in `docs/DECISIONS.md`.
 |---|---|---|
 | **J0** | libjami bridge; accounts, contacts, conversations, messages; the GPUI shell with the Omarchy look | built |
 | **J1** | Calls: place, answer, hang up, mute; remote video through daemon sinks | built; audio calls verified, remote video not yet tested |
-| **J2** | Quick Messages plugin: canned messages to favourite contacts from a launcher popup and the CLI | built |
-| **J3** | Joma desktop share (gliff pipeline over a Jami tunnel) with fallback to Jami screen share | Joma share verified between two profiles on one machine; fallback not yet tested |
-| **J4** | Packaging: PKGBUILD, desktop entry, Hyprland bindings, omatwin | planned |
+| **J2** | Quick Messages plugin: contacts (pinned, unread, online), a quick chat with call / share / file buttons in the Omarchy bar; the CLI | built; installed on zoma; chat, presence and share-from-CLI verified between test profiles |
+| **J3** | Joma desktop share (gliff pipeline over a Jami tunnel) with fallback to Jami screen share | verified between two profiles: 4:4:4 at ~55 fps (1280x800, Intel encode and decode); GPU tiers and `joma probe`; fallback not yet tested |
+| **J4** | Packaging: icon, desktop entry, `scripts/install.sh` (local or SSH), Hyprland binding; later a PKGBUILD | install script and launcher done; omatwin paused (development) |
 | **J5** | Remote control (gliff input), clipboard, multi-output picker, file transfer UI, group calls | planned |

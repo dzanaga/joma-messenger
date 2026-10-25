@@ -1,0 +1,98 @@
+---
+title: "Joma: the afternoon, and what needs your call"
+date: 2026-10-25
+lang: en
+---
+
+# How to read
+
+Same as this morning: tick `- [ ] A:` to agree, add a detail, or leave it unticked and
+write what you want instead.
+
+# What was done
+
+- **Build volume.** Vetro's whole `target` (and Joma, which builds into it) now lives
+  on `/run/media/dzanaga/builds`, a 64 GB btrfs image with compression on the Samsung T5.
+  `/home` went from 3.1 GB to 9.5 GB free. The user unit `builds-disk.service` attaches
+  the image when the drive is mounted (the first version missed it after the reboot;
+  fixed).
+- **The GPU crash (13:57).** It was my fault: a benchmark ran VA-API encoding on the
+  Radeon, which drives your screen. Its encoder hung, the GPU reset failed and Hyprland
+  went down. That path is now opt-in (`JOMA_VIDEO=va`), the benchmark skips the screen's
+  GPU, and the rule is in `AGENTS.md` and my memory.
+- **Q6: why not the AMD card.** gliff's GPU pipeline needs Vulkan dmabuf import with DRM
+  format modifiers, which the AMD Vulkan driver only offers from Vega on; your Radeon 550
+  is a Polaris, one generation earlier. Joma now picks the Intel GPU by itself: the
+  compositor captures as usual, the Intel GPU encodes and decodes. Result: **4:4:4 at
+  ~55 fps** at 1280x800, against 11 fps this morning; the same over a real Jami call
+  between two test profiles (58 fps, below). `joma probe` shows what each GPU can do.
+- **Q8: the bar plugin** is rewritten: contacts with pinned and unread on top, then who
+  is online (presence is new in Joma); clicking one opens a quick chat with the latest
+  messages, a reply box, the quick messages, and buttons for call, video call, call and
+  share the screen, send a file, open in Joma. Super+Alt+M opens it on the focused
+  monitor.
+- **New in Joma:** presence, sending files, and the commands `joma chat`, `joma call`,
+  `joma share`, `joma send-file`, `joma open` (the plugin uses them).
+- **Q9: installed on zoma** (not in omatwin, as you asked): the plugin in the bar, the
+  release build in `~/.local/bin/joma`, the launcher with the new icon, Super+Alt+M.
+  The launcher entry I had added to omatwin this morning is removed from it.
+- **Icon:** a neon green hexagon with a J, on dark grey (`assets/icon/joma.svg`).
+- **Q12:** `LICENSE` added. The GitHub repository is not created yet (see Q1).
+
+![`joma share` from alice: bob watches her desktop in a Jami call (4:4:4, gpu+gpu, 58 fps)](img/2026-10-25-share-from-cli.png)
+
+# Questions
+
+**Q1. GitHub.** The permission system stopped me from creating the repository. Run this
+yourself (private; it can be made public later, not the other way round without
+leaving copies around):
+
+```
+! cd ~/Projects/joma-messenger && gh repo create dzanaga/joma-messenger --private --source . --remote origin --push
+```
+
+Private or public? (OPR is the Omarchy Package Repository, `omacom/omarchy-pkgs`, where
+gliff is published; a later step.)
+
+- [ ] A:
+
+**Q2. zavito.** The permission system also stopped the copy to zavito. Two steps there:
+`sudo pacman -S jami-daemon` on zavito, then from here
+`! ~/Projects/joma-messenger/scripts/install.sh --no-build zavito`. Then a call between
+your account here and one on zavito, with a desktop share each way. OK?
+
+- [ ] A:
+
+**Q3. The bar panel, once you have tried it:** anything to change (what the list shows,
+the buttons, the size)? Offline contacts appear (dimmed) only to fill up to six rows.
+
+- [ ] A:
+
+**Q4. The `joma quick` window** (the small GPUI popup) overlaps the bar panel now.
+Remove it, or keep it as a fallback for sessions without the Omarchy shell?
+
+- [ ] A:
+
+**Q5. Received files.** Sending works; receiving is not wired yet. Proposal: files up to
+the daemon's auto-accept size land in `~/Downloads/Joma/`, larger ones wait for a click.
+OK?
+
+- [ ] A:
+
+**Q6. The VA-API tier** (for GPUs gliff's Vulkan path refuses): keep it as an opt-in
+experiment, or remove it? Its only user here would be the Radeon, which is the GPU that
+crashed.
+
+- [ ] A:
+
+**Q7. Next:** remote control and clipboard as you approved this morning (viewer asks,
+sharer accepts, Shift+Esc takes it back), after the zavito test. OK?
+
+- [ ] A:
+
+# Open problems
+
+- **Hanging up in a test call blocks Joma** (libjami waits for an audio thread that the
+  silent test audio device sends into a spin). It affects only the test profiles; with
+  real audio it should not happen, which the zavito test will confirm.
+- The portal fallback (Jami's own screen share) is still untested.
