@@ -1,13 +1,15 @@
 import QtQuick
 import Quickshell.Io
 
-// Polls `joma quick --json` (the running Joma answers over its socket) and sends
-// quick messages with `joma send-quick`. Joma itself holds the Jami account.
+// Talks to the running Joma through its CLI (which uses Joma's socket): the contact
+// list (`joma quick --json`), a quick chat (`joma chat`), sending, calls, desktop share
+// and files. Joma itself holds the Jami account.
 Item {
   id: root
   visible: false
 
   readonly property int refreshIntervalMs: 15 * 1000
+  readonly property int chatRefreshMs: 2 * 1000
   readonly property string joma: "joma"
 
   property bool running: false
@@ -18,26 +20,47 @@ Item {
   property var messages: []
   property string lastResult: ""
 
+  // The open quick chat, if any.
+  property string chatConversation: ""
+  property var chat: null
+
   function refresh() {
     if (!showProcess.running) showProcess.running = true
   }
 
-  function sendQuick(conversation, index) {
-    sendProcess.command = [root.joma, "send-quick", conversation, String(index + 1)]
-    sendProcess.running = true
+  function openChat(conversation) {
+    chatConversation = conversation
+    chat = null
+    lastResult = ""
+    refreshChat()
   }
 
-  function sendText(conversation, text) {
-    sendProcess.command = [root.joma, "send", conversation, text]
-    sendProcess.running = true
+  function closeChat() {
+    chatConversation = ""
+    chat = null
+    refresh()
   }
+
+  function refreshChat() {
+    if (chatConversation === "" || chatProcess.running) return
+    chatProcess.command = [root.joma, "chat", chatConversation, "30"]
+    chatProcess.running = true
+  }
+
+  function run(args) {
+    actionProcess.command = [root.joma].concat(args)
+    actionProcess.running = true
+  }
+
+  function sendText(conversation, text) { run(["send", conversation, text]) }
+  function sendQuick(conversation, index) { run(["send-quick", conversation, String(index + 1)]) }
+  function call(conversation, video) { run(video ? ["call", conversation, "--video"] : ["call", conversation]) }
+  function shareScreen(conversation) { run(["share", conversation]) }
+  function sendFile(conversation) { run(["send-file", conversation]) }
+  function openIn(conversation) { run(["open", conversation]) }
 
   function openJoma() {
     openProcess.running = true
-  }
-
-  function openPopup() {
-    popupProcess.running = true
   }
 
   Timer {
@@ -46,6 +69,13 @@ Item {
     repeat: true
     triggeredOnStart: true
     onTriggered: root.refresh()
+  }
+
+  Timer {
+    interval: root.chatRefreshMs
+    running: root.chatConversation !== ""
+    repeat: true
+    onTriggered: root.refreshChat()
   }
 
   Process {
@@ -72,14 +102,31 @@ Item {
   }
 
   Process {
-    id: sendProcess
+    id: chatProcess
+    running: false
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try {
+          var data = JSON.parse(text)
+          if (data.conversation === root.chatConversation) root.chat = data
+        } catch (e) {
+          // Joma quit, or the conversation went away: keep what is shown.
+        }
+      }
+    }
+  }
+
+  Process {
+    id: actionProcess
     running: false
     stderr: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.lastResult = text.trim()
     }
     onExited: function(code) {
-      if (code === 0) root.lastResult = "Sent"
+      if (code === 0) root.lastResult = ""
+      root.refreshChat()
       root.refresh()
     }
   }
@@ -88,11 +135,5 @@ Item {
     id: openProcess
     running: false
     command: ["sh", "-c", "setsid joma >/dev/null 2>&1 &"]
-  }
-
-  Process {
-    id: popupProcess
-    running: false
-    command: [root.joma, "quick"]
   }
 }

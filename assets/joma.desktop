@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Joma
+GenericName=Messenger
+Comment=Jami messenger for Omarchy
+Exec=@BIN@
+Icon=joma
+Terminal=false
+Categories=Network;InstantMessaging;Chat;
+Keywords=jami;chat;call;screen;share;
+StartupWMClass=joma

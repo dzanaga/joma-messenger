@@ -9,6 +9,14 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+/// A conversation the bar plugin may list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Candidate {
+    pub id: String,
+    pub unread: u32,
+    pub online: bool,
+}
+
 /// `~/.config/joma/quick.toml`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -70,6 +78,22 @@ impl QuickConfig {
         }
     }
 
+    /// The contacts the bar plugin lists: pinned ones and those with unread messages on
+    /// top, then whoever is online; when that makes fewer than `recent`, the most recent
+    /// offline ones fill the list. `candidates` is newest first.
+    pub fn rank(&self, candidates: &[Candidate]) -> Vec<String> {
+        let pinned = |c: &Candidate| self.favorites.iter().position(|f| *f == c.id);
+        let mut top: Vec<&Candidate> = candidates.iter().filter(|c| pinned(c).is_some() || c.unread > 0).collect();
+        // Pinned in their order, then unread (newest first, as given).
+        top.sort_by_key(|c| (pinned(c).is_none(), pinned(c)));
+        let mut out: Vec<String> = top.iter().map(|c| c.id.clone()).collect();
+        out.extend(candidates.iter().filter(|c| c.online && !out.contains(&c.id)).map(|c| c.id.clone()).collect::<Vec<_>>());
+        let short = self.recent.saturating_sub(out.len());
+        let fill: Vec<String> = candidates.iter().filter(|c| !out.contains(&c.id)).take(short).map(|c| c.id.clone()).collect();
+        out.extend(fill);
+        out
+    }
+
     /// Favourites first (in their order), then the most recent others, up to `recent`
     /// in total beyond the favourites. `recent_ids` is newest first.
     pub fn targets<'a>(&'a self, recent_ids: &'a [String]) -> Vec<&'a str> {
@@ -90,6 +114,17 @@ mod tests {
         let cfg = QuickConfig { favorites: vec!["b".into(), "gone".into()], recent: 2, ..Default::default() };
         let recent: Vec<String> = ["a", "b", "c", "d"].map(String::from).to_vec();
         assert_eq!(cfg.targets(&recent), ["b", "a", "c"]);
+    }
+
+    #[test]
+    fn rank_puts_pinned_and_unread_first_then_online() {
+        let cfg = QuickConfig { favorites: vec!["p".into()], recent: 5, ..Default::default() };
+        let c = |id: &str, unread, online| Candidate { id: id.into(), unread, online };
+        // Newest first.
+        let all = [c("a", 0, false), c("on", 0, true), c("u", 2, false), c("p", 0, false), c("old", 0, false)];
+        assert_eq!(cfg.rank(&all), ["p", "u", "on", "a", "old"]);
+        let cfg = QuickConfig { recent: 3, ..cfg };
+        assert_eq!(cfg.rank(&all), ["p", "u", "on"]);
     }
 
     #[test]

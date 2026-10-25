@@ -26,6 +26,12 @@ const USAGE: &str = "usage: joma                      open Joma (or raise it)
        joma quick --json         quick-message targets, as JSON
        joma send <to> <text…>    send a message (to: a conversation, a name or an ID)
        joma send-quick <to> <n>  send quick message n (1-9)
+       joma chat <to> [n]        the last n messages (default 20), as JSON; marks them read
+       joma call <to> [--video]  call a conversation
+       joma share <to>           call and share the desktop (or share in the running call)
+       joma send-file <to> [path]
+                                 send a file (without a path, Joma asks for one)
+       joma open <to>            show a conversation in Joma
        joma probe [--bench [--display-gpu]]
                                  the GPUs and codecs the desktop share can use
        joma --version";
@@ -48,6 +54,11 @@ fn cli(args: &[String]) -> Option<i32> {
         Some("quick") if args.get(1).map(String::as_str) == Some("--json") => Request::Quick,
         Some("quick") => Request::QuickPopup,
         Some("show") => Request::Show,
+        Some("chat") if args.len() >= 2 => Request::Chat { to: args[1].clone(), limit: args.get(2).and_then(|n| n.parse().ok()).unwrap_or(20) },
+        Some("call") if args.len() >= 2 => Request::Call { to: args[1].clone(), video: args[2..].iter().any(|a| a == "--video") },
+        Some("share") if args.len() == 2 => Request::ShareScreen { to: args[1].clone() },
+        Some("send-file") if args.len() >= 2 => Request::SendFile { to: args[1].clone(), path: args.get(2).cloned() },
+        Some("open") if args.len() == 2 => Request::Open { to: args[1].clone() },
         Some("send") if args.len() >= 3 => Request::Send { to: args[1].clone(), text: args[2..].join(" ") },
         Some("send-quick") if args.len() == 3 => match args[2].parse::<usize>() {
             Ok(n) if n >= 1 => Request::SendQuick { to: args[1].clone(), index: n - 1 },
@@ -65,6 +76,10 @@ fn cli(args: &[String]) -> Option<i32> {
     match request(&req) {
         Ok(Reply::Quick(state)) if json => {
             println!("{}", serde_json::to_string(&state).unwrap_or_default());
+            Some(0)
+        }
+        Ok(Reply::Chat(chat)) => {
+            println!("{}", serde_json::to_string(&chat).unwrap_or_default());
             Some(0)
         }
         Ok(Reply::Error { message }) => {

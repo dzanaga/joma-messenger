@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Joma: a neon green hexagon with a J, on dark grey. Two tubes, no fill. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26292d"/>
+      <stop offset="1" stop-color="#141618"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.52" r="0.5">
+      <stop offset="0" stop-color="#3dff8f" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#3dff8f" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="16" result="wide"/>
+      <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="near"/>
+      <feMerge><feMergeNode in="wide"/><feMergeNode in="wide"/><feMergeNode in="near"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="104" fill="url(#bg)"/>
+  <rect x="16" y="16" width="480" height="480" rx="104" fill="url(#halo)"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <g filter="url(#glow)" stroke="#2bea7a">
+      <polygon points="256.0,84.0 410.2,173.0 410.2,351.0 256.0,440.0 101.8,351.0 101.8,173.0" stroke-width="22"/>
+      <path d="M 200 176 H 312 M 292 176 V 304 C 292 352 262 372 232 372 C 204 372 184 358 176 330" stroke-width="26"/>
+    </g>
+    <g stroke="#d6ffe6" stroke-opacity="0.9">
+      <polygon points="256.0,84.0 410.2,173.0 410.2,351.0 256.0,440.0 101.8,351.0 101.8,173.0" stroke-width="6"/>
+      <path d="M 200 176 H 312 M 292 176 V 304 C 292 352 262 372 232 372 C 204 372 184 358 176 330" stroke-width="8"/>
+    </g>
+  </g>
+</svg>

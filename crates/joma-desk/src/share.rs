@@ -10,7 +10,6 @@
 //! the connection with the token from the offer.
 
 use std::os::fd::AsFd;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -23,7 +22,9 @@ use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, watch};
 
+use crate::gpu::Tier;
 use crate::rate::{Ladder, LinkEstimator, RateController, LEVELS};
+use crate::va::VaEncoder;
 use crate::signal::same;
 
 const MAX_FPS: u32 = 60;
@@ -136,6 +137,7 @@ struct Out(ServerMsg, Vec<Vec<u8>>);
 
 enum Enc {
     Gpu(Box<gliff_vk::Encoder>),
+    Va(Box<VaEncoder>),
     Cpu(Box<gliff_sw::Encoder>),
 }
 
@@ -143,6 +145,7 @@ impl Enc {
     fn set_rate(&mut self, bitrate: u32, fps: u32, vbv_ms: u32) {
         match self {
             Enc::Gpu(e) => e.set_rate(bitrate, fps, vbv_ms),
+            Enc::Va(e) => e.set_rate(bitrate, fps, vbv_ms),
             Enc::Cpu(e) => e.set_rate(bitrate, fps),
         }
     }
@@ -150,6 +153,7 @@ impl Enc {
 
 /// The encoder for the current stream shape.
 struct Video {
+    tier: Tier,
     gpu: Option<Arc<Gpu>>,
     enc: Option<Enc>,
     /// Stream size, chroma layout and fps the encoder was built for.
@@ -159,17 +163,17 @@ struct Video {
 
 impl Video {
     fn pipeline(&self) -> VideoPipeline {
-        if self.gpu.is_some() {
-            VideoPipeline::Gpu
-        } else {
-            VideoPipeline::Cpu
+        match self.tier {
+            Tier::Gpu { .. } | Tier::Va(_) => VideoPipeline::Gpu,
+            Tier::Cpu => VideoPipeline::Cpu,
         }
     }
 
     fn max_size(&self) -> (u32, u32) {
-        match &self.gpu {
-            Some(gpu) => gliff_vk::Encoder::max_size(gpu).unwrap_or((4096, 4096)),
-            None => gliff_sw::Encoder::MAX_SIZE,
+        match &self.tier {
+            Tier::Gpu { gpu, .. } => gliff_vk::Encoder::max_size(gpu).unwrap_or((4096, 4096)),
+            Tier::Va(va) => va.max_size(),
+            Tier::Cpu => gliff_sw::Encoder::MAX_SIZE,
         }
     }
 
@@ -179,9 +183,9 @@ impl Video {
         if extent.0 <= mw && extent.1 <= mh {
             return Ok(extent);
         }
-        if self.gpu.is_none() {
-            // The CPU encoder takes the captured pixels as they are.
-            bail!("a {}x{} screen is larger than the CPU encoder takes", extent.0, extent.1);
+        if !self.tier.takes_dmabufs() {
+            // Encoders fed with pixels take them at the captured size.
+            bail!("a {}x{} screen is larger than the encoder takes", extent.0, extent.1);
         }
         let k = (mw as f64 / extent.0 as f64).min(mh as f64 / extent.1 as f64);
         Ok(((extent.0 as f64 * k) as u32 & !1, (extent.1 as f64 * k) as u32 & !1))
@@ -189,12 +193,13 @@ impl Video {
 
     fn rebuild(&mut self, stream: (u32, u32), dual: bool, bitrate: u32, fps: u32, vbv_ms: u32) -> Result<()> {
         self.enc = None;
-        self.enc = Some(match &self.gpu {
-            Some(gpu) => {
+        self.enc = Some(match &self.tier {
+            Tier::Gpu { gpu, .. } => {
                 let s = gliff_vk::EncoderSettings { width: stream.0, height: stream.1, bitrate, framerate: fps, vbv_ms };
                 Enc::Gpu(Box::new(gliff_vk::Encoder::new(gpu, s, dual)?))
             }
-            None => {
+            Tier::Va(va) => Enc::Va(Box::new(VaEncoder::new(va, stream.0, stream.1, bitrate, fps, vbv_ms)?)),
+            Tier::Cpu => {
                 let s = gliff_sw::EncoderSettings { width: stream.0, height: stream.1, bitrate, framerate: fps };
                 Enc::Cpu(Box::new(gliff_sw::Encoder::new(s, dual)?))
             }
@@ -207,6 +212,17 @@ impl Video {
     fn encode(&mut self, frame: &CapturedFrame, keyframe: bool) -> Result<(Vec<u8>, Option<Vec<u8>>, bool)> {
         let enc = self.enc.as_mut().ok_or_else(|| anyhow!("no encoder"))?;
         let out = match enc {
+            Enc::Gpu(e) if frame.buffer.is_shm() || !self.tier.takes_dmabufs() => {
+                // Shared memory, or a GPU other than the compositor's: upload the pixels.
+                let img = frame.read_bgra()?;
+                let f = e.encode_bgra(&img.pixels, keyframe)?;
+                (f.main, f.aux, f.keyframe)
+            }
+            Enc::Va(e) => {
+                let img = frame.read_bgra()?;
+                let (au, key) = e.encode_bgra(&img.pixels, img.width * 4, keyframe)?;
+                (au, None, key)
+            }
             Enc::Gpu(e) => {
                 let info = &frame.buffer.info;
                 let fourcc = drm_fourcc::DrmFourcc::try_from(info.fourcc)
@@ -236,29 +252,6 @@ impl Video {
     }
 }
 
-fn render_node() -> PathBuf {
-    hypr_capture::render_node(None)
-}
-
-fn open_gpu(node: &std::path::Path) -> Option<Arc<Gpu>> {
-    if std::env::var("JOMA_VIDEO").as_deref() == Ok("cpu") || !node.exists() {
-        return None;
-    }
-    match Gpu::open(Some(node)) {
-        Ok(gpu) if gpu.can_encode() => {
-            tracing::info!(gpu = %gpu.name, encoder = gpu.encoder_api(), "sharing with the GPU pipeline");
-            Some(gpu)
-        }
-        Ok(gpu) => {
-            tracing::warn!(gpu = %gpu.name, "no hardware H.264 encoder; sharing with the CPU pipeline");
-            None
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "no usable GPU; sharing with the CPU pipeline");
-            None
-        }
-    }
-}
 
 async fn serve(
     mut sock: TcpStream,
@@ -289,8 +282,12 @@ async fn serve(
         bail!("viewer has no H.264 decoder");
     }
 
-    let node = render_node();
-    let gpu = open_gpu(&node);
+    let tier = crate::gpu::encode_tier();
+    tracing::info!(tier = tier.label(), node = ?tier.node(), "sharing");
+    let gpu = match &tier {
+        Tier::Gpu { gpu, .. } => Some(gpu.clone()),
+        _ => None,
+    };
     // Two streams carry full 4:4:4 colour; the CPU tier sends one, as gliff does.
     let can_dual = caps.chroma.contains(&ChromaMode::Dual420) && gpu.is_some();
     let can_single = caps.chroma.contains(&ChromaMode::Single420);
@@ -298,15 +295,17 @@ async fn serve(
         tx.write_msg(&ServerMsg::error(gliff_proto::ERROR_NO_CHROMA, "no common chroma mode")).await?;
         bail!("no common chroma mode");
     }
-    let mut video = Video { gpu, enc: None, stream: (0, 0), dual: can_dual };
+    let dmabufs = tier.takes_dmabufs();
+    let mut video = Video { tier, gpu, enc: None, stream: (0, 0), dual: can_dual };
     events(ShareEvent::ViewerConnected { pipeline: video.pipeline().label() });
 
     let (cap_tx, mut cap_rx) = mpsc::unbounded_channel::<CaptureEvent>();
     let mut cc = CaptureConfig::new(screen.name.clone());
-    cc.render_node = node;
+    // Capture buffers live on the compositor's GPU; another encoder reads them as pixels.
+    cc.render_node = crate::gpu::compositor_node();
     cc.cursor = true;
     cc.buffers = 3;
-    if video.gpu.is_none() {
+    if !dmabufs {
         cc.prefer_linear = true;
         cc.shm_fallback = true;
     }
@@ -432,11 +431,6 @@ async fn serve(
             continue;
         }
         let frame = pending.take().expect("checked above");
-        if frame.buffer.is_shm() && video.gpu.is_some() {
-            // The compositor fell back to wl_shm buffers, which only the CPU reads.
-            video.gpu = None;
-            video.enc = None;
-        }
         let stream = video.stream_for(frame.extent())?;
         let dual = want_dual && video.gpu.is_some();
         if video.enc.is_none() || video.stream != stream || video.dual != dual {

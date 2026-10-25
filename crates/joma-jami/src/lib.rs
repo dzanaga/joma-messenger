@@ -242,6 +242,24 @@ pub fn set_composing(account: &str, conversation: &str, composing: bool) -> Resu
     call("setIsComposing", json!([account, format!("swarm:{conversation}"), composing])).map(drop)
 }
 
+// ---- Presence and files ------------------------------------------------------
+
+/// Follow a contact's presence; changes arrive as [`Event::Presence`].
+pub fn subscribe_presence(account: &str, uri: &str) -> Result<()> {
+    call("subscribeBuddy", json!([account, uri, true])).map(drop)
+}
+
+/// Send a file into a conversation. Progress arrives as [`Event::Transfer`].
+pub fn send_file(account: &str, conversation: &str, path: &str) -> Result<()> {
+    let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    call("sendFile", json!([account, conversation, path, name, ""])).map(drop)
+}
+
+/// Fetch a received file into `path`.
+pub fn download_file(account: &str, conversation: &str, interaction: &str, file: &str, path: &str) -> Result<bool> {
+    typed("downloadFile", json!([account, conversation, interaction, file, path]))
+}
+
 // ---- Calls -------------------------------------------------------------------
 
 /// Call a contact (`to` is a Jami URI or `swarm:<conversation id>`). Returns the call id.

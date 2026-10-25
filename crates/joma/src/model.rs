@@ -1,7 +1,7 @@
 //! What Joma knows about the account: conversations, messages, names and calls. It is
 //! fed daemon events and has no UI, so it is tested on its own.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use joma_jami::{Details, Event, SwarmMessage};
 
@@ -186,6 +186,8 @@ pub struct Model {
     pub calls: HashMap<String, Call>,
     /// Pending `loadConversation` requests.
     pub loading: HashMap<u32, String>,
+    /// Peers (bare URIs) reachable now.
+    pub online: HashSet<String>,
 }
 
 /// What an event changed, for the UI.
@@ -224,6 +226,11 @@ impl Model {
         let mut v: Vec<&Conversation> = self.conversations.values().collect();
         v.sort_by(|a, b| b.request.cmp(&a.request).then(b.last_ts().cmp(&a.last_ts())).then(a.id.cmp(&b.id)));
         v
+    }
+
+    /// A member of the conversation is online.
+    pub fn is_online(&self, c: &Conversation) -> bool {
+        c.peers.iter().any(|p| self.online.contains(p))
     }
 
     pub fn total_unread(&self) -> u32 {
@@ -389,6 +396,10 @@ impl Model {
                 }
                 ch.any = true;
             }
+            Event::Presence { account, uri, online } if *account == self.account => {
+                let uri = bare_uri(uri).to_owned();
+                ch.any = if *online { self.online.insert(uri) } else { self.online.remove(&uri) };
+            }
             Event::DecodingStarted { id, .. } => {
                 // The receive side of a call is named after the call.
                 if let Some(c) = self.calls.values_mut().find(|c| id.contains(&c.id)) {
@@ -489,6 +500,18 @@ mod tests {
         assert_eq!(bare_uri("ring:abc"), "abc");
         assert_eq!(bare_uri("abc@ring.dht"), "abc");
         assert_eq!(vcard_name("BEGIN:VCARD\nFN:Ann Lee\nEND:VCARD"), Some("Ann Lee".into()));
+    }
+
+    #[test]
+    fn presence_marks_conversations_online() {
+        let mut m = model();
+        assert!(!m.is_online(&m.conversations["c1"]));
+        let ev = Event::Presence { account: "acc".into(), uri: "ring:bob".into(), online: true };
+        assert!(m.apply(&ev).any);
+        assert!(m.is_online(&m.conversations["c1"]));
+        assert!(!m.apply(&ev).any);
+        m.apply(&Event::Presence { account: "acc".into(), uri: "bob".into(), online: false });
+        assert!(!m.is_online(&m.conversations["c1"]));
     }
 
     #[test]

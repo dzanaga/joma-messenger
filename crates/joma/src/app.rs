@@ -1,6 +1,6 @@
 //! The Joma window: state, daemon events and user actions. Rendering is in `render.rs`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -13,8 +13,8 @@ use joma_desk::portal::PortalShare;
 use joma_desk::share::ShareEvent;
 use joma_desk::signal::{DeskMsg, MIME};
 use joma_jami::Event;
-use joma_quick::ipc::{QuickState, Reply, Request, Target};
-use joma_quick::QuickConfig;
+use joma_quick::ipc::{ChatLine, ChatState, QuickState, Reply, Request, Target};
+use joma_quick::{Candidate, QuickConfig};
 
 use crate::composer::{Composer, Edited, Submit};
 use crate::desk::{After, Desk};
@@ -124,6 +124,10 @@ pub struct Joma {
     repaint_queued: Arc<AtomicBool>,
     composing_sent: Option<Instant>,
     pub quick_popup: Option<gpui::WindowHandle<crate::popup::QuickPopup>>,
+    /// Peers whose presence we follow.
+    subscribed: HashSet<String>,
+    /// Calls placed to share the desktop: the share starts once they connect.
+    share_on_connect: HashSet<String>,
 }
 
 /// Is the Jami Qt client running? It would share our accounts, and two daemons on the
@@ -229,6 +233,8 @@ impl Joma {
             repaint_queued: Arc::new(AtomicBool::new(false)),
             composing_sent: None,
             quick_popup: None,
+            subscribed: HashSet::new(),
+            share_on_connect: HashSet::new(),
         };
         j.configure_inputs(cx);
         j.boot(cx);
@@ -296,6 +302,12 @@ impl Joma {
             ..Default::default()
         };
         self.load_profiles();
+        self.subscribed.clear();
+        for c in joma_jami::contacts(&self.model.account).unwrap_or_default() {
+            if let Some(uri) = c.get("id") {
+                self.follow(uri);
+            }
+        }
         for id in joma_jami::conversations(&self.model.account).unwrap_or_default() {
             self.reload_conversation(&id, false);
         }
@@ -331,6 +343,14 @@ impl Joma {
         }
     }
 
+    /// Follow a peer's presence (once).
+    fn follow(&mut self, uri: &str) {
+        let bare = bare_uri(uri).to_owned();
+        if !bare.is_empty() && bare != self.model.me && self.subscribed.insert(bare.clone()) {
+            let _ = joma_jami::subscribe_presence(&self.model.account, &bare);
+        }
+    }
+
     fn lookup(&mut self, uri: &str) {
         let bare = bare_uri(uri);
         if !bare.is_empty() && !self.model.names.contains_key(bare) {
@@ -346,6 +366,7 @@ impl Joma {
         let peers = self.model.conversations[id].peers.clone();
         for p in peers {
             self.lookup(&p);
+            self.follow(&p);
         }
         if let Ok(req) = joma_jami::load_conversation(&acc, id, "", 30) {
             self.model.loading.insert(req, id.to_owned());
@@ -388,6 +409,23 @@ impl Joma {
         let acc = self.model.account.clone();
         for after in self.desk.tick(&acc) {
             self.after(after, cx);
+        }
+        // A call placed to share starts sharing once connected: at the peer's Joma hello,
+        // or after three seconds without one (then Jami's own share).
+        self.share_on_connect.retain(|id| self.model.calls.contains_key(id));
+        let due: Vec<String> = self
+            .share_on_connect
+            .iter()
+            .filter(|id| {
+                self.model.calls.get(*id).is_some_and(|c| {
+                    c.state == CallState::Current && (c.peer_joma || c.started.is_some_and(|t| t.elapsed() > Duration::from_secs(3)))
+                })
+            })
+            .cloned()
+            .collect();
+        for id in due {
+            self.share_on_connect.remove(&id);
+            self.share_in(&id, cx);
         }
         if self.flash.as_ref().is_some_and(|(_, t)| t.elapsed() > Duration::from_secs(5)) {
             self.flash = None;
@@ -758,11 +796,17 @@ impl Joma {
     }
 
     pub fn place_call(&mut self, video: bool, cx: &mut Context<Self>) {
-        let Some(conv) = self.selected.clone().and_then(|s| self.model.conversations.get(&s).cloned()) else { return };
+        let Some(conv) = self.selected.clone() else { return };
         if self.active_call().is_some() {
             return;
         }
-        let Some(peer) = conv.peers.first().cloned() else { return };
+        self.place_call_to(&conv, video, cx);
+    }
+
+    /// Call a conversation; returns the call id.
+    pub fn place_call_to(&mut self, conv: &str, video: bool, cx: &mut Context<Self>) -> Option<String> {
+        let conv = self.model.conversations.get(conv).cloned()?;
+        let peer = conv.peers.first().cloned()?;
         let to = if conv.peers.len() == 1 { peer.clone() } else { format!("swarm:{}", conv.id) };
         let camera = camera_source();
         let mut media = vec![joma_jami::media(joma_jami::AUDIO, "audio_0", "", false)];
@@ -773,12 +817,15 @@ impl Joma {
             Ok(id) if !id.is_empty() => {
                 let mut call = Call::new(&id, &peer, Some(conv.id.clone()), CallState::Connecting, video);
                 call.muted_video = !video || camera.is_empty();
-                self.model.calls.insert(id, call);
+                self.model.calls.insert(id.clone(), call);
+                cx.notify();
+                return Some(id);
             }
             Ok(_) => self.show_flash("the call could not start", cx),
             Err(e) => self.show_flash(format!("call failed: {e}"), cx),
         }
         cx.notify();
+        None
     }
 
     pub fn accept_call(&mut self, video: bool, cx: &mut Context<Self>) {
@@ -844,12 +891,22 @@ impl Joma {
         if call.state != CallState::Current {
             return;
         }
-        let acc = self.model.account.clone();
         if self.desk.session(&call.id).sharing_label().is_some() {
+            let acc = self.model.account.clone();
             self.desk.stop(&acc, &call.id, &camera_source(), call.muted_video);
             cx.notify();
             return;
         }
+        self.share_in(&call.id.clone(), cx);
+    }
+
+    /// Start sharing the desktop in a connected call.
+    fn share_in(&mut self, call_id: &str, cx: &mut Context<Self>) {
+        let Some(call) = self.model.calls.get(call_id).cloned() else { return };
+        if self.desk.session(&call.id).sharing_label().is_some() {
+            return;
+        }
+        let acc = self.model.account.clone();
         let tx = self.tx.clone();
         let id = call.id.clone();
         let after = self.desk.start(&acc, &call.id, &call.peer, call.peer_joma, move |ev| {
@@ -877,11 +934,17 @@ impl Joma {
     // ---- The socket -------------------------------------------------------------
 
     pub fn quick_state(&self) -> QuickState {
-        let recent: Vec<String> = self.model.ordered().iter().filter(|c| !c.request).map(|c| c.id.clone()).collect();
+        let candidates: Vec<Candidate> = self
+            .model
+            .ordered()
+            .iter()
+            .filter(|c| !c.request)
+            .map(|c| Candidate { id: c.id.clone(), unread: c.unread, online: self.model.is_online(c) })
+            .collect();
         let targets = self
             .quick
-            .targets(&recent)
-            .into_iter()
+            .rank(&candidates)
+            .iter()
             .filter_map(|id| self.model.conversations.get(id))
             .map(|c| Target {
                 conversation: c.id.clone(),
@@ -889,6 +952,7 @@ impl Joma {
                 unread: c.unread,
                 favorite: self.quick.favorites.contains(&c.id),
                 last: c.last().map(|m| m.text.chars().take(60).collect()).unwrap_or_default(),
+                online: self.model.is_online(c),
             })
             .collect();
         QuickState {
@@ -901,11 +965,9 @@ impl Joma {
     }
 
     pub fn send_to(&mut self, to: &str, text: &str) -> Reply {
-        if self.gate != Gate::Ready {
-            return Reply::Error { message: "Joma is not connected to Jami yet".into() };
-        }
-        let Some(conv) = self.model.resolve(to).map(|c| c.id.clone()) else {
-            return Reply::Error { message: format!("no conversation matches “{to}”") };
+        let conv = match self.target(to) {
+            Ok(c) => c,
+            Err(e) => return e,
         };
         match joma_jami::send_message(&self.model.account, &conv, text, "") {
             Ok(()) => Reply::Done,
@@ -939,7 +1001,135 @@ impl Joma {
                 Some(text) => self.send_to(&to, &text),
                 None => Reply::Error { message: format!("no quick message {}", index + 1) },
             },
+            Request::Chat { to, limit } => match self.target(&to) {
+                Ok(conv) => {
+                    self.mark_read(&conv);
+                    cx.notify();
+                    Reply::Chat(self.chat_state(&conv, limit))
+                }
+                Err(e) => e,
+            },
+            Request::Call { to, video } => match self.target(&to) {
+                Ok(_) if self.active_call().is_some() => Reply::Error { message: "a call is already running".into() },
+                Ok(conv) => match self.place_call_to(&conv, video, cx) {
+                    Some(_) => Reply::Done,
+                    None => Reply::Error { message: "the call could not start".into() },
+                },
+                Err(e) => e,
+            },
+            Request::ShareScreen { to } => match self.target(&to) {
+                Ok(conv) => {
+                    let running = self.model.calls.values().find(|c| c.conversation.as_deref() == Some(conv.as_str())).cloned();
+                    match running {
+                        Some(c) if c.state == CallState::Current => self.share_in(&c.id, cx),
+                        Some(c) => {
+                            self.share_on_connect.insert(c.id);
+                        }
+                        None if self.active_call().is_some() => {
+                            return Reply::Error { message: "another call is running".into() };
+                        }
+                        None => match self.place_call_to(&conv, false, cx) {
+                            Some(id) => {
+                                self.share_on_connect.insert(id);
+                            }
+                            None => return Reply::Error { message: "the call could not start".into() },
+                        },
+                    }
+                    Reply::Done
+                }
+                Err(e) => e,
+            },
+            Request::SendFile { to, path } => match self.target(&to) {
+                Ok(conv) => match path {
+                    Some(p) => self.send_file(&conv, &p),
+                    None => {
+                        self.pick_and_send(conv, cx);
+                        Reply::Done
+                    }
+                },
+                Err(e) => e,
+            },
+            Request::Open { to } => match self.target(&to) {
+                Ok(conv) => {
+                    if self.mode != Mode::Chat {
+                        self.set_mode(Mode::Chat, window, cx);
+                    }
+                    self.select(conv, cx);
+                    window.activate_window();
+                    Reply::Done
+                }
+                Err(e) => e,
+            },
         }
+    }
+
+    /// The conversation a socket request names.
+    fn target(&self, to: &str) -> Result<String, Reply> {
+        if self.gate != Gate::Ready {
+            return Err(Reply::Error { message: "Joma is not connected to Jami yet".into() });
+        }
+        self.model.resolve(to).map(|c| c.id.clone()).ok_or_else(|| Reply::Error { message: format!("no conversation matches “{to}”") })
+    }
+
+    pub fn chat_state(&self, conv: &str, limit: usize) -> ChatState {
+        let Some(c) = self.model.conversations.get(conv) else { return ChatState::default() };
+        let skip = c.messages.len().saturating_sub(limit.max(1));
+        ChatState {
+            conversation: c.id.clone(),
+            title: c.title.clone(),
+            online: self.model.is_online(c),
+            composing: c.composing,
+            in_call: self.model.calls.values().any(|k| k.conversation.as_deref() == Some(conv)),
+            messages: c.messages[skip..]
+                .iter()
+                .map(|m| ChatLine {
+                    mine: bare_uri(&m.author) == self.model.me,
+                    author: self.model.name_of(&m.author),
+                    text: m.text.clone(),
+                    ts: m.ts,
+                    event: m.kind == crate::model::MsgKind::Event,
+                })
+                .collect(),
+        }
+    }
+
+    fn send_file(&mut self, conv: &str, path: &str) -> Reply {
+        let path = std::path::Path::new(path);
+        if !path.is_file() {
+            return Reply::Error { message: format!("{} is not a file", path.display()) };
+        }
+        let abs = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        match joma_jami::send_file(&self.model.account, conv, &abs.to_string_lossy()) {
+            Ok(()) => Reply::Done,
+            Err(e) => Reply::Error { message: e.to_string() },
+        }
+    }
+
+    /// Ask for a file (the desktop's file chooser) and send it.
+    pub fn pick_and_send(&mut self, conv: String, cx: &mut Context<Self>) {
+        // A test profile must not open the real desktop's file chooser.
+        if own_profile() && std::env::var_os("JOMA_PORTAL").is_none() {
+            self.show_flash("file chooser skipped in a test profile (JOMA_PORTAL=1 allows it)", cx);
+            return;
+        }
+        let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some("Send".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else { return };
+            let _ = this.update(cx, |j, cx| {
+                for p in paths {
+                    if let Reply::Error { message } = j.send_file(&conv, &p.to_string_lossy()) {
+                        j.show_flash(format!("not sent: {message}"), cx);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 }
 

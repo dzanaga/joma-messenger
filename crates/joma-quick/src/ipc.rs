@@ -22,6 +22,17 @@ pub enum Request {
     Send { to: String, text: String },
     /// Send quick message number `index` (0-based) to `to`.
     SendQuick { to: String, index: usize },
+    /// The latest messages of a conversation; marks it read.
+    Chat { to: String, limit: usize },
+    /// Call a conversation.
+    Call { to: String, video: bool },
+    /// Call a conversation and share the desktop once it answers (or share in the call
+    /// already running).
+    ShareScreen { to: String },
+    /// Send a file; without a path Joma asks for one.
+    SendFile { to: String, path: Option<String> },
+    /// Raise the window on a conversation.
+    Open { to: String },
 }
 
 /// One conversation offered by Quick Messages.
@@ -33,6 +44,33 @@ pub struct Target {
     pub favorite: bool,
     /// The last message, shortened.
     pub last: String,
+    /// A member of the conversation is reachable now.
+    #[serde(default)]
+    pub online: bool,
+}
+
+/// One message of a quick chat.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChatLine {
+    pub mine: bool,
+    pub author: String,
+    pub text: String,
+    /// Unix seconds.
+    pub ts: i64,
+    /// A call, a file or a member change rather than a text.
+    pub event: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ChatState {
+    pub conversation: String,
+    pub title: String,
+    pub online: bool,
+    pub composing: bool,
+    /// A call with this conversation is running.
+    pub in_call: bool,
+    /// Oldest first.
+    pub messages: Vec<ChatLine>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -49,6 +87,7 @@ pub struct QuickState {
 pub enum Reply {
     Done,
     Quick(QuickState),
+    Chat(ChatState),
     Error { message: String },
 }
 
@@ -86,5 +125,9 @@ mod tests {
         assert_eq!(serde_json::to_string(&r).unwrap(), r#"{"cmd":"send","to":"bob","text":"hi"}"#);
         let r: Reply = serde_json::from_str(r#"{"ok":"done"}"#).unwrap();
         assert_eq!(r, Reply::Done);
+        let r = Request::SendFile { to: "bob".into(), path: None };
+        assert_eq!(serde_json::to_string(&r).unwrap(), r#"{"cmd":"send-file","to":"bob","path":null}"#);
+        let r = Request::ShareScreen { to: "bob".into() };
+        assert_eq!(serde_json::to_string(&r).unwrap(), r#"{"cmd":"share-screen","to":"bob"}"#);
     }
 }

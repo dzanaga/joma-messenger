@@ -7,7 +7,9 @@
 #include <callmanager_interface.h>
 #include <configurationmanager_interface.h>
 #include <conversation_interface.h>
+#include <datatransfer_interface.h>
 #include <networkservice_interface.h>
+#include <presencemanager_interface.h>
 #include <videomanager_interface.h>
 
 #include <json/json.h>
@@ -225,6 +227,10 @@ registerHandlers()
     FORWARD(ConversationSignal::ConversationMemberEvent);
     FORWARD(ConversationSignal::ConversationProfileUpdated);
     // Calls
+    FORWARD(ConversationSignal::OnConversationError);
+    // Presence and files
+    FORWARD(PresenceSignal::NewBuddyNotification);
+    FORWARD(DataTransferSignal::DataTransferEvent);
     FORWARD(CallSignal::StateChange);
     FORWARD(CallSignal::IncomingCall);
     FORWARD(CallSignal::IncomingMessage);
@@ -376,6 +382,16 @@ dispatch(const std::string& m, const Json::Value& a)
         return setMessageDisplayed(str(a, 0), str(a, 1), str(a, 2), (int) num(a, 3));
     if (m == "setIsComposing")
         return setIsComposing(str(a, 0), str(a, 1), flag(a, 2)), Json::Value();
+    // Presence
+    if (m == "subscribeBuddy")
+        return subscribeBuddy(str(a, 0), str(a, 1), flag(a, 2)), Json::Value();
+    if (m == "getSubscriptions")
+        return toJson(getSubscriptions(str(a, 0)));
+    // Files
+    if (m == "sendFile")
+        return sendFile(str(a, 0), str(a, 1), str(a, 2), str(a, 3), str(a, 4)), Json::Value();
+    if (m == "downloadFile")
+        return downloadFile(str(a, 0), str(a, 1), str(a, 2), str(a, 3), str(a, 4));
     // Calls
     if (m == "placeCallWithMedia")
         return placeCallWithMedia(str(a, 0), str(a, 1), vmap(a, 2));

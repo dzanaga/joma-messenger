@@ -11,7 +11,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, bail, Result};
 use gliff_proto::{ChromaMode, ClientCaps, ClientMsg, Codec, ServerMsg, PROTOCOL_VERSION};
 use gliff_transport::Framed;
-use gliff_vk::Gpu;
+use crate::gpu::Tier;
+use crate::va::VaDecoder;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
@@ -44,7 +45,7 @@ pub struct Pointer {
 pub struct ViewState {
     pub picture: Option<Picture>,
     pub pointer: Pointer,
-    /// `gpu` or `cpu`, on each end.
+    /// `gpu`, `va` or `cpu` here; `gpu` or `cpu` for the sharer (gliff's wire labels).
     pub local_pipeline: &'static str,
     pub remote_pipeline: &'static str,
     pub chroma: &'static str,
@@ -90,22 +91,12 @@ impl Drop for Viewer {
 
 enum Dec {
     Gpu(Box<gliff_vk::Decoder>),
+    Va(Box<VaDecoder>),
     Cpu(Box<gliff_sw::Decoder>),
 }
 
 fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
-}
-
-fn open_gpu() -> Option<Arc<Gpu>> {
-    if std::env::var("JOMA_VIDEO").as_deref() == Ok("cpu") {
-        return None;
-    }
-    let node = hypr_capture::render_node(None);
-    match Gpu::open(Some(&node)) {
-        Ok(gpu) if gpu.can_decode() => Some(gpu),
-        Ok(_) | Err(_) => None,
-    }
 }
 
 /// Make every alpha byte opaque: the GPU path writes BGRX.
@@ -143,9 +134,13 @@ async fn run(
     let mut rx = Framed::new(rd);
     let mut tx = Framed::new(wr);
 
-    let gpu = open_gpu();
-    let chroma = if gpu.is_some() {
+    let tier = crate::gpu::decode_tier();
+    tracing::info!(tier = tier.label(), node = ?tier.node(), "watching");
+    let chroma = if matches!(tier, Tier::Gpu { .. }) {
         vec![ChromaMode::Dual420, ChromaMode::Single420]
+    } else if matches!(tier, Tier::Va(_)) {
+        // Rebuilding 4:4:4 needs gliff's Vulkan shaders.
+        vec![ChromaMode::Single420]
     } else {
         // The CPU decoder recombines Dual420 too, but one stream halves its work.
         vec![ChromaMode::Single420, ChromaMode::Dual420]
@@ -158,7 +153,7 @@ async fn run(
         features: gliff_proto::features(),
     };
     tx.write_msg(&ClientMsg::Hello { version: PROTOCOL_VERSION, keymap: String::new(), caps }).await?;
-    state.lock().unwrap().local_pipeline = if gpu.is_some() { "gpu" } else { "cpu" };
+    state.lock().unwrap().local_pipeline = tier.label();
 
     let mut dec: Option<Dec> = None;
     let mut size = (0u32, 0u32);
@@ -191,21 +186,26 @@ async fn run(
                 }
                 let dual = chroma == ChromaMode::Dual420;
                 size = (width, height);
-                dec = Some(match &gpu {
-                    Some(g) => match gliff_vk::Decoder::new(g, dual, width, height) {
-                        Ok(d) => Dec::Gpu(Box::new(d)),
-                        Err(e) => {
-                            tracing::warn!(error = %e, "GPU decoder failed; decoding on the CPU");
-                            Dec::Cpu(Box::new(gliff_sw::Decoder::new(dual, width, height)?))
+                let hw = match &tier {
+                    Tier::Gpu { gpu, .. } => gliff_vk::Decoder::new(gpu, dual, width, height).map(|d| Dec::Gpu(Box::new(d))).map_err(|e| anyhow!(e)),
+                    Tier::Va(va) if !dual => VaDecoder::new(va, width, height).map(|d| Dec::Va(Box::new(d))),
+                    _ => Err(anyhow!("no hardware decoder")),
+                };
+                dec = Some(match hw {
+                    Ok(d) => d,
+                    Err(e) => {
+                        if !matches!(tier, Tier::Cpu) {
+                            tracing::warn!(error = %e, "hardware decoder failed; decoding on the CPU");
                         }
-                    },
-                    None => Dec::Cpu(Box::new(gliff_sw::Decoder::new(dual, width, height)?)),
+                        Dec::Cpu(Box::new(gliff_sw::Decoder::new(dual, width, height)?))
+                    }
                 });
                 let mut s = state.lock().unwrap();
                 s.remote_pipeline = pipeline.map(|p| p.label()).unwrap_or("?");
                 s.chroma = if dual { "4:4:4" } else { "4:2:0" };
                 s.local_pipeline = match dec {
                     Some(Dec::Gpu(_)) => "gpu",
+                    Some(Dec::Va(_)) => "va",
                     _ => "cpu",
                 };
             }
@@ -215,6 +215,7 @@ async fn run(
                 let Some(d) = dec.as_mut() else { continue };
                 let decoded = match d {
                     Dec::Gpu(d) => d.decode_to_bgra(&main, &aux).map(|o| o.map(|p| (p, size.0, size.1))).map_err(|e| anyhow!(e)),
+                    Dec::Va(d) => d.decode(&main),
                     Dec::Cpu(d) => d.decode(&main, &aux).map(|o| o.map(|f| (f.pixels, f.width, f.height))).map_err(|e| anyhow!(e)),
                 };
                 match decoded {

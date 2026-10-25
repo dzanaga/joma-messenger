@@ -36,6 +36,11 @@ pub enum Event {
     PeerServices { request: u32, account: String, peer: String, status: i64, services: String },
     TunnelOpened { account: String, tunnel: String, port: u16 },
     TunnelClosed { account: String, tunnel: String, reason: String },
+    /// A subscribed contact's presence: online when any of its devices is reachable.
+    Presence { account: String, uri: String, online: bool },
+    /// A file transfer moved on (`code` is libjami's `DataTransferEventCode`).
+    Transfer { account: String, conversation: String, interaction: String, file: String, code: i64 },
+    ConversationError { account: String, conversation: String, code: i64, what: String },
     Other { signal: String, args: Vec<Value> },
 }
 
@@ -136,6 +141,18 @@ impl Event {
             },
             "ServiceTunnelOpened" => Event::TunnelOpened { account: s(a, 0), tunnel: s(a, 1), port: n(a, 2) as u16 },
             "ServiceTunnelClosed" => Event::TunnelClosed { account: s(a, 0), tunnel: s(a, 1), reason: s(a, 2) },
+            // Status 0 is offline; 1 reachable over the DHT, 2 connected.
+            "NewBuddyNotification" => Event::Presence { account: s(a, 0), uri: s(a, 1), online: n(a, 2) > 0 },
+            "DataTransferEvent" => Event::Transfer {
+                account: s(a, 0),
+                conversation: s(a, 1),
+                interaction: s(a, 2),
+                file: s(a, 3),
+                code: n(a, 4),
+            },
+            "OnConversationError" => {
+                Event::ConversationError { account: s(a, 0), conversation: s(a, 1), code: n(a, 2), what: s(a, 3) }
+            }
             _ => Event::Other { signal: signal.to_owned(), args: a.clone() },
         }
     }
@@ -157,6 +174,14 @@ mod tests {
         assert_eq!(message.text(), "ciao");
         assert_eq!(message.author(), "abc");
         assert_eq!(message.timestamp(), 1_700_000_000);
+    }
+
+    #[test]
+    fn parses_presence() {
+        let v = json!({"s": "NewBuddyNotification", "a": ["acc", "abc", 2, ""]});
+        assert!(matches!(Event::parse(&v), Event::Presence { online: true, .. }));
+        let v = json!({"s": "NewBuddyNotification", "a": ["acc", "abc", 0, ""]});
+        assert!(matches!(Event::parse(&v), Event::Presence { online: false, .. }));
     }
 
     #[test]
