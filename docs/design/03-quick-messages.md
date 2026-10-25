@@ -6,13 +6,14 @@ the list (`recent`, default 6).
 
 - In the window: Ctrl+. shows the bar of messages; Alt+1…9 sends one to the open
   conversation; Ctrl+Shift+F stars it.
-- `joma quick`: a small window (app id `joma-quick`, float it with a Hyprland rule):
-  j/k pick a contact, 1…9 send, Esc closes.
 - `joma send` / `joma send-quick`: for scripts and launchers.
-- Omarchy bar (`omarchy-plugin/io.github.dzanaga.joma-quick`): unread count. The panel
+- Omarchy bar (`omarchy-plugin/io.github.dzanaga.joma-quick`): the pixel-art logo
+  (`JomaGlyph.qml`, the grid of `assets/joma-messenger-pixel.png`) in the bar's colour;
+  the j's dot fills with the widget setting `unreadColor` (default `#39ff88`) while
+  messages are unread. The panel
   lists contacts ranked by `QuickConfig::rank`: pinned (favourites) and unread first,
   then online ones; offline recent ones fill up to `recent`. A click opens a quick chat
-  (`joma chat`, polled every 2 s while open) with a reply box, the quick messages, and
+  (`joma chat`, polled every 2 s while open) with a reply box and
   call / video / share screen / send file / open buttons (`joma call`, `joma share`,
   `joma send-file`, `joma open`).
 - `omarchy-shell io.github.dzanaga.joma-quick toggle` (bound to Super+Alt+M here) opens
@@ -20,8 +21,11 @@ the list (`recent`, default 6).
   instantiates the widget and only one handler per target is used.
 - Presence: Joma subscribes to every contact (`subscribeBuddy`); `NewBuddyNotification`
   status above 0 counts as online.
-- `joma share <to>` places an audio call and starts the desktop share once it is
-  connected: at the peer's Joma hello, or after 3 s without one (Jami's portal share).
+- `joma share <to>` shares in the call with `<to>` if one runs; otherwise without a
+  call (see `desk.rs`): the handshake goes as account messages (`sendAccountTextMessage`,
+  kept in no history), the viewer's Joma answers `Hello` and asks its user (`joma watch
+  <to>` or the watch button). No `Hello` within 8 s: the peer has no Joma, so Joma calls
+  with the microphone off and shares through Jami's portal once connected.
 - `joma send-file <to>` without a path opens the desktop's file chooser from Joma
   (skipped in test profiles unless `JOMA_PORTAL=1`).
 

@@ -46,7 +46,7 @@ panel now does all of this and more. I propose to remove that window and keep
 `joma quick --json` (the bar uses it) and the quick messages inside Joma's main window
 (Alt+1..9). OK?
 
-- [ ] A:
+- [x] A: ok
 
 **Q2. zavito** (from this afternoon, still open). On zavito: `sudo pacman -S jami-daemon`,
 then from here `! ~/Projects/joma-messenger/scripts/install.sh --no-build zavito`. Then a
@@ -61,7 +61,7 @@ please run:
 ! cd ~/Projects/joma-messenger && gh repo create dzanaga/joma-messenger --private --source . --remote origin --push
 ```
 
-- [ ] A: done
+- [x] A: done
 
 # Not tested yet
 

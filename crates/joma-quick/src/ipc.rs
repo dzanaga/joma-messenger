@@ -14,8 +14,6 @@ use serde::{Deserialize, Serialize};
 pub enum Request {
     /// Raise the window.
     Show,
-    /// Open the quick messages popup.
-    QuickPopup,
     /// The quick-message targets and messages, for the bar plugin.
     Quick,
     /// Send `text` to a conversation (by id, or by a member's name or URI).
@@ -33,6 +31,8 @@ pub enum Request {
     SendFile { to: String, path: Option<String> },
     /// Raise the window on a conversation.
     Open { to: String },
+    /// Watch the desktop a peer offers without a call.
+    Watch { to: String },
     /// Quit Joma (closing its window only hides it).
     Quit,
 }

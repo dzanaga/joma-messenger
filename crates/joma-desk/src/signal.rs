@@ -1,5 +1,6 @@
-//! The desktop-share handshake, carried as in-call messages of one MIME type. Peers that
-//! never answer `Hello` are plain Jami clients and get Jami's own screen share.
+//! The desktop-share handshake: messages of one MIME type, carried in a call, or straight
+//! between the two accounts for a share without a call. Peers that never answer `Hello`
+//! are plain Jami clients and get Jami's own screen share.
 
 use serde::{Deserialize, Serialize};
 
@@ -31,12 +32,16 @@ pub enum DeskMsg {
         output: String,
         width: u32,
         height: u32,
+        /// Unix seconds when offered. A share without a call can be delivered late; the
+        /// viewer ignores old offers.
+        #[serde(default)]
+        ts: u64,
     },
     /// The viewer is receiving the stream.
     Accept,
     /// The viewer cannot take the stream; the sharer falls back to Jami's screen share.
     Decline { reason: String },
-    /// The sharer stopped.
+    /// The sharer stopped (or, without a call, the viewer stopped watching).
     Stop,
 }
 
@@ -48,6 +53,11 @@ impl DeskMsg {
     pub fn decode(text: &str) -> Option<DeskMsg> {
         serde_json::from_str(text).ok()
     }
+}
+
+/// Seconds since the epoch.
+pub fn now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 /// A random token, 32 hex digits, from the kernel's generator.
@@ -74,6 +84,12 @@ mod tests {
         assert_eq!(DeskMsg::decode(&m.encode()), Some(m));
         assert_eq!(DeskMsg::decode("{\"t\":\"stop\"}"), Some(DeskMsg::Stop));
         assert_eq!(DeskMsg::decode("nonsense"), None);
+    }
+
+    #[test]
+    fn offers_from_older_jomas_decode_without_a_time() {
+        let old = r#"{"t":"offer","v":1,"service":"s","device":"d","uri":"u","token":"k","output":"o","width":1,"height":2}"#;
+        assert!(matches!(DeskMsg::decode(old), Some(DeskMsg::Offer { ts: 0, .. })));
     }
 
     #[test]

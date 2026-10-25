@@ -8,7 +8,7 @@
   technique, do not tunnel gliff.)
 - D-3 The handshake rides in-call messages (`application/x-joma-desk+json`).
 - D-4 Fallback is Jami's portal screen share, on no `Hello`, a decline or 15 s of silence.
-- D-5 Quick Messages is an Omarchy shell plugin plus an in-app bar and a popup, all
+- D-5 Quick Messages is an Omarchy shell plugin plus an in-app bar, all
   through the running Joma's socket.
 - D-6 View-only desktop share for now; remote control and clipboard later.
 - D-7 Licence GPL-3.0-or-later (Joma links libjami, GPL-3).
@@ -18,6 +18,10 @@
   default). (User, 2026-10-25.)
 - D-10 The VA-API tier stays, opt-in only (`JOMA_VIDEO=va`), and never on the GPU that
   drives the screen without asking.
+- D-11 Desktop share without a call: the handshake as account messages, the viewer
+  asked first; peers without Joma get a call with the microphone off. (User, 2026-10-25.)
+- D-12 No `joma quick` window, no quick messages under the bar chat: the bar panel is
+  the quick way in. (User, 2026-10-25.)
 
 ## Decided
 

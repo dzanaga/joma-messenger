@@ -11,9 +11,9 @@ to Jami's own screen share.
 |---|---|
 | `joma-jami` | libjami in process: a C++ shim with one JSON call entry and one JSON signal callback; typed calls and `Event`s in Rust |
 | `joma-theme` | Omarchy's current `colors.toml` as a GPUI palette, with a fallback (Tokyo Night) |
-| `joma-desk` | Joma desktop share: signalling over in-call messages, gliff's capture → split → H.264 pipeline on the sharer, decode → BGRA on the viewer, carried over a Jami service tunnel; plus the Jami portal fallback |
+| `joma-desk` | Joma desktop share: signalling over in-call or account messages (share without a call), gliff's capture → split → H.264 pipeline on the sharer, decode → BGRA on the viewer, carried over a Jami service tunnel; plus the Jami portal fallback |
 | `joma-quick` | Quick Messages config and the socket protocol (CLI, bar plugin) |
-| `joma` | The GPUI app and the CLI (`joma`, `joma quick`, `joma send`) |
+| `joma` | The GPUI app and the CLI (`joma`, `joma send`, `joma share`, …) |
 
 Design notes live in `docs/design/`. Decisions are in `docs/DECISIONS.md`.
 

@@ -14,9 +14,21 @@
   },
   "barWidget": {
     "displayName": "Joma",
-    "description": "Unread count; pick a contact and send a quick message.",
+    "description": "Your Jami contacts and a quick chat with each; the logo fills when messages are unread.",
     "category": "Communication",
     "allowMultiple": false,
-    "defaultSection": "right"
+    "defaultSection": "right",
+    "defaults": {
+      "unreadColor": "#39ff88"
+    },
+    "schema": [
+      {
+        "key": "unreadColor",
+        "type": "string",
+        "label": "Unread colour",
+        "description": "Fills the Joma logo in the bar while messages are unread (a colour such as #39ff88).",
+        "defaultValue": "#39ff88"
+      }
+    ]
   }
 }

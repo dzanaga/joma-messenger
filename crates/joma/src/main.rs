@@ -2,8 +2,8 @@
 //!
 //! `joma` opens the window (or raises the running one). Closing the window hides it and
 //! Joma keeps running in the background (see `hypr`); Ctrl+Q quits. The other commands talk to the
-//! running Joma: `joma quick` opens the quick-message popup, `joma quick --json` prints
-//! what the Omarchy bar plugin shows, `joma send <to> <text>` sends a message.
+//! running Joma: `joma quick --json` prints what the Omarchy bar plugin shows,
+//! `joma send <to> <text>` sends a message.
 //!
 //! `JOMA_PROFILE=<dir>` runs Joma on its own Jami data under `<dir>` (tests, a second
 //! identity); without it Joma uses Jami's own data, shared with the Qt client.
@@ -14,7 +14,6 @@ mod desk;
 mod hypr;
 mod ipc;
 mod model;
-mod popup;
 mod render;
 mod theme;
 
@@ -24,13 +23,13 @@ use joma_quick::ipc::{request, Reply, Request};
 use app::*;
 
 const USAGE: &str = "usage: joma                      open Joma (or raise it)
-       joma quick                quick-message popup
-       joma quick --json         quick-message targets, as JSON
+       joma quick --json         the bar widget's contacts and quick messages, as JSON
        joma send <to> <text…>    send a message (to: a conversation, a name or an ID)
        joma send-quick <to> <n>  send quick message n (1-9)
        joma chat <to> [n]        the last n messages (default 20), as JSON; marks them read
        joma call <to> [--video]  call a conversation
-       joma share <to>           call and share the desktop (or share in the running call)
+       joma share <to>           share the desktop (in the running call, else without a call)
+       joma watch <to>           watch the desktop <to> offers you
        joma send-file <to> [path]
                                  send a file (without a path, Joma asks for one)
        joma open <to>            show a conversation in Joma
@@ -55,13 +54,13 @@ fn cli(args: &[String]) -> Option<i32> {
             return Some(probe(has("--bench"), has("--display-gpu")));
         }
         Some("quick") if args.get(1).map(String::as_str) == Some("--json") => Request::Quick,
-        Some("quick") => Request::QuickPopup,
         Some("show") => Request::Show,
         Some("quit") => Request::Quit,
         Some("chat") if args.len() >= 2 => Request::Chat { to: args[1].clone(), limit: args.get(2).and_then(|n| n.parse().ok()).unwrap_or(20) },
         Some("call") if args.len() >= 2 => Request::Call { to: args[1].clone(), video: args[2..].iter().any(|a| a == "--video") },
         Some("share") if args.len() == 2 => Request::ShareScreen { to: args[1].clone() },
         Some("send-file") if args.len() >= 2 => Request::SendFile { to: args[1].clone(), path: args.get(2).cloned() },
+        Some("watch") if args.len() == 2 => Request::Watch { to: args[1].clone() },
         Some("open") if args.len() == 2 => Request::Open { to: args[1].clone() },
         Some("send") if args.len() >= 3 => Request::Send { to: args[1].clone(), text: args[2..].join(" ") },
         Some("send-quick") if args.len() == 3 => match args[2].parse::<usize>() {

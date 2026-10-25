@@ -1,6 +1,11 @@
-//! Desktop share during a call. With a peer running Joma, the desktop goes through Joma's
-//! own stream (gliff's pipeline, carried by a Jami service tunnel). With anyone else, or
-//! when the Joma way fails, it falls back to Jami's screen share through the portal.
+//! Desktop share. With a peer running Joma, the desktop goes through Joma's own stream
+//! (gliff's pipeline, carried by a Jami service tunnel). With anyone else, or when the
+//! Joma way fails, it falls back to Jami's screen share through the portal, in a call.
+//!
+//! A session is keyed by a call id, or by `direct:<peer uri>` for a share without a call:
+//! then the handshake travels as account messages (straight to the peer's devices, kept in
+//! no history), the viewer is asked first, and a peer that does not answer `Hello` within
+//! a few seconds gets a call with the microphone off and Jami's screen share instead.
 //!
 //! 1. When a call becomes current, each Joma sends `Hello` as an in-call message.
 //! 2. Share pressed, peer said hello, Hyprland here: start the share endpoint, expose it
@@ -20,17 +25,37 @@ use joma_desk::view::Viewer;
 use joma_jami::Details;
 
 const ACCEPT_TIMEOUT: Duration = Duration::from_secs(15);
+/// Without a call: how long a Joma peer has to say hello, and the viewer to say yes.
+const HELLO_TIMEOUT: Duration = Duration::from_secs(8);
+const ASK_TIMEOUT: Duration = Duration::from_secs(90);
+/// Older offers without a call are dropped (they can arrive late through the DHT).
+const OFFER_MAX_AGE: u64 = 60;
+
+const DIRECT: &str = "direct:";
+
+/// The session key of a share without a call.
+pub fn direct_key(uri: &str) -> String {
+    format!("{DIRECT}{}", crate::model::bare_uri(uri))
+}
+
+/// The peer of a share without a call.
+pub fn direct_peer(key: &str) -> Option<&str> {
+    key.strip_prefix(DIRECT)
+}
 
 pub enum Sharing {
     Off,
     /// Asking the portal; the user is picking a screen.
     Picking,
-    Joma { share: Share, service: String, offered: Instant, accepted: bool },
+    /// `answered`: the peer said hello (always so in a call).
+    Joma { share: Share, service: String, offered: Instant, answered: bool, accepted: bool },
     Portal { portal: PortalShare, input: String },
 }
 
 pub enum Viewing {
     Off,
+    /// Without a call: an offer waiting for the user's yes.
+    Asked { uri: String, service: String, device: String, token: String },
     /// Asking the sharer's daemon which device advertises the service.
     Querying { request: u32, uri: String, service: String, device: String, token: String },
     Opening { tunnel: String, token: String },
@@ -55,6 +80,7 @@ impl Session {
         match self.sharing {
             Sharing::Off => None,
             Sharing::Picking => Some("choosing a screen…"),
+            Sharing::Joma { answered: false, .. } => Some("asking…"),
             Sharing::Joma { accepted: false, .. } => Some("offering desktop (Joma)…"),
             Sharing::Joma { accepted: true, .. } => Some("sharing desktop · Joma"),
             Sharing::Portal { .. } => Some("sharing screen · Jami"),
@@ -68,6 +94,10 @@ pub enum After {
     Nothing,
     /// Fall back to the portal share for this call.
     Portal(String),
+    /// Without a call, the peer is no Joma: call them (microphone off) and share there.
+    Call(String),
+    /// Without a call, a peer offers their desktop: ask the user.
+    Asked(String),
 }
 
 #[derive(Default)]
@@ -75,10 +105,14 @@ pub struct Desk {
     pub sessions: HashMap<String, Session>,
 }
 
-fn send(account: &str, call: &str, msg: &DeskMsg) {
+fn send(account: &str, key: &str, msg: &DeskMsg) {
     let mut payloads = Details::new();
     payloads.insert(signal::MIME.into(), msg.encode());
-    if let Err(e) = joma_jami::send_call_message(account, call, &payloads) {
+    let sent = match direct_peer(key) {
+        Some(uri) => joma_jami::send_account_message(account, uri, &payloads, false),
+        None => joma_jami::send_call_message(account, key, &payloads),
+    };
+    if let Err(e) = sent {
         tracing::warn!(error = %e, "could not send a desk message");
     }
 }
@@ -122,6 +156,49 @@ impl Desk {
         }
     }
 
+    /// Share with a peer without a call.
+    pub fn start_direct(&mut self, account: &str, uri: &str, events: impl Fn(ShareEvent) + Send + 'static) -> After {
+        let key = direct_key(uri);
+        if !matches!(self.session(&key).sharing, Sharing::Off) {
+            return After::Nothing;
+        }
+        if !joma_desk::share::available() {
+            return After::Call(uri.to_owned());
+        }
+        match self.offer(account, &key, uri, events) {
+            Ok(()) => After::Nothing,
+            Err(e) => {
+                tracing::warn!(error = %format!("{e:#}"), "Joma share failed; calling instead");
+                After::Call(uri.to_owned())
+            }
+        }
+    }
+
+    /// The user said yes to a share without a call.
+    pub fn accept_offer(&mut self, account: &str, key: &str) {
+        let s = self.session(key);
+        let Viewing::Asked { uri, service, device, token } = std::mem::replace(&mut s.viewing, Viewing::Off) else { return };
+        match joma_jami::query_peer_services(account, &uri) {
+            Ok(request) => self.session(key).viewing = Viewing::Querying { request, uri, service, device, token },
+            Err(_) => self.open(account, key, &uri, &device, &service, token),
+        }
+    }
+
+    /// The user said no, or stopped watching a share without a call.
+    pub fn decline_offer(&mut self, account: &str, key: &str) {
+        let s = self.session(key);
+        let asked = matches!(s.viewing, Viewing::Asked { .. });
+        if let Viewing::Opening { tunnel, .. } | Viewing::On { tunnel, .. } = &s.viewing {
+            let _ = joma_jami::close_tunnel(account, tunnel);
+        }
+        s.viewing = Viewing::Off;
+        if asked {
+            send(account, key, &DeskMsg::Decline { reason: "declined".into() });
+        } else {
+            send(account, key, &DeskMsg::Stop);
+        }
+    }
+
     fn offer(&mut self, account: &str, call: &str, peer: &str, events: impl Fn(ShareEvent) + Send + 'static) -> Result<()> {
         let token = signal::token();
         let share = Share::start(token.clone(), events)?;
@@ -135,9 +212,11 @@ impl Desk {
             output: share.screen.name.clone(),
             width: share.screen.width,
             height: share.screen.height,
+            ts: signal::now(),
         };
         send(account, call, &msg);
-        self.session(call).sharing = Sharing::Joma { share, service, offered: Instant::now(), accepted: false };
+        let answered = direct_peer(call).is_none();
+        self.session(call).sharing = Sharing::Joma { share, service, offered: Instant::now(), answered, accepted: false };
         Ok(())
     }
 
@@ -215,7 +294,26 @@ impl Desk {
     /// An in-call message from the peer. Returns true for a `Hello` (with its abilities).
     pub fn message(&mut self, account: &str, call: &str, peer: &str, msg: DeskMsg) -> (Option<(bool, bool)>, After) {
         match msg {
-            DeskMsg::Hello { share, view, .. } => return (Some((share, view)), After::Nothing),
+            DeskMsg::Hello { share, view, .. } => {
+                if let Sharing::Joma { answered, .. } = &mut self.session(call).sharing {
+                    *answered = true;
+                }
+                return (Some((share, view)), After::Nothing);
+            }
+            DeskMsg::Offer { service, device, uri, token, ts, .. } if direct_peer(call).is_some() => {
+                if signal::now().saturating_sub(ts) > OFFER_MAX_AGE {
+                    return (None, After::Nothing);
+                }
+                let s = self.session(call);
+                if let Viewing::Opening { tunnel, .. } | Viewing::On { tunnel, .. } = &s.viewing {
+                    let _ = joma_jami::close_tunnel(account, tunnel);
+                }
+                let uri = if uri.is_empty() { peer.to_owned() } else { uri };
+                s.viewing = Viewing::Asked { uri, service, device, token };
+                // Tell the sharer a Joma is here, so it waits for the user's answer.
+                send(account, call, &DeskMsg::Hello { v: signal::VERSION, share: joma_desk::share::available(), view: true });
+                return (None, After::Asked(call.to_owned()));
+            }
             DeskMsg::Offer { service, device, uri, token, .. } => {
                 let s = self.session(call);
                 if let Viewing::Opening { tunnel, .. } | Viewing::On { tunnel, .. } = &s.viewing {
@@ -235,6 +333,17 @@ impl Desk {
                     *accepted = true;
                 }
             }
+            DeskMsg::Decline { reason } if direct_peer(call).is_some() => {
+                if matches!(self.session(call).sharing, Sharing::Joma { .. }) {
+                    self.stop(account, call, "", true);
+                    if reason == "declined" {
+                        self.session(call).note = Some("they declined the share".into());
+                    } else {
+                        self.session(call).note = Some(format!("they could not view ({reason}); calling instead"));
+                        return (None, After::Call(direct_peer(call).unwrap_or_default().to_owned()));
+                    }
+                }
+            }
             DeskMsg::Decline { reason } => {
                 if matches!(self.session(call).sharing, Sharing::Joma { .. }) {
                     self.stop(account, call, "", true);
@@ -243,6 +352,11 @@ impl Desk {
                 }
             }
             DeskMsg::Stop => {
+                // Without a call the viewer's Stop ends the share too.
+                if direct_peer(call).is_some() && matches!(self.session(call).sharing, Sharing::Joma { .. }) {
+                    self.stop(account, call, "", true);
+                    self.session(call).note = Some("they stopped watching".into());
+                }
                 let s = self.session(call);
                 if let Viewing::Opening { tunnel, .. } | Viewing::On { tunnel, .. } = &s.viewing {
                     let _ = joma_jami::close_tunnel(account, tunnel);
@@ -342,6 +456,21 @@ impl Desk {
                 }
             }
             let s = self.session(&call);
+            if let Some(uri) = direct_peer(&call).map(str::to_owned) {
+                match &s.sharing {
+                    Sharing::Joma { offered, answered: false, .. } if offered.elapsed() > HELLO_TIMEOUT => {
+                        self.stop(account, &call, "", true);
+                        self.session(&call).note = Some("no Joma there; calling instead".into());
+                        out.push(After::Call(uri));
+                    }
+                    Sharing::Joma { offered, accepted: false, .. } if offered.elapsed() > ASK_TIMEOUT => {
+                        self.stop(account, &call, "", true);
+                        self.session(&call).note = Some("no answer to the share".into());
+                    }
+                    _ => {}
+                }
+                continue;
+            }
             if let Sharing::Joma { offered, accepted: false, .. } = &s.sharing {
                 if offered.elapsed() > ACCEPT_TIMEOUT {
                     self.stop(account, &call, "", true);
@@ -351,6 +480,26 @@ impl Desk {
             }
         }
         out
+    }
+
+    /// Shares without a call that are over: (peer uri, why), removed from the sessions.
+    pub fn reap_direct(&mut self) -> Vec<(String, Option<String>)> {
+        let done: Vec<String> = self
+            .sessions
+            .iter()
+            .filter(|(k, s)| direct_peer(k).is_some() && matches!(s.sharing, Sharing::Off) && matches!(s.viewing, Viewing::Off))
+            .map(|(k, _)| k.clone())
+            .collect();
+        done.into_iter()
+            .filter_map(|k| self.sessions.remove(&k).map(|s| (direct_peer(&k).unwrap_or_default().to_owned(), s.note)))
+            .collect()
+    }
+
+    /// Shares without a call that are running or asked: their keys.
+    pub fn direct_sessions(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self.sessions.keys().filter(|k| direct_peer(k).is_some()).cloned().collect();
+        keys.sort();
+        keys
     }
 
     pub fn viewer(&self, call: &str) -> Option<&Viewer> {

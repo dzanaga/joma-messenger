@@ -7,7 +7,7 @@ import qs.Ui
 
 // The bar glyph shows the unread count. Its panel lists contacts (pinned and unread on
 // top, then whoever is online); choosing one opens a quick chat: the latest messages, a
-// reply box, the quick messages, and buttons to call, share the desktop or send a file.
+// reply box, and buttons to call, share the desktop or send a file.
 BarWidget {
   id: root
   moduleName: "io.github.dzanaga.joma-quick"
@@ -18,6 +18,9 @@ BarWidget {
   readonly property color fg: Color.popups.text
   readonly property color dim: Qt.darker(fg, 1.55)
   readonly property color accent: Color.accent
+  // The logo fills with this colour while messages are unread (the widget's settings in
+  // shell.json: "unreadColor").
+  readonly property color unreadColor: settings && settings.unreadColor ? settings.unreadColor : "#39ff88"
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   property bool popupOpen: false
@@ -78,10 +81,10 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    // The glyph is drawn below; the label only reserves room for the unread count.
+    // The glyph is drawn below; the label is unused.
     text: " "
     labelVisible: false
-    fixedWidth: glyph.width + (badge.visible ? badge.implicitWidth + Style.space(3) : 0) + scaledHorizontalMargin * 2
+    fixedWidth: glyph.implicitWidth + scaledHorizontalMargin * 2
     dimmed: !root.live
     tooltipText: !root.live ? "Joma is not running" : (root.unread > 0 ? root.unread + " unread in Joma" : "Joma")
     onPressed: function(buttonCode) {
@@ -89,28 +92,14 @@ BarWidget {
       else if (buttonCode === Qt.RightButton && root.svc) root.svc.openJoma()
     }
 
-    Row {
+    JomaGlyph {
+      id: glyph
       anchors.centerIn: parent
-      spacing: Style.space(3)
-      JomaGlyph {
-        id: glyph
-        anchors.verticalCenter: parent.verticalCenter
-        width: Math.round(button.fontSize * 1.6)
-        height: width
-        neon: root.accent
-        opacity: root.unread > 0 || !root.live ? 1 : 0.8
-      }
-      Text {
-        id: badge
-        visible: root.unread > 0
-        anchors.verticalCenter: parent.verticalCenter
-        text: String(root.unread)
-        color: root.accent
-        font.family: root.fontFamily
-        font.pixelSize: button.fontSize
-        font.bold: true
-        renderType: Text.NativeRendering
-      }
+      size: button.fontSize * 1.2
+      widthSize: button.fontSize * 1.25
+      outline: button.foreground
+      fill: root.unreadColor
+      filled: root.unread > 0
     }
   }
 
@@ -329,7 +318,7 @@ BarWidget {
           }
           PanelActionButton {
             iconText: "󰍹"
-            tooltipText: "Call and share your screen"
+            tooltipText: "Share your screen (no call; Jami users get a call with the microphone off)"
             foreground: root.fg
             onClicked: root.svc.shareScreen(root.chatId)
           }
@@ -406,24 +395,6 @@ BarWidget {
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
               }
-            }
-          }
-        }
-
-        Flow {
-          width: parent.width
-          spacing: Style.space(4)
-          Repeater {
-            model: root.svc ? root.svc.messages.slice(0, 9) : []
-            Button {
-              required property var modelData
-              required property int index
-              text: modelData
-              foreground: root.fg
-              fontFamily: root.fontFamily
-              fontSize: Style.font.caption
-              bordered: true
-              onClicked: root.svc.sendQuick(root.chatId, index)
             }
           }
         }

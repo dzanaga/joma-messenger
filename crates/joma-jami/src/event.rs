@@ -29,6 +29,9 @@ pub enum Event {
     IncomingCall { account: String, call: String, from: String, media: Vec<Media> },
     /// An in-call message: MIME type to payload.
     CallMessage { account: String, call: String, from: String, payloads: Details },
+    /// A message straight from a peer's device, outside any call or conversation (it is
+    /// not kept in the history).
+    AccountMessage { account: String, from: String, payloads: Details },
     MediaChangeRequested { account: String, call: String, media: Vec<Media> },
     MediaNegotiation { call: String, event: String, media: Vec<Media> },
     DecodingStarted { id: String, width: i64, height: i64, mixer: bool },
@@ -123,6 +126,7 @@ impl Event {
             }
             "StateChange" => Event::CallState { account: s(a, 0), call: s(a, 1), state: s(a, 2), code: n(a, 3) },
             "IncomingCall" => Event::IncomingCall { account: s(a, 0), call: s(a, 1), from: s(a, 2), media: de(a, 3) },
+            "IncomingAccountMessage" => Event::AccountMessage { account: s(a, 0), from: s(a, 1), payloads: de(a, 3) },
             "IncomingMessage" => {
                 Event::CallMessage { account: s(a, 0), call: s(a, 1), from: s(a, 2), payloads: de(a, 3) }
             }

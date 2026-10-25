@@ -217,6 +217,7 @@ registerHandlers()
     FORWARD(ConfigurationSignal::ProfileReceived);
     FORWARD(ConfigurationSignal::ComposingStatusChanged);
     FORWARD(ConfigurationSignal::AccountMessageStatusChanged);
+    FORWARD(ConfigurationSignal::IncomingAccountMessage);
     // Conversations
     FORWARD(ConversationSignal::SwarmLoaded);
     FORWARD(ConversationSignal::SwarmMessageReceived);
@@ -413,6 +414,8 @@ dispatch(const std::string& m, const Json::Value& a)
         return toJson(getCallDetails(str(a, 0), str(a, 1)));
     if (m == "getCallList")
         return toJson(getCallList(str(a, 0)));
+    if (m == "sendAccountTextMessage")
+        return toJson(sendAccountTextMessage(str(a, 0), str(a, 1), smap(a, 2), flag(a, 3) ? 1 : 0));
     if (m == "sendTextMessage")
         return sendTextMessage(str(a, 0), str(a, 1), smap(a, 2), str(a, 3), flag(a, 4)), Json::Value();
     // Video

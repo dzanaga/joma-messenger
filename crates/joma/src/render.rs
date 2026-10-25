@@ -12,6 +12,7 @@ use gpui::{
 use smallvec::smallvec;
 
 use crate::app::*;
+use joma_quick::ipc::Reply;
 use crate::model::{CallState, Conversation, MsgKind};
 use crate::theme::Theme;
 
@@ -111,8 +112,7 @@ impl Joma {
                 }
             }
         }
-        let call = self.active_call().map(|c| c.id.clone());
-        let state = call.as_ref().and_then(|c| self.desk.viewer(c)).map(|v| v.state.lock().unwrap().clone());
+        let state = self.viewing_key().and_then(|k| self.desk.viewer(&k)).map(|v| v.state.lock().unwrap().clone());
         match state {
             Some(st) => {
                 if let Some(p) = st.picture {
@@ -412,8 +412,21 @@ impl Joma {
             .bg(t.panel)
             .child(div().flex().flex_wrap().items_center().justify_between().gap(px(6.)).px(px(12.)).py(px(6.)).child(status).child(controls));
         if let Some(image) = stage_image {
-            let bg = t.bar;
-            let stage = canvas(
+            let stage = self.stage_canvas(t, image, pointer);
+            panel = panel
+                .when(self.stage, |d| d.flex_1())
+                .child(div().relative().when(self.stage, |d| d.flex_1()).when(!self.stage, |d| d.h(px(260.))).child(stage))
+                .when_some(info, |d, i| d.child(div().px(px(12.)).py(px(3.)).text_size(px(t.size - 2.)).text_color(t.muted).child(i)));
+        } else if let Some(note) = session.and_then(|s| s.note.clone()) {
+            panel = panel.child(div().px(px(12.)).pb(px(6.)).text_size(px(t.size - 2.)).text_color(t.yellow).child(note));
+        }
+        Some(panel.into_any_element())
+    }
+
+    /// A peer's desktop (or video), fitted, with their pointer on top.
+    fn stage_canvas(&self, t: &Theme, image: Arc<RenderImage>, pointer: Option<(joma_desk::view::Pointer, Arc<RenderImage>)>) -> AnyElement {
+        let bg = t.bar;
+        canvas(
                 |_, _, _| {},
                 move |bounds, _, window, _| {
                     window.paint_quad(gpui::fill(bounds, bg));
@@ -435,15 +448,76 @@ impl Joma {
                     }
                 },
             )
-            .size_full();
-            panel = panel
-                .when(self.stage, |d| d.flex_1())
-                .child(div().relative().when(self.stage, |d| d.flex_1()).when(!self.stage, |d| d.h(px(260.))).child(stage))
-                .when_some(info, |d, i| d.child(div().px(px(12.)).py(px(3.)).text_size(px(t.size - 2.)).text_color(t.muted).child(i)));
-        } else if let Some(note) = session.and_then(|s| s.note.clone()) {
-            panel = panel.child(div().px(px(12.)).pb(px(6.)).text_size(px(t.size - 2.)).text_color(t.yellow).child(note));
+            .size_full()
+            .into_any_element()
+    }
+
+    /// Shares without a call: an offer to answer, ours running, or theirs on the stage.
+    fn direct_panels(&self, t: &Theme, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        use crate::desk::{direct_peer, Sharing, Viewing};
+        let mut out = Vec::new();
+        for key in self.desk.direct_sessions() {
+            let Some(s) = self.desk.sessions.get(&key) else { continue };
+            let name = self.model.name_of(direct_peer(&key).unwrap_or_default());
+            let (text, asked) = match (&s.viewing, &s.sharing) {
+                (Viewing::Asked { .. }, _) => (format!("{name} wants to show you their screen"), true),
+                (Viewing::On { .. }, _) => (format!("{G_EYE} {name}'s screen"), false),
+                (Viewing::Querying { .. } | Viewing::Opening { .. }, _) => (format!("connecting to {name}'s screen…"), false),
+                (Viewing::Off, Sharing::Off) => continue,
+                (Viewing::Off, _) => (format!("{G_DESKTOP} {} · {name}", s.sharing_label().unwrap_or("sharing")), false),
+            };
+            let (k1, k2) = (key.clone(), key.clone());
+            let controls = div()
+                .flex()
+                .gap(px(6.))
+                .when(asked, |d| {
+                    d.child(button(SharedString::from(format!("watch-{key}")), G_EYE, "watch", t, true).on_click(cx.listener(move |this, _, _, cx| this.watch_direct(&k1, cx))))
+                })
+                .when(self.desk.viewer(&key).is_some(), |d| {
+                    d.child(button(SharedString::from(format!("stage-{key}")), G_EXPAND, "", t, self.stage).on_click(cx.listener(|this, _, _, cx| {
+                        this.stage = !this.stage;
+                        cx.notify();
+                    })))
+                })
+                .child(
+                    button(SharedString::from(format!("stop-{key}")), G_TIMES, if asked { "decline" } else { "stop" }, t, false)
+                        .text_color(t.red)
+                        .on_click(cx.listener(move |this, _, _, cx| this.stop_direct(&k2, cx))),
+                );
+            let mut panel = div()
+                .flex()
+                .flex_col()
+                .border_b_1()
+                .border_color(t.border)
+                .bg(if asked { t.accent_bg } else { t.panel })
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(6.))
+                        .px(px(12.))
+                        .py(px(6.))
+                        .child(div().flex_1().min_w(px(0.)).truncate().text_color(t.bright).child(text))
+                        .child(controls.flex_none()),
+                );
+            if let (Some(v), Some(f)) = (self.desk.viewer(&key), self.desk_frame.as_ref()) {
+                let (pointer, info) = {
+                    let st = v.state.lock().unwrap();
+                    (
+                        self.pointer.as_ref().map(|p| (st.pointer.clone(), p.image.clone())),
+                        format!("{} · {}→{} · {:.0} fps", st.chroma, st.remote_pipeline, st.local_pipeline, st.fps),
+                    )
+                };
+                let stage = self.stage_canvas(t, f.image.clone(), pointer);
+                panel = panel
+                    .when(self.stage, |d| d.flex_1())
+                    .child(div().relative().when(self.stage, |d| d.flex_1()).when(!self.stage, |d| d.h(px(260.))).child(stage))
+                    .child(div().px(px(12.)).py(px(3.)).text_size(px(t.size - 2.)).text_color(t.muted).child(info));
+            }
+            out.push(panel.into_any_element());
         }
-        Some(panel.into_any_element())
+        out
     }
 
     fn messages(&self, t: &Theme, conv: &Conversation, cx: &mut Context<Self>) -> AnyElement {
@@ -518,12 +592,14 @@ impl Joma {
     fn chat(&mut self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let conv = self.selected.as_ref().and_then(|s| self.model.conversations.get(s)).cloned();
         let call_panel = self.call_panel(t, conv.as_ref(), cx);
+        let direct = self.direct_panels(t, cx);
         let Some(conv) = conv else {
             return div()
                 .flex()
                 .flex_col()
                 .flex_1()
                 .when_some(call_panel, |d, p| d.child(p))
+                .children(direct)
                 .child(
                     div()
                         .flex()
@@ -570,7 +646,14 @@ impl Joma {
                         cx.notify();
                     })))
                     .when(!has_call && !conv.request, |d| {
-                        d.child(button("call-a", G_PHONE, "", t, false).on_click(cx.listener(|this, _, _, cx| this.place_call(false, cx))))
+                        d.child(button("share-d", G_DESKTOP, "", t, false).on_click(cx.listener(|this, _, _, cx| {
+                            if let Some(conv) = this.selected.clone() {
+                                if let Reply::Error { message } = this.share_direct(&conv, cx) {
+                                    this.show_flash(message, cx);
+                                }
+                            }
+                        })))
+                        .child(button("call-a", G_PHONE, "", t, false).on_click(cx.listener(|this, _, _, cx| this.place_call(false, cx))))
                             .child(button("call-v", G_VIDEO, "", t, false).on_click(cx.listener(|this, _, _, cx| this.place_call(true, cx))))
                     }),
             );
@@ -619,6 +702,7 @@ impl Joma {
             .min_w(px(0.))
             .child(header)
             .when_some(call_panel, |d, p| d.child(p))
+            .children(direct)
             .when(!self.stage, |d| {
                 d.child(body)
                     .when_some(quick, |d, q| d.child(q))

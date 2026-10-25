@@ -21,19 +21,25 @@ Audio or video calls (Ctrl+Shift+C / V), answer (Ctrl+Shift+A), hang up (Ctrl+Sh
 mute, camera. Remote video in the call panel; F11 fills the window.
 
 ## Desktop share
-Ctrl+Shift+S in a call. With a Joma peer: gliff's pipeline, sharp text, the pointer drawn
-on the viewer. Otherwise: Jami's screen share through the portal.
+Without a call: the screen button in a conversation's header, the bar widget's share
+button or `joma share <to>`. The other Joma asks its user ("… wants to show you their
+screen": watch or decline, or `joma watch <to>`); no call starts and nothing goes into
+the history. Either side stops it; the sharer's share ends when the viewer leaves. If the
+peer has no Joma, Joma calls them with the microphone off and shares through Jami.
+In a call: Ctrl+Shift+S. With a Joma peer: gliff's pipeline, sharp text, the pointer
+drawn on the viewer. Otherwise: Jami's screen share through the portal.
 
 ## Quick Messages
-Ctrl+. and Alt+1…9 in the window; `joma quick` popup; `joma send`; the Omarchy bar
-widget: contacts with pinned and unread on top, then whoever is online; click one for a
-quick chat (latest messages, reply box, quick messages) with buttons to call, video
-call, call and share the screen, send a file or open the conversation in Joma. Its icon
-is the Joma hexagon in the Omarchy theme's accent colour, dimmed while Joma is not running
-(click it then to start Joma).
+Ctrl+. and Alt+1…9 in the window; `joma send`; the Omarchy bar widget: contacts with
+pinned and unread on top, then whoever is online; click one for a quick chat (latest
+messages, reply box) with buttons to call, video call, share the screen, send a file or
+open the conversation in Joma. Its icon is the pixel-art jm in the bar's colour; the j's
+dot fills green while messages are unread (`unreadColor` in the widget's entry in
+`~/.config/omarchy/shell.json`). Dimmed while Joma is not running (click it then to
+start Joma).
 
 ## Command line
-`joma chat <to> [n]` (JSON), `joma call <to> [--video]`, `joma share <to>`,
+`joma chat <to> [n]` (JSON), `joma call <to> [--video]`, `joma share <to>`, `joma watch <to>`,
 `joma send-file <to> [path]`, `joma open <to>`, `joma quit`, `joma probe [--bench]` (the
 GPUs the desktop share can use).
 
@@ -42,6 +48,10 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
+- 2026-10-25 night: desktop share without a call (falls back to a call with the
+  microphone off for peers without Joma), `joma watch`; the pixel-art icon (app and bar,
+  configurable unread colour on the j's dot); the `joma quick` window and the quick
+  messages under the bar chat are gone.
 - 2026-10-25 evening: receiving files (`~/Downloads/joma/`, automatic up to 20 MB);
   closing the window keeps Joma running; `joma quit`; the bar icon is the Joma hexagon
   in the theme's accent colour.

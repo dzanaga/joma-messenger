@@ -9,10 +9,11 @@ share built on [gliff](https://github.com/omacom/gliff)'s streaming pipeline (sh
 - **Messages:** conversations, requests, history, typing, unread counts, notifications.
 - **Calls:** audio and video, mute, camera, remote video.
 - **Desktop share:** Joma to Joma through gliff's capture and H.264 pipeline over a
-  Jami peer-to-peer tunnel; Jami's portal screen share with other clients.
+  Jami peer-to-peer tunnel, with or without a call; Jami's portal screen share with
+  other clients.
 - **Quick Messages:** canned messages to favourite contacts, from the window
-  (Ctrl+. and Alt+1…9), a popup (`joma quick`), the CLI (`joma send`) and an Omarchy
-  bar widget (`omarchy-plugin/`).
+  (Ctrl+. and Alt+1…9), the CLI (`joma send`) and an Omarchy bar widget
+  (`omarchy-plugin/`).
 
 Joma runs the Jami daemon (libjami) inside its own process, so it cannot run at the same
 time as the Jami app on the same account: quit Jami first.
@@ -41,7 +42,7 @@ gliff needs (Vulkan loader, libva, mesa). Then `cargo build --release`; the bina
 
 ```
 joma                      open Joma (or raise it)
-joma quick                quick-message popup (bind it to a key in Hyprland)
+joma share <to>           share your desktop (no call needed)
 joma send <to> <text>     send a message to a conversation, name or ID
 joma send-quick <to> <n>  send quick message n
 ```

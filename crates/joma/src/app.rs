@@ -123,7 +123,6 @@ pub struct Joma {
     adding: Option<String>,
     repaint_queued: Arc<AtomicBool>,
     composing_sent: Option<Instant>,
-    pub quick_popup: Option<gpui::WindowHandle<crate::popup::QuickPopup>>,
     /// Peers whose presence we follow.
     subscribed: HashSet<String>,
     /// Calls placed to share the desktop: the share starts once they connect.
@@ -271,7 +270,6 @@ impl Joma {
             adding: None,
             repaint_queued: Arc::new(AtomicBool::new(false)),
             composing_sent: None,
-            quick_popup: None,
             subscribed: HashSet::new(),
             share_on_connect: HashSet::new(),
             downloads: HashMap::new(),
@@ -460,6 +458,11 @@ impl Joma {
         for after in self.desk.tick(&acc) {
             self.after(after, cx);
         }
+        for (uri, note) in self.desk.reap_direct() {
+            if let Some(note) = note {
+                self.show_flash(format!("{}: {note}", self.model.name_of(&uri)), cx);
+            }
+        }
         // A call placed to share starts sharing once connected: at the peer's Joma hello,
         // or after three seconds without one (then Jami's own share).
         self.share_on_connect.retain(|id| self.model.calls.contains_key(id));
@@ -491,7 +494,14 @@ impl Joma {
             AppMsg::Share(call, ev) => {
                 match ev {
                     ShareEvent::ViewerConnected { pipeline } => self.show_flash(format!("peer is watching · {pipeline} encoding"), cx),
-                    ShareEvent::ViewerLeft => self.show_flash("peer stopped watching", cx),
+                    ShareEvent::ViewerLeft => {
+                        // Without a call there is nothing else to keep the share for.
+                        if crate::desk::direct_peer(&call).is_some() {
+                            let acc = self.model.account.clone();
+                            self.desk.stop(&acc, &call, "", true);
+                        }
+                        self.show_flash("peer stopped watching", cx)
+                    }
                     ShareEvent::Error(e) => self.show_flash(format!("desktop share: {e}"), cx),
                 }
                 let _ = call;
@@ -538,6 +548,16 @@ impl Joma {
                             }
                         }
                     }
+                    self.after(after, cx);
+                    cx.notify();
+                }
+                return;
+            }
+            Event::AccountMessage { account, from, payloads } if *account == acc => {
+                if let Some(msg) = payloads.get(MIME).and_then(|p| DeskMsg::decode(p)) {
+                    let peer = bare_uri(from).to_owned();
+                    let key = crate::desk::direct_key(&peer);
+                    let (_, after) = self.desk.message(&acc, &key, &peer, msg);
                     self.after(after, cx);
                     cx.notify();
                 }
@@ -674,9 +694,65 @@ impl Joma {
     }
 
     fn after(&mut self, after: After, cx: &mut Context<Self>) {
-        if let After::Portal(call) = after {
-            self.start_portal(call, cx);
+        match after {
+            After::Nothing => {}
+            After::Portal(call) => self.start_portal(call, cx),
+            After::Call(uri) => {
+                // The peer has no Joma: call them with the microphone off and share there.
+                let conv = self.model.ordered().iter().find(|c| c.peers.len() == 1 && bare_uri(&c.peers[0]) == bare_uri(&uri)).map(|c| c.id.clone());
+                match conv {
+                    Some(conv) if self.active_call().is_none() => {
+                        if let Some(id) = self.place_call_with(&conv, false, true, cx) {
+                            self.share_on_connect.insert(id);
+                            self.show_flash("no Joma there: calling with the microphone off to share", cx);
+                        }
+                    }
+                    _ => self.show_flash("could not share the desktop", cx),
+                }
+            }
+            After::Asked(key) => {
+                let who = crate::desk::direct_peer(&key).map(|u| self.model.name_of(u)).unwrap_or_default();
+                notify_desktop(&format!("{who} wants to show you their screen"), "Open Joma to watch");
+                self.show_flash(format!("{who} wants to show you their screen"), cx);
+            }
         }
+    }
+
+    /// Share the desktop with a conversation's peer without a call.
+    pub fn share_direct(&mut self, conv: &str, cx: &mut Context<Self>) -> Reply {
+        let Some(peer) = self.model.conversations.get(conv).filter(|c| c.peers.len() == 1).map(|c| c.peers[0].clone()) else {
+            return Reply::Error { message: "sharing without a call needs a one-to-one conversation".into() };
+        };
+        let acc = self.model.account.clone();
+        let tx = self.tx.clone();
+        let key = crate::desk::direct_key(&peer);
+        let after = self.desk.start_direct(&acc, &peer, move |ev| {
+            let _ = tx.unbounded_send(AppMsg::Share(key.clone(), ev));
+        });
+        self.after(after, cx);
+        cx.notify();
+        Reply::Done
+    }
+
+    /// Stop a share without a call (`key` from [`crate::desk::direct_key`]): ours, or the
+    /// one we watch or were asked to watch.
+    pub fn stop_direct(&mut self, key: &str, cx: &mut Context<Self>) {
+        let acc = self.model.account.clone();
+        let s = self.desk.session(key);
+        if !matches!(s.sharing, crate::desk::Sharing::Off) {
+            self.desk.stop(&acc, key, "", true);
+        }
+        if !matches!(self.desk.session(key).viewing, crate::desk::Viewing::Off) {
+            self.desk.decline_offer(&acc, key);
+        }
+        cx.notify();
+    }
+
+    pub fn watch_direct(&mut self, key: &str, cx: &mut Context<Self>) {
+        let acc = self.model.account.clone();
+        self.desk.accept_offer(&acc, key);
+        self.stage = true;
+        cx.notify();
     }
 
     // ---- Conversations ----------------------------------------------------------
@@ -846,6 +922,16 @@ impl Joma {
     // ---- Calls ------------------------------------------------------------------
 
     /// The call of the selected conversation, or else any call.
+    /// The share being watched: the current call's, else one without a call.
+    pub fn viewing_key(&self) -> Option<String> {
+        if let Some(c) = self.active_call() {
+            if self.desk.viewer(&c.id).is_some() {
+                return Some(c.id.clone());
+            }
+        }
+        self.desk.direct_sessions().into_iter().find(|k| self.desk.viewer(k).is_some())
+    }
+
     pub fn active_call(&self) -> Option<&Call> {
         let sel = self.selected.as_deref();
         self.model
@@ -865,11 +951,16 @@ impl Joma {
 
     /// Call a conversation; returns the call id.
     pub fn place_call_to(&mut self, conv: &str, video: bool, cx: &mut Context<Self>) -> Option<String> {
+        self.place_call_with(conv, video, false, cx)
+    }
+
+    /// Call a conversation, with the microphone off if `mic_off`; returns the call id.
+    fn place_call_with(&mut self, conv: &str, video: bool, mic_off: bool, cx: &mut Context<Self>) -> Option<String> {
         let conv = self.model.conversations.get(conv).cloned()?;
         let peer = conv.peers.first().cloned()?;
         let to = if conv.peers.len() == 1 { peer.clone() } else { format!("swarm:{}", conv.id) };
         let camera = camera_source();
-        let mut media = vec![joma_jami::media(joma_jami::AUDIO, "audio_0", "", false)];
+        let mut media = vec![joma_jami::media(joma_jami::AUDIO, "audio_0", "", mic_off)];
         if video {
             media.push(joma_jami::media(joma_jami::VIDEO, "video_0", &camera, camera.is_empty()));
         }
@@ -877,6 +968,7 @@ impl Joma {
             Ok(id) if !id.is_empty() => {
                 let mut call = Call::new(&id, &peer, Some(conv.id.clone()), CallState::Connecting, video);
                 call.muted_video = !video || camera.is_empty();
+                call.muted_audio = mic_off;
                 self.model.calls.insert(id.clone(), call);
                 cx.notify();
                 return Some(id);
@@ -1041,13 +1133,6 @@ impl Joma {
                 raise(window);
                 Reply::Done
             }
-            Request::QuickPopup => {
-                self.quick = QuickConfig::load();
-                // Opening a window inside this update would block on Wayland.
-                let me = cx.entity();
-                cx.defer(move |cx| crate::popup::open(me, cx));
-                Reply::Done
-            }
             Request::Quick => {
                 self.quick = QuickConfig::load();
                 Reply::Quick(self.quick_state())
@@ -1085,15 +1170,8 @@ impl Joma {
                         Some(c) => {
                             self.share_on_connect.insert(c.id);
                         }
-                        None if self.active_call().is_some() => {
-                            return Reply::Error { message: "another call is running".into() };
-                        }
-                        None => match self.place_call_to(&conv, false, cx) {
-                            Some(id) => {
-                                self.share_on_connect.insert(id);
-                            }
-                            None => return Reply::Error { message: "the call could not start".into() },
-                        },
+                        // No call: share straight away, without one.
+                        None => return self.share_direct(&conv, cx),
                     }
                     Reply::Done
                 }
@@ -1106,6 +1184,21 @@ impl Joma {
                         self.pick_and_send(conv, cx);
                         Reply::Done
                     }
+                },
+                Err(e) => e,
+            },
+            Request::Watch { to } => match self.target(&to) {
+                Ok(conv) => match self.model.conversations.get(&conv).and_then(|c| c.peers.first()).cloned() {
+                    Some(peer) => {
+                        let key = crate::desk::direct_key(&peer);
+                        if !matches!(self.desk.session(&key).viewing, crate::desk::Viewing::Asked { .. }) {
+                            return Reply::Error { message: "no desktop offered".into() };
+                        }
+                        self.watch_direct(&key, cx);
+                        raise(window);
+                        Reply::Done
+                    }
+                    None => Reply::Error { message: "no peer in that conversation".into() },
                 },
                 Err(e) => e,
             },

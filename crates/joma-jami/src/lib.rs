@@ -305,6 +305,13 @@ pub fn send_call_message(account: &str, call_id: &str, payloads: &Details) -> Re
     call("sendTextMessage", json!([account, call_id, payloads, "", false])).map(drop)
 }
 
+/// Send a message straight to a peer's devices, outside calls and conversations: not
+/// kept in any history, delivered as [`Event::AccountMessage`]. `connected_only` skips
+/// devices without an open connection instead of going through the DHT.
+pub fn send_account_message(account: &str, to: &str, payloads: &Details, connected_only: bool) -> Result<()> {
+    call("sendAccountTextMessage", json!([account, to, payloads, connected_only])).map(drop)
+}
+
 // ---- Video -------------------------------------------------------------------
 
 pub fn video_devices() -> Result<Vec<String>> {
