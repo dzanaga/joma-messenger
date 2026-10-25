@@ -188,7 +188,24 @@ pub fn bare_uri(uri: &str) -> &str {
 
 /// The display name inside a vCard (`FN:`).
 pub fn vcard_name(vcard: &str) -> Option<String> {
-    vcard.lines().find_map(|l| l.strip_prefix("FN:").or_else(|| l.strip_prefix("FN;CHARSET=utf-8:"))).map(|n| n.trim().to_owned()).filter(|n| !n.is_empty())
+    // `FN:name`, or with parameters (`FN;CHARSET=UTF-8:name`), in any case.
+    vcard
+        .lines()
+        .find_map(|l| {
+            let (key, value) = l.split_once(':')?;
+            let prop = key.split(';').next()?;
+            prop.eq_ignore_ascii_case("FN").then(|| value.trim().to_owned())
+        })
+        .filter(|n| !n.is_empty())
+}
+
+/// The vCard of a `ProfileReceived` event: the daemon passes the file's path.
+fn vcard_text(vcard: &str) -> String {
+    if !vcard.contains('\n') && std::path::Path::new(vcard).is_file() {
+        std::fs::read_to_string(vcard).unwrap_or_default()
+    } else {
+        vcard.to_owned()
+    }
 }
 
 #[derive(Debug, Default)]
@@ -197,6 +214,8 @@ pub struct Model {
     /// Our own URI (40 hex digits).
     pub me: String,
     pub my_name: String,
+    /// Our registered username, empty without one.
+    pub username: String,
     pub registration: String,
     pub conversations: HashMap<String, Conversation>,
     /// Names and registered names of peers, by bare URI.
@@ -417,7 +436,7 @@ impl Model {
                 }
             }
             Event::ProfileReceived { account, from, vcard } if *account == self.account => {
-                if let Some(n) = vcard_name(vcard) {
+                if let Some(n) = vcard_name(&vcard_text(vcard)) {
                     self.names.insert(bare_uri(from).to_owned(), n);
                     self.retitle();
                     ch.any = true;
@@ -530,6 +549,19 @@ mod tests {
         assert!(m.take_unsent(t + SEND_TIMEOUT).is_empty());
         assert_eq!(m.take_unsent(t + SEND_TIMEOUT * 2), vec![("c1".to_string(), "lost".to_string())]);
         assert!(m.unconfirmed.is_empty());
+    }
+
+    #[test]
+    fn vcard_names_with_parameters_and_from_files() {
+        assert_eq!(vcard_name("BEGIN:VCARD\nFN:Alice\nEND:VCARD"), Some("Alice".into()));
+        assert_eq!(vcard_name("BEGIN:VCARD\r\nFN;CHARSET=UTF-8:Bob B\r\nEND:VCARD"), Some("Bob B".into()));
+        assert_eq!(vcard_name("BEGIN:VCARD\nFN:\nEND:VCARD"), None);
+        let path = std::env::temp_dir().join(format!("joma-test-{}.vcf", std::process::id()));
+        std::fs::write(&path, "BEGIN:VCARD\nVERSION:2.1\nFN:Carol\nEND:VCARD\n").unwrap();
+        let mut m = model();
+        m.apply(&Event::ProfileReceived { account: "acc".into(), from: "ring:bob".into(), vcard: path.to_string_lossy().into() });
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(m.name_of("bob"), "Carol");
     }
 
     #[test]

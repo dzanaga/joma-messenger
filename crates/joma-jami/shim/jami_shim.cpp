@@ -214,6 +214,7 @@ registerHandlers()
     FORWARD(ConfigurationSignal::ContactAdded);
     FORWARD(ConfigurationSignal::ContactRemoved);
     FORWARD(ConfigurationSignal::RegisteredNameFound);
+    FORWARD(ConfigurationSignal::NameRegistrationEnded);
     FORWARD(ConfigurationSignal::ProfileReceived);
     FORWARD(ConfigurationSignal::ComposingStatusChanged);
     FORWARD(ConfigurationSignal::AccountMessageStatusChanged);

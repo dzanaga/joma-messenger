@@ -72,7 +72,18 @@ pub enum Mode {
     Add,
     /// The input filters conversations.
     Search,
+    /// The input registers our username.
+    Username,
 }
+
+/// A username the name server can take: 3 to 32 of a-z, 0-9, `-` and `_`, lower-cased.
+pub fn valid_username(name: &str) -> Option<String> {
+    let n = name.trim().trim_start_matches('@').to_lowercase();
+    let ok = (3..=32).contains(&n.len()) && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    ok.then_some(n)
+}
+
+pub const USERNAME_RULE: &str = "3 to 32 letters, digits, - or _";
 
 /// Why the daemon is not running yet.
 #[derive(Clone, PartialEq, Eq)]
@@ -121,6 +132,10 @@ pub struct Joma {
     pub focus_composer: bool,
     /// Add-contact lookups in flight: the typed name.
     adding: Option<String>,
+    /// Creating an account: the name typed in the first step.
+    pub onboard_name: Option<String>,
+    /// A username to register once the new account is online.
+    pending_username: Option<String>,
     repaint_queued: Arc<AtomicBool>,
     composing_sent: Option<Instant>,
     /// Peers whose presence we follow.
@@ -295,6 +310,8 @@ impl Joma {
             pinned_bottom: true,
             focus_composer: false,
             adding: None,
+            onboard_name: None,
+            pending_username: None,
             repaint_queued: Arc::new(AtomicBool::new(false)),
             composing_sent: None,
             subscribed: HashSet::new(),
@@ -373,12 +390,13 @@ impl Joma {
         let volatile = joma_jami::volatile_details(&account).unwrap_or_default();
         self.model = Model {
             me: details.get("Account.username").map(|u| bare_uri(u).to_owned()).unwrap_or_default(),
-            my_name: volatile
-                .get("Account.registeredName")
+            my_name: details
+                .get("Account.displayName")
                 .filter(|n| !n.is_empty())
-                .or_else(|| details.get("Account.displayName"))
+                .or_else(|| volatile.get("Account.registeredName"))
                 .cloned()
                 .unwrap_or_default(),
+            username: volatile.get("Account.registeredName").cloned().unwrap_or_default(),
             registration: volatile.get("Account.registrationStatus").cloned().unwrap_or_default(),
             account,
             ..Default::default()
@@ -471,7 +489,9 @@ impl Joma {
         let chat = self.gate == Gate::Ready && self.selected.as_ref().is_some_and(|s| !self.model.conversations.get(s).is_some_and(|c| c.request));
         self.composer.update(cx, |c, _| c.configure(key, theme.clone(), chat));
         let (key, placeholder) = match (self.gate.clone(), self.mode) {
-            (Gate::Onboarding, _) => ("onboarding", "Your name (shown to your contacts)"),
+            (Gate::Onboarding, _) if self.onboard_name.is_none() => ("onboarding", "Your name (shown to your contacts)"),
+            (Gate::Onboarding, _) => ("onboarding-user", "A username, so contacts can find you (Enter alone skips)"),
+            (_, Mode::Username) => ("username", "Your username, then Enter"),
             (_, Mode::Add) => ("add", "Jami username or 40-digit ID, then Enter"),
             (_, Mode::Search) => ("search", "Filter conversations"),
             _ => ("idle", ""),
@@ -479,6 +499,7 @@ impl Joma {
         self.input.update(cx, |c, _| {
             c.configure(key.into(), theme, true);
             c.set_placeholder(placeholder);
+            c.set_allow_empty(key == "onboarding-user");
         });
     }
 
@@ -731,6 +752,41 @@ impl Joma {
         if let Event::DecodingStopped { id } = &ev {
             self.frames.remove(id);
         }
+        if let Event::Registration { account, state } = &ev {
+            // Once online: a new account registers its username, and an account without
+            // a profile (created by Joma 0.2 and earlier) gets one, so contacts see its
+            // name instead of its ID.
+            if *account == acc && state == "REGISTERED" {
+                let has_profile = self.account_dir().is_some_and(|d| d.join("profile.vcf").exists());
+                if !has_profile && !self.model.my_name.is_empty() {
+                    if let Err(e) = joma_jami::update_profile(&acc, &self.model.my_name) {
+                        tracing::warn!(error = %e, "could not write the profile");
+                    }
+                }
+                if let Some(u) = self.pending_username.take() {
+                    if let Err(e) = joma_jami::register_name(&acc, &u) {
+                        self.show_flash(format!("could not register {u}: {e}"), cx);
+                    }
+                }
+            }
+        }
+        if let Event::NameRegistered { account, state, name } = &ev {
+            if *account == acc {
+                let text = match state {
+                    0 => {
+                        self.model.username = name.clone();
+                        if self.model.my_name.is_empty() {
+                            self.model.my_name = name.clone();
+                        }
+                        format!("your username is now {name}")
+                    }
+                    1 => format!("“{name}” is not a valid username ({USERNAME_RULE})"),
+                    3 => format!("“{name}” is taken: choose another (click “choose a username”)"),
+                    _ => format!("could not register “{name}” (name server error {state})"),
+                };
+                self.show_flash(text, cx);
+            }
+        }
         if let Event::NameFound { query, state, address, .. } = &ev {
             if self.adding.as_deref() == Some(query.as_str()) {
                 self.adding = None;
@@ -952,7 +1008,28 @@ impl Joma {
     fn submit_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.input.read(cx).text().trim().to_owned();
         if self.gate == Gate::Onboarding {
-            match joma_jami::create_account(&text) {
+            // Two steps: the name contacts see, then an optional username.
+            let Some(name) = self.onboard_name.clone() else {
+                if text.is_empty() {
+                    self.show_flash("type your name first", cx);
+                    return;
+                }
+                self.onboard_name = Some(text);
+                self.input.update(cx, |c, cx| c.clear(cx));
+                self.configure_inputs(cx);
+                cx.notify();
+                return;
+            };
+            if !text.is_empty() {
+                match valid_username(&text) {
+                    Some(u) => self.pending_username = Some(u),
+                    None => {
+                        self.show_flash(format!("a username has {USERNAME_RULE}"), cx);
+                        return;
+                    }
+                }
+            }
+            match joma_jami::create_account(&name) {
                 Ok(_) => self.show_flash("creating your account…", cx),
                 Err(e) => self.show_flash(format!("could not create the account: {e}"), cx),
             }
@@ -974,6 +1051,16 @@ impl Joma {
                     self.select(id, cx);
                 }
             }
+            Mode::Username => match valid_username(&text) {
+                Some(u) => match joma_jami::register_name(&self.model.account, &u) {
+                    Ok(_) => {
+                        self.show_flash(format!("registering {u}…"), cx);
+                        self.set_mode(Mode::Chat, window, cx);
+                    }
+                    Err(e) => self.show_flash(format!("could not register: {e}"), cx),
+                },
+                None => self.show_flash(format!("a username has {USERNAME_RULE}"), cx),
+            },
             Mode::Chat => {}
         }
     }
@@ -1494,4 +1581,13 @@ mod tests {
         assert_eq!(base64_decode("aGVsbG8=").unwrap(), b"hello");
         assert_eq!(base64_decode("YWJjZA").unwrap(), b"abcd");
     }
+
+    #[test]
+    fn usernames() {
+        assert_eq!(valid_username(" @Diego_G "), Some("diego_g".into()));
+        assert_eq!(valid_username("ab"), None);
+        assert_eq!(valid_username("no spaces"), None);
+        assert_eq!(valid_username("dé"), None);
+    }
 }
+

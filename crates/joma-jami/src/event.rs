@@ -14,7 +14,11 @@ pub enum Event {
     ContactRemoved { account: String, uri: String },
     TrustRequest { account: String, conversation: String, from: String },
     NameFound { account: String, query: String, state: i64, address: String, name: String },
+    /// A peer's profile; `vcard` is the path of the vCard file the daemon saved.
     ProfileReceived { account: String, from: String, vcard: String },
+    /// [`crate::register_name`] finished: `state` 0 success, 1 invalid name, 2 invalid
+    /// credentials, 3 already taken, 4 and above an error.
+    NameRegistered { account: String, state: i64, name: String },
     Composing { account: String, conversation: String, from: String, composing: bool },
     MessageStatus { account: String, conversation: String, peer: String, message: String, state: i64 },
     SwarmLoaded { request: u32, account: String, conversation: String, messages: Vec<SwarmMessage> },
@@ -84,6 +88,7 @@ impl Event {
                 address: s(a, 3),
                 name: s(a, 4),
             },
+            "NameRegistrationEnded" => Event::NameRegistered { account: s(a, 0), state: n(a, 1), name: s(a, 2) },
             "ProfileReceived" => Event::ProfileReceived { account: s(a, 0), from: s(a, 1), vcard: s(a, 2) },
             "ComposingStatusChanged" => Event::Composing {
                 account: s(a, 0),

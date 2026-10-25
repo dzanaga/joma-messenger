@@ -186,6 +186,14 @@ pub fn create_account(display_name: &str) -> Result<String> {
     typed("addAccount", json!([details]))
 }
 
+/// Set the profile peers receive (the vCard's name; no avatar change). The daemon sends
+/// it to contacts.
+pub fn update_profile(account: &str, display_name: &str) -> Result<()> {
+    call("updateProfile", json!([account, display_name, "", "", "", 0])).map(drop)
+}
+
+/// Register `name` on the name server for this account; the answer arrives as
+/// [`Event::NameRegistered`].
 pub fn register_name(account: &str, name: &str) -> Result<bool> {
     typed("registerName", json!([account, name]))
 }

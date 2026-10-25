@@ -1,5 +1,12 @@
 # Features
 
+## Account
+Creating an account asks for your name (what contacts see), then an optional username:
+it is registered on Jami's name server once the account is online, so contacts can find
+you by it. Without one, "choose a username" in the top bar registers it later. Joma
+writes the profile contacts receive (accounts made by Joma 0.2 and earlier had none, so
+contacts saw a 40-digit ID; it is added the next time the account comes online).
+
 ## Messages
 Conversations newest first, requests on top (accept with Ctrl+Enter). Add a contact by
 Jami username or ID (Ctrl+N). History, typing indicator, unread counts, desktop
@@ -53,6 +60,9 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
+- unreleased: usernames (at account creation, or "choose a username"); contacts see your
+  name instead of your ID (the missing profile is written; received profiles are read
+  from the file the daemon names).
 - 0.2.0 (2026-10-25): remote video in calls works (it crashed Joma); the version next to
   "joma" in the top bar; a green dot on online contacts in the list; a paused Joma also
   stops a desktop share in progress.

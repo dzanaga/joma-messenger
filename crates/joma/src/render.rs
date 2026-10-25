@@ -142,7 +142,7 @@ impl Joma {
         }
     }
 
-    fn top_bar(&self, t: &Theme) -> AnyElement {
+    fn top_bar(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let reg = self.model.registration.as_str();
         let (dot, color) = match reg {
             "REGISTERED" => ("online", t.green),
@@ -180,6 +180,20 @@ impl Joma {
                     } else {
                         self.model.my_name.clone()
                     }))
+                    .when(!self.model.username.is_empty(), |d| {
+                        d.child(div().text_color(t.muted).child(format!("@{}", self.model.username)))
+                    })
+                    .when(self.model.username.is_empty() && self.gate == Gate::Ready, |d| {
+                        d.child(
+                            div()
+                                .id("choose-username")
+                                .text_color(t.yellow)
+                                .cursor_pointer()
+                                .hover(|d| d.text_color(t.accent))
+                                .child("choose a username")
+                                .on_click(cx.listener(|this, _, window, cx| this.set_mode(Mode::Username, window, cx))),
+                        )
+                    })
                     .when(!dot.is_empty(), |d| d.child(div().text_color(color).child(format!("● {dot}")))),
             )
             .child(
@@ -302,6 +316,7 @@ impl Joma {
                         .pb(px(6.))
                         .child(div().text_color(t.muted).text_size(px(t.size - 2.)).pb(px(3.)).child(match self.mode {
                             Mode::Add => "add a contact",
+                            Mode::Username => "choose your username (contacts find you by it)",
                             _ => "filter",
                         }))
                         .child(self.input.clone()),
@@ -726,6 +741,7 @@ impl Joma {
             None => div().text_color(t.muted).child(match self.mode {
                 Mode::Add => "enter: add · esc: cancel",
                 Mode::Search => "enter: open first · esc: cancel",
+                Mode::Username => "enter: register · esc: cancel",
                 Mode::Chat => "alt+j/k: conversations · ctrl+n: add · ctrl+k: find · ctrl+shift+c/v: call · ctrl+shift+s: share · ctrl+.: quick",
             }),
         };
@@ -756,7 +772,11 @@ impl Joma {
                 .child(div().text_color(t.accent).font_weight(FontWeight::BOLD).child("Welcome to Joma"))
                 .child(div().child("Joma is a Jami client for Omarchy. Create a Jami account to start: it lives on this machine, no server and no phone number."))
                 .child(self.input.clone())
-                .child(div().text_color(t.muted).text_size(px(t.size - 2.)).child("Enter creates the account. You can register a username later.")),
+                .child(div().text_color(t.muted).text_size(px(t.size - 2.)).child(if self.onboard_name.is_none() {
+                    "Enter: next, a username".to_owned()
+                } else {
+                    format!("Enter creates the account. A username has {USERNAME_RULE}; without one, contacts see your 40-digit ID until they get your profile.")
+                })),
             Gate::Failed(e) => card.child(div().text_color(t.red).child(format!("The Jami daemon failed to start: {e}"))),
             Gate::Ready => card,
         };
@@ -849,7 +869,7 @@ impl Render for Joma {
             .on_action(cx.listener(|this, _: &Quick8, _, cx| this.send_quick(7, cx)))
             .on_action(cx.listener(|this, _: &Quick9, _, cx| this.send_quick(8, cx)))
             .on_mouse_down(MouseButton::Left, |_, _, _| {})
-            .child(self.top_bar(&t))
+            .child(self.top_bar(&t, cx))
             .child(body)
             .child(self.status_line(&t))
     }

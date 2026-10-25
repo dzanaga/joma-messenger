@@ -25,6 +25,8 @@ pub struct Composer {
     enabled: bool,
     bounds: Option<Bounds<Pixels>>,
     placeholder: String,
+    /// Enter also submits an empty text (a step that can be skipped).
+    allow_empty: bool,
 }
 impl EventEmitter<Submit> for Composer {}
 impl EventEmitter<Edited> for Composer {}
@@ -48,6 +50,7 @@ impl Composer {
             enabled: false,
             bounds: None,
             placeholder: "Write a message…".into(),
+            allow_empty: false,
         }
     }
     pub fn configure(&mut self, key: String, theme: std::rc::Rc<Theme>, enabled: bool) {
@@ -64,6 +67,9 @@ impl Composer {
     }
     pub fn set_placeholder(&mut self, p: impl Into<String>) {
         self.placeholder = p.into();
+    }
+    pub fn set_allow_empty(&mut self, allow: bool) {
+        self.allow_empty = allow;
     }
     pub fn text(&self) -> String {
         self.text.clone()
@@ -103,7 +109,7 @@ impl Composer {
         cx.notify();
     }
     fn submit(&mut self, cx: &mut Context<Self>) {
-        if self.enabled && self.marked.is_none() && !self.text.trim().is_empty() {
+        if self.enabled && self.marked.is_none() && (self.allow_empty || !self.text.trim().is_empty()) {
             cx.emit(Submit);
         }
     }
