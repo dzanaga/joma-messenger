@@ -20,6 +20,18 @@ Item {
   property var messages: []
   property string lastResult: ""
 
+  // Asked over IPC; the bar widget on the focused monitor acts on it.
+  signal toggleRequested()
+  signal openRequested()
+  signal closeRequested()
+
+  IpcHandler {
+    target: "io.github.dzanaga.joma-quick"
+    function toggle(): void { root.toggleRequested() }
+    function open(): void { root.openRequested() }
+    function close(): void { root.closeRequested() }
+  }
+
   // The open quick chat, if any.
   property string chatConversation: ""
   property var chat: null

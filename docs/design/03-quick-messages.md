@@ -15,6 +15,9 @@ the list (`recent`, default 6).
   (`joma chat`, polled every 2 s while open) with a reply box, the quick messages, and
   call / video / share screen / send file / open buttons (`joma call`, `joma share`,
   `joma send-file`, `joma open`).
+- `omarchy-shell io.github.dzanaga.joma-quick toggle` (bound to Super+Alt+M here) opens
+  the panel on the focused monitor: the service owns the IPC target, since every bar
+  instantiates the widget and only one handler per target is used.
 - Presence: Joma subscribes to every contact (`subscribeBuddy`); `NewBuddyNotification`
   status above 0 counts as online.
 - `joma share <to>` places an audio call and starts the desktop share once it is

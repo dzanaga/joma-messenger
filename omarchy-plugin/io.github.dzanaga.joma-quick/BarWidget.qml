@@ -1,5 +1,7 @@
 import QtQuick
 import QtQuick.Controls
+import Quickshell
+import Quickshell.Hyprland
 import qs.Commons
 import qs.Ui
 
@@ -57,6 +59,20 @@ BarWidget {
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
+
+  // `omarchy-shell io.github.dzanaga.joma-quick toggle` (Super+Alt+M) reaches the
+  // service; the widget on the focused monitor's bar answers it.
+  readonly property bool onFocusedScreen: {
+    var w = root.QsWindow.window
+    var m = Hyprland.focusedMonitor
+    return !!(w && w.screen && m && m.name === w.screen.name)
+  }
+  Connections {
+    target: root.svc
+    function onToggleRequested() { if (root.onFocusedScreen) root.toggle() }
+    function onOpenRequested() { if (root.onFocusedScreen) root.open() }
+    function onCloseRequested() { root.close() }
+  }
 
   WidgetButton {
     id: button
