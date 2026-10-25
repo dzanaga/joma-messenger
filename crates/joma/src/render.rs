@@ -657,7 +657,7 @@ impl Joma {
         let card = match &self.gate {
             Gate::QtRunning => card
                 .child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child("Jami is open"))
-                .child(div().child("Joma uses the same accounts and history as the Jami app, and only one of them can run at a time. Jami keeps running in the tray after its window is closed: quit it from its tray icon (or run `pkill -x jami`), then retry."))
+                .child(div().child("Joma uses the same accounts and history as the Jami app, and only one of them can run at a time. Jami keeps running in the tray after its window is closed: quit it from its tray icon (or run `pkill -x jami`). Joma comes back by itself once it quits."))
                 .child(button("retry", G_CHECK, "retry", t, true).on_click(cx.listener(|this, _, _, cx| this.boot(cx)))),
             Gate::Onboarding => card
                 .child(div().text_color(t.accent).font_weight(FontWeight::BOLD).child("Welcome to Joma"))

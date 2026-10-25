@@ -174,9 +174,36 @@ pub fn qt_client_running() -> bool {
         .any(|c| c.trim() == "jami")
 }
 
+/// The daemon was started in this process (libjami cannot start twice in one).
+static DAEMON_STARTED: AtomicBool = AtomicBool::new(false);
+
+/// Start Joma over in this process, to run the daemon again after it stepped aside for
+/// the Qt client. A hidden window stays hidden (`JOMA_HIDDEN`).
+fn restart() -> std::io::Error {
+    use std::os::unix::process::CommandExt;
+    let exe = match std::env::current_exe() {
+        Ok(e) => e,
+        Err(e) => return e,
+    };
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(std::env::args_os().skip(1));
+    if crate::hypr::hidden() {
+        cmd.env("JOMA_HIDDEN", "1");
+    } else {
+        cmd.env_remove("JOMA_HIDDEN");
+    }
+    cmd.exec()
+}
+
 /// Is this a test profile (its own XDG data dir), where the Qt client cannot interfere?
 fn own_profile() -> bool {
     std::env::var_os("JOMA_PROFILE").is_some()
+}
+
+/// Does the Qt client share our data, so Joma must not run beside it? Tests set
+/// `JOMA_GUARD_QT` to check the guard in a test profile.
+fn guard_qt() -> bool {
+    !own_profile() || std::env::var_os("JOMA_GUARD_QT").is_some()
 }
 
 /// Show the window, also when closing it had hidden it.
@@ -278,6 +305,18 @@ impl Joma {
         };
         j.configure_inputs(cx);
         j.boot(cx);
+        // Restarted while hidden (see `restart`): hide again once the window is mapped.
+        if std::env::var_os("JOMA_HIDDEN").is_some() {
+            cx.spawn(async move |_, cx| {
+                for _ in 0..20 {
+                    cx.background_executor().timer(Duration::from_millis(100)).await;
+                    if crate::hypr::hide() {
+                        break;
+                    }
+                }
+            })
+            .detach();
+        }
         // Keys reach the actions only through a focused element.
         if j.gate == Gate::Onboarding {
             window.focus(&j.input.focus_handle(cx));
@@ -291,13 +330,18 @@ impl Joma {
 
     /// Start the daemon, unless the Qt client holds the same data.
     pub fn boot(&mut self, cx: &mut Context<Self>) {
-        if !own_profile() && qt_client_running() {
+        if guard_qt() && qt_client_running() {
             self.gate = Gate::QtRunning;
             cx.notify();
             return;
         }
-        static STARTED: AtomicBool = AtomicBool::new(false);
-        if !STARTED.swap(true, Ordering::SeqCst) {
+        if DAEMON_STARTED.load(Ordering::SeqCst) && !joma_jami::running() {
+            let e = restart();
+            self.gate = Gate::Failed(format!("could not restart Joma: {e}"));
+            cx.notify();
+            return;
+        }
+        if !DAEMON_STARTED.swap(true, Ordering::SeqCst) {
             let tx = self.tx.clone();
             // No NO_LOCAL_* flags: libjami keeps audio inputs in its video manager, which
             // NO_LOCAL_VIDEO leaves out, and then crashes when a call starts. Test profiles
@@ -455,7 +499,42 @@ impl Joma {
         }
     }
 
+    /// The Qt client started while our daemon runs: stop it, as two daemons on the same
+    /// data corrupt it. The Qt client does not check for Joma, so Joma has to.
+    fn step_aside(&mut self, cx: &mut Context<Self>) {
+        tracing::warn!("the Jami app started: stopping the daemon until it quits");
+        self.gate = Gate::QtRunning;
+        self.model = Model::default();
+        self.selected = None;
+        self.frames.clear();
+        self.desk_frame = None;
+        self.pointer = None;
+        self.stage = false;
+        self.configure_inputs(cx);
+        joma_jami::stop();
+        notify_desktop("Joma paused", "The Jami app is open and uses the same accounts. Joma resumes when it quits.");
+        cx.notify();
+    }
+
     fn tick(&mut self, cx: &mut Context<Self>) {
+        if guard_qt() {
+            let qt = qt_client_running();
+            if qt && joma_jami::running() {
+                self.step_aside(cx);
+            } else if !qt && self.gate == Gate::QtRunning {
+                self.boot(cx);
+            }
+        }
+        if !joma_jami::running() {
+            return;
+        }
+        for (conv, text) in self.model.take_unsent(Instant::now()) {
+            let title = self.model.conversations.get(&conv).map(|c| c.title.clone()).unwrap_or_else(|| "a conversation that is gone".into());
+            self.show_flash(format!("not sent to {title}: the daemon dropped it"), cx);
+            if !text.is_empty() {
+                self.composer.update(cx, |c, cx| c.restore(&conv, text, cx));
+            }
+        }
         let acc = self.model.account.clone();
         for after in self.desk.tick(&acc) {
             self.after(after, cx);
@@ -487,7 +566,9 @@ impl Joma {
 
     fn handle(&mut self, msg: AppMsg, window: &mut Window, cx: &mut Context<Self>) {
         match msg {
-            AppMsg::Jami(ev) => self.on_event(ev, window, cx),
+            // Signals still queued when the daemon stepped aside are stale.
+            AppMsg::Jami(ev) if joma_jami::running() => self.on_event(ev, window, cx),
+            AppMsg::Jami(_) => {}
             AppMsg::Share(call, ev) => {
                 match ev {
                     ShareEvent::ViewerConnected { pipeline } => self.show_flash(format!("peer is watching · {pipeline} encoding"), cx),
@@ -736,6 +817,7 @@ impl Joma {
         }
         match joma_jami::send_message(&self.model.account, &conv, text.trim_end(), "") {
             Ok(()) => {
+                self.model.sent(&conv, text.trim_end(), Instant::now());
                 self.composer.update(cx, |c, cx| c.clear(cx));
                 let _ = joma_jami::set_composing(&self.model.account, &conv, false);
                 self.composing_sent = None;
@@ -758,6 +840,7 @@ impl Joma {
         let (Some(conv), Some(text)) = (self.selected.clone(), self.quick.messages.get(index).cloned()) else { return };
         match joma_jami::send_message(&self.model.account, &conv, &text, "") {
             Ok(()) => {
+                self.model.sent(&conv, "", Instant::now());
                 self.quick_open = false;
                 self.show_flash(format!("sent “{text}”"), cx);
             }
@@ -1030,7 +1113,10 @@ impl Joma {
             Err(e) => return e,
         };
         match joma_jami::send_message(&self.model.account, &conv, text, "") {
-            Ok(()) => Reply::Done,
+            Ok(()) => {
+                self.model.sent(&conv, "", Instant::now());
+                Reply::Done
+            }
             Err(e) => Reply::Error { message: e.to_string() },
         }
     }

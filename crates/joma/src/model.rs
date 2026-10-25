@@ -2,6 +2,7 @@
 //! fed daemon events and has no UI, so it is tested on its own.
 
 use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 use joma_jami::{Details, Event, SwarmMessage};
 
@@ -205,7 +206,13 @@ pub struct Model {
     pub loading: HashMap<u32, String>,
     /// Peers (bare URIs) reachable now.
     pub online: HashSet<String>,
+    /// Messages sent but not yet seen back from the daemon: conversation, text, when.
+    pub unconfirmed: Vec<(String, String, Instant)>,
 }
+
+/// The daemon echoes a sent message at once (it commits it locally, also offline); one
+/// not echoed by then was dropped, for example in a conversation it no longer has.
+pub const SEND_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// What an event changed, for the UI.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -228,6 +235,19 @@ impl Model {
         let mut member = Details::new();
         member.insert("uri".into(), metadata.get("from").cloned().unwrap_or_default());
         self.set_conversation(id, metadata, &[member], true);
+    }
+
+    /// A message was handed to the daemon for this conversation.
+    pub fn sent(&mut self, conversation: &str, text: &str, at: Instant) {
+        self.unconfirmed.push((conversation.to_owned(), text.to_owned(), at));
+    }
+
+    /// Sends the daemon did not echo within [`SEND_TIMEOUT`]: conversation and text.
+    pub fn take_unsent(&mut self, now: Instant) -> Vec<(String, String)> {
+        let (late, keep): (Vec<_>, Vec<_>) =
+            std::mem::take(&mut self.unconfirmed).into_iter().partition(|(_, _, t)| now.duration_since(*t) >= SEND_TIMEOUT);
+        self.unconfirmed = keep;
+        late.into_iter().map(|(c, text, _)| (c, text)).collect()
     }
 }
 
@@ -342,6 +362,11 @@ impl Model {
                 let Some(msg) = Msg::from_swarm(message) else { return ch };
                 let mine = bare_uri(&msg.author) == self.me;
                 let received = matches!(ev, Event::MessageReceived { .. });
+                if mine && received && msg.kind == MsgKind::Text {
+                    if let Some(i) = self.unconfirmed.iter().position(|(c, _, _)| c == conversation) {
+                        self.unconfirmed.remove(i);
+                    }
+                }
                 if let Some(c) = self.conversations.get_mut(conversation) {
                     let added = c.merge([msg.clone()]);
                     if added > 0 && received && !mine && (msg.kind == MsgKind::Text || msg.file.is_some()) {
@@ -490,6 +515,21 @@ mod tests {
         m.apply(&mine);
         assert_eq!(m.conversations["c1"].unread, 1);
         assert_eq!(m.conversations["c1"].messages.len(), 2);
+    }
+
+    #[test]
+    fn sends_not_echoed_in_time_are_reported() {
+        let mut m = model();
+        let t = Instant::now();
+        m.sent("c1", "yo", t);
+        m.sent("c1", "lost", t + Duration::from_secs(1));
+        let echo = Event::MessageReceived { account: "acc".into(), conversation: "c1".into(), message: swarm("2", "me", "yo", 6) };
+        m.apply(&echo);
+        // Someone else's message does not confirm ours.
+        m.apply(&Event::MessageReceived { account: "acc".into(), conversation: "c1".into(), message: swarm("3", "bob", "hi", 7) });
+        assert!(m.take_unsent(t + SEND_TIMEOUT).is_empty());
+        assert_eq!(m.take_unsent(t + SEND_TIMEOUT * 2), vec![("c1".to_string(), "lost".to_string())]);
+        assert!(m.unconfirmed.is_empty());
     }
 
     #[test]

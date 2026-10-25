@@ -16,6 +16,11 @@ Closing the window hides it (Hyprland's special workspace `special:joma`): Joma 
 receiving messages and calls, the bar widget keeps working, and `joma`, the launcher,
 `joma open` or an incoming call bring the window back. Ctrl+Q or `joma quit` quits.
 
+## Beside the Jami app
+Joma and the Jami app share accounts and history, and only one may run at a time. When
+the Jami app opens while Joma runs, Joma pauses (a notification says so) and comes back
+by itself when the Jami app quits.
+
 ## Calls
 Audio or video calls (Ctrl+Shift+C / V), answer (Ctrl+Shift+A), hang up (Ctrl+Shift+E),
 mute, camera. Remote video in the call panel; F11 fills the window.
@@ -42,6 +47,9 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
+- 2026-10-25 night: Joma pauses while the Jami app runs, also when it opens after Joma
+  (before, both ran on the same data); a message the daemon drops says "not sent" and
+  its text returns to the draft.
 - 2026-10-25 evening: receiving files (`~/Downloads/joma/`, automatic up to 20 MB);
   closing the window keeps Joma running; `joma quit`; the bar icon is the Joma hexagon
   in the theme's accent colour.

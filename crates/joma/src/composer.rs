@@ -68,6 +68,21 @@ impl Composer {
     pub fn text(&self) -> String {
         self.text.clone()
     }
+    /// Put back text that was not sent, unless that conversation has a new draft.
+    pub fn restore(&mut self, key: &str, text: String, cx: &mut Context<Self>) {
+        if key == self.key {
+            if self.text.is_empty() {
+                self.selected = text.len()..text.len();
+                self.text = text;
+                cx.notify();
+            }
+        } else {
+            let draft = self.drafts.entry(key.to_owned()).or_default();
+            if draft.is_empty() {
+                *draft = text;
+            }
+        }
+    }
     pub fn clear(&mut self, cx: &mut Context<Self>) {
         self.text.clear();
         self.selected = 0..0;
