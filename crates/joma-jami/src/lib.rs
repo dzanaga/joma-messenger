@@ -346,8 +346,10 @@ pub fn close_video_input(id: &str) -> Result<bool> {
 }
 
 /// Receive BGRA frames of a decoder (its id comes with [`Event::DecodingStarted`]).
-pub fn attach_sink(id: &str) -> Result<bool> {
-    typed("attachSink", json!([id]))
+/// Receive the decoded frames of `id` as BGRA, `width` x `height` (the decoder's size, from
+/// [`Event::DecodingStarted`]; attach again when it changes).
+pub fn attach_sink(id: &str, width: i64, height: i64) -> Result<bool> {
+    typed("attachSink", json!([id, width, height]))
 }
 
 pub fn detach_sink(id: &str) -> Result<()> {

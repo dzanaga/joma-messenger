@@ -166,7 +166,14 @@ impl Joma {
                     .flex()
                     .items_center()
                     .gap(px(10.))
-                    .child(div().text_color(t.accent).font_weight(FontWeight::BOLD).child("joma"))
+                    .child(
+                        div()
+                            .flex()
+                            .items_baseline()
+                            .gap(px(5.))
+                            .child(div().text_color(t.accent).font_weight(FontWeight::BOLD).child("joma"))
+                            .child(div().text_color(t.muted).text_size(px(t.size - 2.)).child(concat!("v", env!("CARGO_PKG_VERSION")))),
+                    )
                     .child(div().text_color(t.muted).child("·"))
                     .child(div().text_color(t.bright).child(if self.model.my_name.is_empty() {
                         "jami".to_owned()
@@ -194,6 +201,7 @@ impl Joma {
             let selected = self.selected.as_deref() == Some(c.id.as_str());
             let fav = self.quick.favorites.contains(&c.id);
             let has_call = self.model.calls.values().any(|k| k.conversation.as_deref() == Some(&c.id));
+            let online = !c.request && self.model.is_online(&c);
             let last = if c.composing {
                 "typing…".to_owned()
             } else {
@@ -228,6 +236,7 @@ impl Joma {
                                     .items_center()
                                     .gap(px(6.))
                                     .overflow_hidden()
+                                    .when(online, |d| d.child(div().flex_none().size(px(7.)).rounded_full().bg(t.green)))
                                     .when(fav, |d| d.child(div().text_color(t.yellow).child(G_STAR)))
                                     .when(has_call, |d| d.child(div().text_color(t.green).child(G_PHONE)))
                                     .child(

@@ -508,6 +508,9 @@ impl Joma {
         self.desk_frame = None;
         self.pointer = None;
         self.stage = false;
+        // Shares and views end with the daemon; drop them so no capture keeps running.
+        self.desk = Desk::default();
+        self.share_on_connect.clear();
         self.configure_inputs(cx);
         joma_jami::stop();
         notify_desktop("Joma paused", "The Jami app is open and uses the same accounts. Joma resumes when it quits.");
@@ -720,9 +723,9 @@ impl Joma {
                 }
             }
         }
-        if let Event::DecodingStarted { id, .. } = &ev {
+        if let Event::DecodingStarted { id, width, height, .. } = &ev {
             if self.model.calls.values().any(|c| c.sinks.contains(id)) {
-                let _ = joma_jami::attach_sink(id);
+                let _ = joma_jami::attach_sink(id, *width, *height);
             }
         }
         if let Event::DecodingStopped { id } = &ev {
@@ -1441,6 +1444,11 @@ impl Focusable for Joma {
 
 /// The camera to send, as a daemon source (`camera://<device>`), or empty without one.
 pub fn camera_source() -> String {
+    // A test profile never opens the real camera; `JOMA_CAMERA` gives it a source instead
+    // (for example `file:///path/clip.mp4`).
+    if own_profile() {
+        return std::env::var("JOMA_CAMERA").unwrap_or_default();
+    }
     match joma_jami::default_video_device() {
         Ok(d) if !d.is_empty() => format!("camera://{d}"),
         _ => String::new(),

@@ -53,6 +53,9 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
+- 0.2.0 (2026-10-25): remote video in calls works (it crashed Joma); the version next to
+  "joma" in the top bar; a green dot on online contacts in the list; a paused Joma also
+  stops a desktop share in progress.
 - 2026-10-25 night: desktop share without a call (falls back to a call with the
   microphone off for peers without Joma), `joma watch`; the pixel-art icon (app and bar,
   configurable unread colour on the j's dot); the `joma quick` window and the quick

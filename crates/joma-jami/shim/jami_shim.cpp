@@ -268,9 +268,14 @@ findSink(const std::string& id)
     return it == g_sinks.end() ? nullptr : it->second;
 }
 
+// `width` x `height` is the decoder's size (DecodingStarted); the daemon scales each
+// frame into the one `pull` returns, so that frame must have its format, size and
+// buffers set: an empty one makes swscale abort (docs/crashes/2026-10-25-...).
 static bool
-attachSink(const std::string& id)
+attachSink(const std::string& id, int width, int height)
 {
+    if (width <= 0 || height <= 0)
+        return false;
     auto sink = std::make_shared<Sink>();
     {
         std::lock_guard<std::mutex> l(g_sinks_lock);
@@ -278,7 +283,17 @@ attachSink(const std::string& id)
     }
     libjami::SinkTarget target;
     target.preferredFormat = AV_PIX_FMT_BGRA;
-    target.pull = []() { return libjami::FrameBuffer(av_frame_alloc()); };
+    target.pull = [width, height]() {
+        libjami::FrameBuffer frame(av_frame_alloc());
+        if (!frame)
+            return libjami::FrameBuffer();
+        frame->format = AV_PIX_FMT_BGRA;
+        frame->width = width;
+        frame->height = height;
+        if (av_frame_get_buffer(frame.get(), 0) < 0)
+            return libjami::FrameBuffer();
+        return frame;
+    };
     std::weak_ptr<Sink> weak = sink;
     target.push = [weak](libjami::FrameBuffer frame) {
         auto s = weak.lock();
@@ -428,7 +443,7 @@ dispatch(const std::string& m, const Json::Value& a)
     if (m == "closeVideoInput")
         return closeVideoInput(str(a, 0));
     if (m == "attachSink")
-        return attachSink(str(a, 0));
+        return attachSink(str(a, 0), (int) num(a, 1), (int) num(a, 2));
     if (m == "detachSink")
         return detachSink(str(a, 0)), Json::Value();
     // Exposed services and tunnels

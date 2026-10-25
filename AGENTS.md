@@ -14,7 +14,8 @@
   `~/.local/share/jami` with the Jami app. Tests run with `JOMA_PROFILE=<dir>` (its own
   data, config and socket) and `HOME=<dir>/home` after `scripts/test-profile.sh <dir>`
   (silent ALSA audio), inside the hidden nested Hyprland of `scripts/nest.sh`. A test
-  profile skips notifications and the desktop portal. Known limit: the ALSA `null`
+  profile skips notifications and the desktop portal, and never opens the real camera
+  (`JOMA_CAMERA=file:///…/clip.mp4` gives it one). Known limit: the ALSA `null`
   capture is unpaced, so libjami's `AudioInput::readFromDevice` spins during a test call
   and hanging up blocks in `SIPCall::stopAllMedia` (joins that loop). End test calls by
   stopping the profiles; real audio devices are paced and not affected.

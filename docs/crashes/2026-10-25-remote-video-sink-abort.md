@@ -1,6 +1,9 @@
 # 2026-10-25: Joma aborts on the first remote video frame
 
-**State:** diagnosed, not fixed. The cause is in our shim (`crates/joma-jami/shim/jami_shim.cpp`).
+**State:** fixed in 0.2.0. The cause was in our shim (`crates/joma-jami/shim/jami_shim.cpp`):
+`pull()` now returns a BGRA frame with the decoder's size and buffers (`attach_sink` takes
+the size from `DecodingStarted`). Verified with a video call between two test profiles
+(the sender's camera a test clip through `JOMA_CAMERA`).
 
 ## The crash
 
@@ -63,7 +66,7 @@ Every remote video frame that reaches an attached sink takes this path, so any c
 incoming video crashes Joma. This was Joma's first recorded crash, and remote video had
 never been tested before (J1 in `PLAN.md`).
 
-## Fix (to do)
+## Fix (done)
 
 In `pull()`, return a frame ready to be written into: `format = AV_PIX_FMT_BGRA`, the
 decoder's `width` and `height`, then `av_frame_get_buffer(frame, 0)`.
