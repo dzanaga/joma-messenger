@@ -23,3 +23,6 @@ futures = "0.3"
 image = "0.25"
 smallvec = { version = "1", features = ["union"] }
 libc = "0.2"
+serde.workspace = true
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }

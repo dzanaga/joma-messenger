@@ -14,6 +14,7 @@ mod desk;
 mod hypr;
 mod ipc;
 mod model;
+mod presence;
 mod render;
 mod theme;
 

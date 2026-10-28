@@ -20,6 +20,7 @@ use crate::composer::{Composer, Edited, Submit};
 use crate::desk::{After, Desk};
 use crate::ipc::Pending;
 use crate::model::{bare_uri, Call, CallState, FileRef, Model};
+use crate::presence::{Presence, State, Wire};
 use crate::theme::Theme;
 
 actions!(
@@ -63,6 +64,15 @@ pub enum AppMsg {
     Repaint,
     Ipc(Pending),
     Portal(String, anyhow::Result<PortalShare>),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Dot {
+    None,
+    /// A device is on the Jami network (or Joma says away).
+    Reachable,
+    /// Joma says the user is active.
+    Active,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -148,6 +158,8 @@ pub struct Joma {
     share_on_connect: HashSet<String>,
     /// Files being or already downloaded this session: file id to where.
     pub downloads: HashMap<String, std::path::PathBuf>,
+    /// Joma presence: ours and our contacts'.
+    pub presence: Presence,
 }
 
 /// Received files up to this size download by themselves (the Jami app's default).
@@ -322,6 +334,7 @@ impl Joma {
             subscribed: HashSet::new(),
             share_on_connect: HashSet::new(),
             downloads: HashMap::new(),
+            presence: Presence::start(),
         };
         j.configure_inputs(cx);
         j.boot(cx);
@@ -562,6 +575,10 @@ impl Joma {
                 self.composer.update(cx, |c, cx| c.restore(&conv, text, cx));
             }
         }
+        self.tell_presence();
+        if self.presence.expire(Instant::now()) {
+            cx.notify();
+        }
         let acc = self.model.account.clone();
         for after in self.desk.tick(&acc) {
             self.after(after, cx);
@@ -664,6 +681,14 @@ impl Joma {
                 return;
             }
             Event::AccountMessage { account, from, payloads } if *account == acc => {
+                if let Some(wire) = payloads.get(crate::presence::MIME).and_then(|p| Wire::decode(p)) {
+                    let peer = bare_uri(from).to_owned();
+                    if self.presence.received(&peer, wire, Instant::now()) {
+                        self.tell_presence();
+                    }
+                    cx.notify();
+                    return;
+                }
                 if let Some(msg) = payloads.get(MIME).and_then(|p| DeskMsg::decode(p)) {
                     let peer = bare_uri(from).to_owned();
                     let key = crate::desk::direct_key(&peer);
@@ -721,6 +746,11 @@ impl Joma {
             Event::CallState { call, state, .. } if CallState::parse(state) == CallState::Over => vec![call.clone()],
             _ => vec![],
         };
+        if let Event::Presence { account, uri, online: false } = &ev {
+            if *account == acc {
+                self.presence.gone(bare_uri(uri));
+            }
+        }
         let changed = self.model.apply(&ev);
         for (conv, interaction, file) in &changed.files {
             if file.size > 0 && file.size <= AUTO_DOWNLOAD {
@@ -762,6 +792,15 @@ impl Joma {
             // a profile (created by Joma 0.2 and earlier) gets one, so contacts see its
             // name instead of its ID.
             if *account == acc && state == "REGISTERED" {
+                // A new account has no URI until it is generated: until then our own
+                // URI counted as a peer.
+                if self.model.me.is_empty() {
+                    let details = joma_jami::account_details(&acc).unwrap_or_default();
+                    self.model.me = details.get("Account.username").map(|u| bare_uri(u).to_owned()).unwrap_or_default();
+                    for id in self.model.conversations.keys().cloned().collect::<Vec<_>>() {
+                        self.reload_conversation(&id, false);
+                    }
+                }
                 let has_profile = self.account_dir().is_some_and(|d| d.join("profile.vcf").exists());
                 if !has_profile && !self.model.my_name.is_empty() {
                     if let Err(e) = joma_jami::update_profile(&acc, &self.model.my_name) {
@@ -866,6 +905,88 @@ impl Joma {
     }
 
     /// Share the desktop with a conversation's peer without a call.
+    /// Peers of our one-to-one conversations still in the list: who hears our presence.
+    fn presence_contacts(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for c in self.listed() {
+            if !c.request && c.peers.len() == 1 && !out.contains(&c.peers[0]) {
+                out.push(c.peers[0].clone());
+            }
+        }
+        out
+    }
+
+    /// Tell contacts our presence when it changed or is due.
+    fn tell_presence(&mut self) {
+        if self.model.registration != "REGISTERED" || self.gate != Gate::Ready {
+            return;
+        }
+        let state = self.presence.mine(self.quick.invisible);
+        let contacts = self.presence_contacts();
+        let online = &self.model.online;
+        let due = self.presence.due(state, &contacts, |c| online.contains(c), Instant::now());
+        for (to, wire) in due {
+            self.send_presence(&to, &wire);
+        }
+    }
+
+    fn send_presence(&self, to: &str, wire: &Wire) {
+        let mut payloads = joma_jami::Details::new();
+        payloads.insert(crate::presence::MIME.into(), wire.encode());
+        let _ = joma_jami::send_account_message(&self.model.account, to, &payloads, false);
+    }
+
+    /// Quitting: contacts we told forget us now instead of in ten minutes.
+    pub fn leave(&mut self) {
+        if self.quick.invisible || self.model.registration != "REGISTERED" {
+            return;
+        }
+        let wire = Wire { state: State::Hidden, ts: joma_desk::signal::now() };
+        for to in self.presence_contacts() {
+            if self.model.online.contains(&to) {
+                self.send_presence(&to, &wire);
+            }
+        }
+    }
+
+    pub fn toggle_invisible(&mut self, cx: &mut Context<Self>) {
+        self.quick.invisible = !self.quick.invisible;
+        self.save_quick(cx);
+        self.tell_presence();
+        self.show_flash(if self.quick.invisible { "invisible: contacts no longer see when you are active" } else { "visible: Joma contacts see when you are active" }, cx);
+        cx.notify();
+    }
+
+    /// How present a peer is: Joma says active, or only Jami says reachable.
+    pub fn dot_of(&self, peer: &str) -> Dot {
+        match self.presence.state_of(peer) {
+            Some(State::Active) => Dot::Active,
+            Some(_) => Dot::Reachable,
+            None if self.model.online.contains(peer) => Dot::Reachable,
+            None => Dot::None,
+        }
+    }
+
+    /// The header's status line for a peer: "active now", "away since 14:20",
+    /// "on Jami · seen 14:32", or nothing known.
+    pub fn presence_line(&self, conv: &crate::model::Conversation, peer: &str) -> Option<String> {
+        match self.presence.state_of(peer) {
+            Some(State::Active) => return Some("active now".into()),
+            Some(State::Away { since }) => return Some(format!("away since {}", crate::render::when(since as i64))),
+            _ => {}
+        }
+        let last_msg = conv.messages.iter().rev().find(|m| m.author == peer).map(|m| m.ts).unwrap_or(0);
+        let seen = self.presence.seen.get(peer).map(|s| *s as i64).unwrap_or(0).max(last_msg);
+        let mut parts = Vec::new();
+        if self.model.online.contains(peer) {
+            parts.push("on Jami".to_owned());
+        }
+        if seen > 0 {
+            parts.push(format!("seen {}", crate::render::when(seen)));
+        }
+        (!parts.is_empty()).then(|| parts.join(" · "))
+    }
+
     pub fn share_direct(&mut self, conv: &str, cx: &mut Context<Self>) -> Reply {
         let Some(peer) = self.model.conversations.get(conv).filter(|c| c.peers.len() == 1).map(|c| c.peers[0].clone()) else {
             return Reply::Error { message: "sharing without a call needs a one-to-one conversation".into() };
@@ -1470,6 +1591,7 @@ impl Joma {
                 Err(e) => e,
             },
             Request::Quit => {
+                self.leave();
                 cx.defer(|cx| cx.quit());
                 Reply::Done
             }

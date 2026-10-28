@@ -3027,10 +3027,13 @@ dependencies = [
  "joma-quick",
  "joma-theme",
  "libc",
+ "serde",
  "serde_json",
  "smallvec",
  "tracing",
  "tracing-subscriber",
+ "wayland-client",
+ "wayland-protocols 0.32.13",
 ]
 
 [[package]]

@@ -47,6 +47,17 @@ pub fn local_time(ts: i64) -> (String, i64, String) {
     (format!("{:02}:{:02}", tm.tm_hour, tm.tm_min), day, label)
 }
 
+/// A moment for a status line: "14:32" today, "yesterday 14:32", else "Mon 26 Oct 14:32".
+pub fn when(ts: i64) -> String {
+    let (hm, day, label) = local_time(ts);
+    let (_, today, _) = local_time(joma_desk::signal::now() as i64);
+    match today - day {
+        0 => hm,
+        1 => format!("yesterday {hm}"),
+        _ => format!("{} {hm}", label.rsplit_once(' ').map(|(d, _)| d).unwrap_or(&label)),
+    }
+}
+
 /// A stable colour per author.
 fn author_color(t: &Theme, uri: &str) -> Hsla {
     let palette = [t.cyan, t.magenta, t.green, t.yellow, t.red];
@@ -196,7 +207,19 @@ impl Joma {
                                 .on_click(cx.listener(|this, _, window, cx| this.set_mode(Mode::Username, window, cx))),
                         )
                     })
-                    .when(!dot.is_empty(), |d| d.child(div().text_color(color).child(format!("● {dot}")))),
+                    .when(!dot.is_empty(), |d| d.child(div().text_color(color).child(format!("● {dot}"))))
+                    .when(reg == "REGISTERED", |d| {
+                        let invisible = self.quick.invisible;
+                        d.child(
+                            div()
+                                .id("invisible")
+                                .text_color(if invisible { t.yellow } else { t.muted })
+                                .cursor_pointer()
+                                .hover(|d| d.text_color(t.accent))
+                                .child(if invisible { "◌ invisible" } else { "visible" })
+                                .on_click(cx.listener(|this, _, _, cx| this.toggle_invisible(cx))),
+                        )
+                    }),
             )
             .child(
                 div()
@@ -217,7 +240,15 @@ impl Joma {
             let selected = self.selected.as_deref() == Some(c.id.as_str());
             let fav = self.quick.favorites.contains(&c.id);
             let has_call = self.model.calls.values().any(|k| k.conversation.as_deref() == Some(&c.id));
-            let online = !c.request && self.model.is_online(&c);
+            let dot = if c.request {
+                Dot::None
+            } else if c.peers.iter().any(|p| self.dot_of(p) == Dot::Active) {
+                Dot::Active
+            } else if c.peers.iter().any(|p| self.dot_of(p) == Dot::Reachable) {
+                Dot::Reachable
+            } else {
+                Dot::None
+            };
             let last = if c.composing {
                 "typing…".to_owned()
             } else {
@@ -252,7 +283,9 @@ impl Joma {
                                     .items_center()
                                     .gap(px(6.))
                                     .overflow_hidden()
-                                    .when(online, |d| d.child(div().flex_none().size(px(7.)).rounded_full().bg(t.green)))
+                                    .when(dot != Dot::None, |d| {
+                                        d.child(div().flex_none().size(px(7.)).rounded_full().bg(if dot == Dot::Active { t.green } else { t.green.opacity(0.3) }))
+                                    })
                                     .when(fav, |d| d.child(div().text_color(t.yellow).child(G_STAR)))
                                     .when(has_call, |d| d.child(div().text_color(t.green).child(G_PHONE)))
                                     .child(
@@ -679,6 +712,7 @@ impl Joma {
         let has_call = self.active_call().is_some();
         let peers = conv.peers.iter().map(|p| self.model.name_of(p)).collect::<Vec<_>>().join(", ");
         let peer_ids = conv.peers.iter().map(|p| format!("{}…", &p[..p.len().min(12)])).collect::<Vec<_>>().join(" ");
+        let status = (conv.peers.len() == 1 && !conv.request).then(|| self.presence_line(&conv, &conv.peers[0])).flatten();
         let header = div()
             .flex()
             .flex_none()
@@ -693,10 +727,12 @@ impl Joma {
                     .flex()
                     .flex_col()
                     .child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child(conv.title.clone()))
-                    .child(div().text_size(px(t.size - 2.)).text_color(t.muted).child(if peers == conv.title {
-                        peer_ids
-                    } else {
-                        format!("{peers} · {peer_ids}")
+                    .child(div().text_size(px(t.size - 2.)).text_color(t.muted).child({
+                        let who = if peers == conv.title { peer_ids } else { format!("{peers} · {peer_ids}") };
+                        match status {
+                            Some(s) => format!("{s} · {who}"),
+                            None => who,
+                        }
                     })),
             )
             .child(
@@ -867,7 +903,10 @@ impl Render for Joma {
             .text_color(t.text)
             .font_family(t.font.clone())
             .text_size(px(t.size))
-            .on_action(cx.listener(|_, _: &Quit, _, cx| cx.quit()))
+            .on_action(cx.listener(|this, _: &Quit, _, cx| {
+                this.leave();
+                cx.quit()
+            }))
             .on_action(cx.listener(|this, _: &NextConversation, _, cx| this.step(1, cx)))
             .on_action(cx.listener(|this, _: &PrevConversation, _, cx| this.step(-1, cx)))
             .on_action(cx.listener(|this, _: &NewConversation, window, cx| this.set_mode(Mode::Add, window, cx)))

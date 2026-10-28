@@ -25,6 +25,9 @@
 - D-13 Removing a contact only hides it in Joma (`removed` in quick.toml); deleting for
   good is a second step from the removed list (removeContact without ban, then
   removeConversation). (User, 2026-10-25.)
+- D-14 Presence: Jami's reachability is a faint dot; Joma users exchange active/away
+  (full green dot, "active now", "away since", "seen"); invisible sends nothing.
+  (User, 2026-10-28.)
 
 ## Decided
 

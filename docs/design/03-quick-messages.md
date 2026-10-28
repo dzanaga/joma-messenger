@@ -20,7 +20,12 @@ the list (`recent`, default 6).
   the panel on the focused monitor: the service owns the IPC target, since every bar
   instantiates the widget and only one handler per target is used.
 - Presence: Joma subscribes to every contact (`subscribeBuddy`); `NewBuddyNotification`
-  status above 0 counts as online.
+  status above 0 counts as reachable (a device announced on the DHT in the last ten
+  minutes, or connected). On top, Joma's own presence (`presence.rs`): account messages
+  of type `application/x-joma-presence+json` (`active`, `away` with `since`, `hidden`)
+  to the one-to-one contacts still listed, on every change and every 4 minutes to the
+  reachable ones; a state not refreshed in 10 minutes is dropped. Away comes from the
+  compositor's `ext-idle-notify-v1` after 5 minutes.
 - `joma share <to>` shares in the call with `<to>` if one runs; otherwise without a
   call (see `desk.rs`): the handshake goes as account messages (`sendAccountTextMessage`,
   kept in no history), the viewer's Joma answers `Hello` and asks its user (`joma watch

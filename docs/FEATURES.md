@@ -7,6 +7,18 @@ you by it. Without one, "choose a username" in the top bar registers it later. J
 writes the profile contacts receive (accounts made by Joma 0.2 and earlier had none, so
 contacts saw a 40-digit ID; it is added the next time the account comes online).
 
+## Presence
+Jami only knows whether a contact has a device on the network (phones with push and a
+Jami app in the background always do), so Joma users tell each other more:
+- a full green dot: active on Joma (input in the last 5 minutes);
+- a faint dot: reachable on Jami, or away on Joma;
+- the conversation header says "active now", "away since 14:20", or "on Jami · seen
+  14:32" (the last time they were active on Joma, or wrote).
+
+**visible / invisible** in the top bar: invisible sends contacts nothing, and those who
+saw you active forget it; you still see theirs. Jami's own reachability cannot be
+hidden. Saved as `invisible` in `~/.config/joma/quick.toml`.
+
 ## Removing contacts
 The bin in a conversation's header takes it off the lists (window, bar, notifications);
 it stays in Jami, and its messages keep arriving quietly. The bin next to + in the list
@@ -67,7 +79,8 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
-- unreleased: removing contacts (a removed list to restore from or delete for good);
+- unreleased: presence between Joma users (active, away, seen) and invisible mode;
+  removing contacts (a removed list to restore from or delete for good);
   usernames (at account creation, or "choose a username"); contacts see your
   name instead of your ID (the missing profile is written; received profiles are read
   from the file the daemon names).

@@ -30,6 +30,8 @@ pub struct QuickConfig {
     /// Conversations removed from the lists (Joma's "removed contacts"): kept in Jami,
     /// hidden here until restored or deleted for good.
     pub removed: Vec<String>,
+    /// Send no Joma presence (active, away, seen) to contacts.
+    pub invisible: bool,
 }
 
 impl Default for QuickConfig {
@@ -48,6 +50,7 @@ impl Default for QuickConfig {
             favorites: Vec::new(),
             recent: 6,
             removed: Vec::new(),
+            invisible: false,
         }
     }
 }
