@@ -79,7 +79,7 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
-- unreleased: presence between Joma users (active, away, seen) and invisible mode;
+- 0.3.0 (2026-10-28): presence between Joma users (active, away, seen) and invisible mode;
   removing contacts (a removed list to restore from or delete for good);
   usernames (at account creation, or "choose a username"); contacts see your
   name instead of your ID (the missing profile is written; received profiles are read
