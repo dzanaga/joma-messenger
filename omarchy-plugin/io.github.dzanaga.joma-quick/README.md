@@ -1,7 +1,8 @@
 # Joma Quick (Omarchy shell plugin)
 
-A bar widget for [Joma](../../README.md): the Joma hexagon in the theme's accent colour
-(`JomaGlyph.qml`) with the unread count, and a panel with your contacts and a quick chat
+A bar widget for [Joma](../../README.md): the Joma j in the bar's colour, its dot
+showing the status (`JomaGlyph.qml`: lavender online, green unread, red offline, grey
+invisible), and a panel with your contacts and a quick chat
 for each (messages, reply, quick messages, call, share, files). Left click or
 Super+Alt+M opens the panel, right click opens Joma.
 

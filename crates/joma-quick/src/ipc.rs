@@ -79,6 +79,9 @@ pub struct ChatState {
 pub struct QuickState {
     pub account: String,
     pub registered: bool,
+    /// Sending contacts no presence.
+    #[serde(default)]
+    pub invisible: bool,
     pub unread: u32,
     pub targets: Vec<Target>,
     pub messages: Vec<String>,

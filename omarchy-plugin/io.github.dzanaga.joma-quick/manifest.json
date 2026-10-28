@@ -14,20 +14,44 @@
   },
   "barWidget": {
     "displayName": "Joma",
-    "description": "Your Jami contacts and a quick chat with each; the logo fills when messages are unread.",
+    "description": "Your Jami contacts and a quick chat with each; the j's dot shows Joma's status.",
     "category": "Communication",
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "unreadColor": "#39ff88"
+      "onlineColor": "#b193f7",
+      "unreadColor": "#39ff88",
+      "offlineColor": "#f7768e",
+      "invisibleColor": "#7a7f8a"
     },
     "schema": [
+      {
+        "key": "onlineColor",
+        "type": "string",
+        "label": "Online colour",
+        "description": "The j's dot while Joma is online.",
+        "defaultValue": "#b193f7"
+      },
       {
         "key": "unreadColor",
         "type": "string",
         "label": "Unread colour",
-        "description": "Fills the Joma logo in the bar while messages are unread (a colour such as #39ff88).",
+        "description": "The j's dot while messages are unread.",
         "defaultValue": "#39ff88"
+      },
+      {
+        "key": "offlineColor",
+        "type": "string",
+        "label": "Offline colour",
+        "description": "The j's dot while Joma is offline or not running.",
+        "defaultValue": "#f7768e"
+      },
+      {
+        "key": "invisibleColor",
+        "type": "string",
+        "label": "Invisible colour",
+        "description": "The j's dot while you are invisible.",
+        "defaultValue": "#7a7f8a"
       }
     ]
   }

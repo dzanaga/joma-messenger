@@ -64,9 +64,10 @@ drawn on the viewer. Otherwise: Jami's screen share through the portal.
 Ctrl+. and Alt+1…9 in the window; `joma send`; the Omarchy bar widget: contacts with
 pinned and unread on top, then whoever is online; click one for a quick chat (latest
 messages, reply box) with buttons to call, video call, share the screen, send a file or
-open the conversation in Joma. Its icon is the pixel-art jm in the bar's colour; the j's
-dot fills green while messages are unread (`unreadColor` in the widget's entry in
-`~/.config/omarchy/shell.json`). Dimmed while Joma is not running (click it then to
+open the conversation in Joma. Its icon is the Joma j in the bar's colour, its dot
+showing the status: lavender online, green with unread messages, red offline, grey
+invisible (`onlineColor`, `unreadColor`, `offlineColor`, `invisibleColor` in the
+widget's entry in `~/.config/omarchy/shell.json`). Dimmed while Joma is not running (click it then to
 start Joma).
 
 ## Command line
@@ -79,6 +80,8 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
+- unreleased: the v2 logo (app icon: the j with its lavender dot on black); the bar
+  icon's dot shows the status (online, unread, offline, invisible).
 - 0.3.0 (2026-10-28): presence between Joma users (active, away, seen) and invisible mode;
   removing contacts (a removed list to restore from or delete for good);
   usernames (at account creation, or "choose a username"); contacts see your

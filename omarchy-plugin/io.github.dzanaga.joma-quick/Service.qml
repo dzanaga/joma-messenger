@@ -14,6 +14,7 @@ Item {
 
   property bool running: false
   property bool registered: false
+  property bool invisible: false
   property string account: ""
   property int unread: 0
   property var targets: []
@@ -101,6 +102,7 @@ Item {
           var data = JSON.parse(text)
           root.running = data.running !== false
           root.registered = !!data.registered
+          root.invisible = !!data.invisible
           root.account = data.account || ""
           root.unread = data.unread || 0
           root.targets = data.targets || []

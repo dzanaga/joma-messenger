@@ -1490,6 +1490,7 @@ impl Joma {
         QuickState {
             account: self.model.my_name.clone(),
             registered: self.model.registration == "REGISTERED",
+            invisible: self.quick.invisible,
             unread: self.listed_unread(),
             targets,
             messages: self.quick.messages.clone(),

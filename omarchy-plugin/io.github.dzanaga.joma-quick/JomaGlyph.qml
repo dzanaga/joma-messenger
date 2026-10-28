@@ -1,85 +1,46 @@
 import QtQuick
 import QtQuick.Window
 
-// The Joma pixel-art logo for the bar: the outline of "jm" in the bar's colour, and the
-// inside of the j's dot filled with `fill` when `filled` (unread messages). The grid
-// comes from assets/joma-messenger-pixel.png (scripts/icon.py prints it).
+// The Joma logo for the bar: the blocky "j" in the bar's colour and its square dot in
+// `dot` (the widget sets it from Joma's status). The shapes are the edges of
+// assets/joma-logo-v2.png, as in scripts/icon.py.
 Item {
   id: root
 
-  property color outline: "white"
-  property color fill: "#39ff88"
-  property bool filled: false
-  // Height. Cells snap to screen pixels, so at sizes that are not a whole number of
-  // pixels per logo pixel some lines come out a pixel thicker.
+  property color color: "white"
+  property color dot: "#b193f7"
+  // Height.
   property real size: 16
-  // The width as if the logo were this tall: a whole number of screen pixels per logo
-  // pixel, so the columns stay even.
-  property real widthSize: size
 
-  readonly property var rows: [
-    "..###......",
-    "..#.#......",
-    "..###......",
-    "...........",
-    "..#########",
-    "..#.#.....#",
-    "..#.#.#.#.#",
-    "###.#.#.#.#",
-    "#.#.#.###.#",
-    "#.#.#.#.#.#",
-    "#...#.#.#.#",
-    "#######.###"
+  // The logo's box in source pixels, and its shapes: x0, y0, x1, y1.
+  readonly property var box: [377, 297, 877, 1021]
+  readonly property var shapes: [
+    { r: [701, 297, 877, 460], isDot: true },
+    { r: [701, 491, 877, 1021], isDot: false },
+    { r: [377, 763, 556, 1021], isDot: false },
+    { r: [556, 889, 701, 1021], isDot: false }
   ]
-  readonly property int cols: rows[0].length
   readonly property real dpr: Screen.devicePixelRatio > 0 ? Screen.devicePixelRatio : 1
-  readonly property real cell: size / rows.length
-  readonly property real cellWidth: Math.max(1, Math.round(widthSize * dpr / rows.length)) / dpr
+  readonly property real scale: size / (box[3] - box[1])
 
-  // The rows of the j's dot: only its inside is filled.
-  readonly property int dotRows: 3
+  // Edges on whole screen pixels, so the j's parts meet without seams.
+  function snapX(v) { return Math.round((v - box[0]) * scale * dpr) / dpr }
+  function snapY(v) { return Math.round((v - box[1]) * scale * dpr) / dpr }
 
-  // Every cell: 1 outline, 2 inside (enclosed by the outline), 0 outside.
-  readonly property var cells: {
-    var h = rows.length, w = cols
-    var kind = []
-    for (var y = 0; y < h; y++) {
-      kind.push([])
-      for (var x = 0; x < w; x++) kind[y].push(rows[y][x] === "#" ? 1 : 2)
-    }
-    // Flood the outside from the border; what stays 2 is enclosed.
-    var stack = []
-    for (var i = 0; i < w; i++) { stack.push([i, 0]); stack.push([i, h - 1]) }
-    for (var j = 0; j < h; j++) { stack.push([0, j]); stack.push([w - 1, j]) }
-    while (stack.length > 0) {
-      var p = stack.pop()
-      var px = p[0], py = p[1]
-      if (px < 0 || py < 0 || px >= w || py >= h || kind[py][px] !== 2) continue
-      kind[py][px] = 0
-      stack.push([px + 1, py]); stack.push([px - 1, py]); stack.push([px, py + 1]); stack.push([px, py - 1])
-    }
-    var out = []
-    for (var yy = 0; yy < h; yy++)
-      for (var xx = 0; xx < w; xx++)
-        if (kind[yy][xx] === 1 || (kind[yy][xx] === 2 && yy < dotRows)) out.push({ x: xx, y: yy, inside: kind[yy][xx] === 2 })
-    return out
-  }
-
-  implicitWidth: cols * cellWidth
-  implicitHeight: rows.length * cell
+  implicitWidth: snapX(box[2])
+  implicitHeight: snapY(box[3])
 
   Repeater {
-    model: root.cells
+    model: root.shapes
     Rectangle {
       required property var modelData
-      // Edges on whole screen pixels, so neighbouring cells meet without seams.
-      x: Math.round(modelData.x * root.cellWidth * root.dpr) / root.dpr
-      y: Math.round(modelData.y * root.cell * root.dpr) / root.dpr
-      width: Math.round((modelData.x + 1) * root.cellWidth * root.dpr) / root.dpr - x
-      height: Math.round((modelData.y + 1) * root.cell * root.dpr) / root.dpr - y
+      x: root.snapX(modelData.r[0])
+      y: root.snapY(modelData.r[1])
+      width: root.snapX(modelData.r[2]) - x
+      // At bar sizes the gap under the dot rounds to nothing: keep one pixel.
+      height: (modelData.isDot ? Math.min(root.snapY(modelData.r[3]), root.snapY(491) - 1 / root.dpr) : root.snapY(modelData.r[3])) - y
       antialiasing: false
-      visible: !modelData.inside || root.filled
-      color: modelData.inside ? root.fill : root.outline
+      color: modelData.isDot ? root.dot : root.color
     }
   }
 }

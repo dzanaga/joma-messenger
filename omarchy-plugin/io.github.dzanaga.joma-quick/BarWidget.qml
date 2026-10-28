@@ -18,9 +18,14 @@ BarWidget {
   readonly property color fg: Color.popups.text
   readonly property color dim: Qt.darker(fg, 1.55)
   readonly property color accent: Color.accent
-  // The logo fills with this colour while messages are unread (the widget's settings in
-  // shell.json: "unreadColor").
-  readonly property color unreadColor: settings && settings.unreadColor ? settings.unreadColor : "#39ff88"
+  // The j's dot shows Joma's status, in the colours of the widget's settings in
+  // shell.json: unread messages, offline (or not running), invisible, else online.
+  function setting(key, fallback) { return settings && settings[key] ? settings[key] : fallback }
+  readonly property color dotColor: !live ? setting("offlineColor", "#f7768e")
+    : unread > 0 ? setting("unreadColor", "#39ff88")
+    : !svc.registered ? setting("offlineColor", "#f7768e")
+    : svc.invisible ? setting("invisibleColor", "#7a7f8a")
+    : setting("onlineColor", "#b193f7")
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   property bool popupOpen: false
@@ -96,10 +101,8 @@ BarWidget {
       id: glyph
       anchors.centerIn: parent
       size: button.fontSize * 1.2
-      widthSize: button.fontSize * 1.25
-      outline: button.foreground
-      fill: root.unreadColor
-      filled: root.unread > 0
+      color: button.foreground
+      dot: root.dotColor
     }
   }
 
@@ -145,7 +148,7 @@ BarWidget {
             title: "Joma"
             meta: !root.live
               ? "not running"
-              : (root.svc.account + " · " + (root.svc.registered ? "online" : "offline")
+              : (root.svc.account + " · " + (root.svc.registered ? (root.svc.invisible ? "invisible" : "online") : "offline")
                  + (root.unread > 0 ? " · " + root.unread + " unread" : ""))
             foreground: root.fg
             fontFamily: root.fontFamily
