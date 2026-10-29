@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 pub enum Request {
     /// Raise the window.
     Show,
+    /// Show the window, or hide it when it has the focus (the tray icon, Super+Alt+M).
+    Toggle,
     /// The quick-message targets and messages, for the bar plugin.
     Quick,
     /// Send `text` to a conversation (by id, or by a member's name or URI).

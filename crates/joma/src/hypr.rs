@@ -1,9 +1,13 @@
 //! Closing the window keeps Joma running: under Hyprland the window moves to the hidden
-//! special workspace `special:joma` and comes back on `joma`, `joma open` or a call.
-//! GPUI ends the app with its last window, and Hyprland has no minimize, so this is how
-//! Joma stays reachable from the bar and keeps receiving messages and calls.
+//! special workspace `special:joma` and comes back from the tray icon, `joma toggle`,
+//! `joma open` or a call. GPUI ends the app with its last window, and Hyprland has no
+//! minimize, so this is how Joma stays in the tray and keeps receiving messages and calls.
+//!
+//! The window has two shapes: compact, a floating panel under the bar at the right
+//! (like a tray app's popup), and full, an ordinary tiled window.
 
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const HIDDEN: &str = "special:joma";
 
@@ -34,16 +38,88 @@ pub fn hide() -> bool {
     dispatch(&format!("hl.dsp.window.move({{ workspace = '{HIDDEN}', follow = false, window = 'address:{address}' }})"))
 }
 
+/// The window opens straight into `special:joma` (starting in the tray): a rule on the
+/// title it is created with, which no later window has.
+pub const HIDDEN_TITLE: &str = "joma-start-hidden";
+
+pub fn start_hidden() -> bool {
+    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
+        && hyprctl(&[
+            "eval",
+            &format!("hl.window_rule({{ match = {{ initial_title = '^{HIDDEN_TITLE}$' }}, workspace = '{HIDDEN} silent', no_initial_focus = true }})"),
+        ])
+        .is_some()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shape {
+    Compact,
+    Full,
+}
+
+/// Started with `--hidden` (at login) or restarted while hidden.
+pub static START_HIDDEN: AtomicBool = AtomicBool::new(false);
+static FULL: AtomicBool = AtomicBool::new(false);
+
+/// The shape the window shows in.
+pub fn shape() -> Shape {
+    if FULL.load(Ordering::Relaxed) { Shape::Full } else { Shape::Compact }
+}
+
+pub fn set_shape(s: Shape) {
+    FULL.store(s == Shape::Full, Ordering::Relaxed);
+}
+
+/// The compact panel's size, logical pixels.
+const PANEL: (i64, i64) = (460, 680);
+const GAP: i64 = 8;
+
+/// Where the panel goes on the focused monitor: under the bar (the reserved top), at
+/// the right.
+fn panel_rect() -> Option<(i64, i64, i64, i64)> {
+    let monitors: serde_json::Value = serde_json::from_str(&hyprctl(&["monitors", "-j"])?).ok()?;
+    let m = monitors.as_array()?.iter().find(|m| m["focused"] == true)?;
+    let scale = m["scale"].as_f64().filter(|s| *s > 0.0).unwrap_or(1.0);
+    let (mx, my) = (m["x"].as_i64()?, m["y"].as_i64()?);
+    let w = (m["width"].as_f64()? / scale) as i64;
+    let h = (m["height"].as_f64()? / scale) as i64;
+    let r: Vec<i64> = m["reserved"].as_array()?.iter().filter_map(|v| v.as_i64()).collect();
+    let (top, right, bottom) = (r.get(1).copied().unwrap_or(0), r.get(2).copied().unwrap_or(0), r.get(3).copied().unwrap_or(0));
+    let ph = PANEL.1.min(h - top - bottom - 2 * GAP).max(300);
+    Some((mx + w - right - PANEL.0 - GAP, my + top + GAP, PANEL.0, ph))
+}
+
+/// Show the window in a shape, on the current workspace, focused.
+pub fn show_as(shape: Shape) -> bool {
+    let Some((address, _)) = main_window() else { return false };
+    let w = format!("window = 'address:{address}'");
+    // To the current workspace, from `special:joma` or wherever it was left. (Not
+    // pinned on every workspace: a pinned window loses keys in Hyprland 0.56.)
+    dispatch(&format!("hl.dsp.window.move({{ workspace = 'e+0', {w} }})"));
+    match shape {
+        Shape::Compact => {
+            dispatch(&format!("hl.dsp.window.float({{ action = 'enable', {w} }})"));
+            if let Some((x, y, pw, ph)) = panel_rect() {
+                dispatch(&format!("hl.dsp.window.resize({{ x = {pw}, y = {ph}, {w} }})"));
+                dispatch(&format!("hl.dsp.window.move({{ x = {x}, y = {y}, {w} }})"));
+            }
+        }
+        Shape::Full => {
+            dispatch(&format!("hl.dsp.window.float({{ action = 'disable', {w} }})"));
+        }
+    }
+    dispatch(&format!("hl.dsp.focus({{ {w} }})"))
+}
+
+/// Is the main window the focused one?
+pub fn focused() -> bool {
+    let Some((address, _)) = main_window() else { return false };
+    hyprctl(&["activewindow", "-j"])
+        .and_then(|o| serde_json::from_str::<serde_json::Value>(&o).ok())
+        .is_some_and(|a| a["address"].as_str() == Some(address.as_str()))
+}
+
 /// Is the main window hidden?
 pub fn hidden() -> bool {
     main_window().is_some_and(|(_, workspace)| workspace == HIDDEN)
-}
-
-/// Bring the main window back to the current workspace if it is hidden.
-pub fn show() {
-    let Some((address, workspace)) = main_window() else { return };
-    if workspace == HIDDEN {
-        dispatch(&format!("hl.dsp.window.move({{ workspace = 'e+0', window = 'address:{address}' }})"));
-    }
-    dispatch(&format!("hl.dsp.focus({{ window = 'address:{address}' }})"));
 }

@@ -15,6 +15,8 @@ mod hypr;
 mod ipc;
 mod model;
 mod presence;
+mod setup;
+mod tray;
 mod render;
 mod theme;
 
@@ -23,7 +25,8 @@ use joma_quick::ipc::{request, Reply, Request};
 
 use app::*;
 
-const USAGE: &str = "usage: joma                      open Joma (or raise it)
+const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); --hidden starts in the tray
+       joma toggle               show Joma, or hide it when it has the focus
        joma quick --json         the bar widget's contacts and quick messages, as JSON
        joma send <to> <text…>    send a message (to: a conversation, a name or an ID)
        joma send-quick <to> <n>  send quick message n (1-9)
@@ -56,6 +59,7 @@ fn cli(args: &[String]) -> Option<i32> {
         }
         Some("quick") if args.get(1).map(String::as_str) == Some("--json") => Request::Quick,
         Some("show") => Request::Show,
+        Some("toggle") => Request::Toggle,
         Some("quit") => Request::Quit,
         Some("chat") if args.len() >= 2 => Request::Chat { to: args[1].clone(), limit: args.get(2).and_then(|n| n.parse().ok()).unwrap_or(20) },
         Some("call") if args.len() >= 2 => Request::Call { to: args[1].clone(), video: args[2..].iter().any(|a| a == "--video") },
@@ -164,14 +168,21 @@ fn main() {
         .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "warn,joma=info,joma_desk=info".into()))
         .with_writer(std::io::stderr)
         .init();
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let hidden = args.iter().any(|a| a == "--hidden") || std::env::var_os("JOMA_HIDDEN").is_some();
+    args.retain(|a| a != "--hidden");
     if let Some(code) = cli(&args) {
         std::process::exit(code);
     }
-    // One Joma at a time: raise the running one.
-    if request(&Request::Show).is_ok() {
+    // One Joma at a time: raise the running one (at login, leave it be).
+    if request(&if hidden { Request::Quick } else { Request::Show }).is_ok() {
         return;
     }
+    setup::refresh();
+    let hidden = hidden && hypr::start_hidden();
+    hypr::START_HIDDEN.store(hidden, std::sync::atomic::Ordering::SeqCst);
+    // Started in the tray, the window opens as the panel; else as a full window.
+    hypr::set_shape(if hidden { hypr::Shape::Compact } else { hypr::Shape::Full });
     let (tx, rx) = futures::channel::mpsc::unbounded::<AppMsg>();
     let ipc_tx = tx.clone();
     if let Err(e) = ipc::serve(move |p| {
@@ -217,7 +228,7 @@ fn main() {
         let bounds = Bounds::centered(None, size(px(1100.), px(720.)), cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
-            titlebar: Some(TitlebarOptions { title: Some("Joma".into()), ..Default::default() }),
+            titlebar: Some(TitlebarOptions { title: Some(if hidden { hypr::HIDDEN_TITLE } else { "Joma" }.into()), ..Default::default() }),
             app_id: Some("joma".into()),
             ..Default::default()
         };

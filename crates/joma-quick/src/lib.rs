@@ -32,6 +32,8 @@ pub struct QuickConfig {
     pub removed: Vec<String>,
     /// Send no Joma presence (active, away, seen) to contacts.
     pub invisible: bool,
+    /// The setup banner was closed.
+    pub setup_dismissed: bool,
 }
 
 impl Default for QuickConfig {
@@ -51,6 +53,7 @@ impl Default for QuickConfig {
             recent: 6,
             removed: Vec::new(),
             invisible: false,
+            setup_dismissed: false,
         }
     }
 }

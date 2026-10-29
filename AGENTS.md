@@ -19,6 +19,10 @@
   capture is unpaced, so libjami's `AudioInput::readFromDevice` spins during a test call
   and hanging up blocks in `SIPCall::stopAllMedia` (joins that loop). End test calls by
   stopping the profiles; real audio devices are paced and not affected.
+- **Test profiles never register usernames**: the public name server cannot take a name
+  back (`register_name` refuses under `JOMA_PROFILE`). On 2026-10-29 a retried onboarding
+  typed into the username step and registered `arol` for a throwaway account. Check the
+  state before retyping into a flow.
 - In the nest, `grim -o $NEST_HEADLESS` takes screenshots (plain `grim` waits forever);
   `hyprctl dispatch 'hl.dsp.focus({ window = "pid:<pid>" })'` picks the window `wtype`
   types into.

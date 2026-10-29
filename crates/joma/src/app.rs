@@ -20,7 +20,9 @@ use crate::composer::{Composer, Edited, Submit};
 use crate::desk::{After, Desk};
 use crate::ipc::Pending;
 use crate::model::{bare_uri, Call, CallState, FileRef, Model};
+use crate::hypr::Shape;
 use crate::presence::{Presence, State, Wire};
+use crate::tray::{Look, Tray, TrayAction};
 use crate::theme::Theme;
 
 actions!(
@@ -64,6 +66,7 @@ pub enum AppMsg {
     Repaint,
     Ipc(Pending),
     Portal(String, anyhow::Result<PortalShare>),
+    Tray(crate::tray::TrayAction),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -160,6 +163,39 @@ pub struct Joma {
     pub downloads: HashMap<String, std::path::PathBuf>,
     /// Joma presence: ours and our contacts'.
     pub presence: Presence,
+    pub tray: Tray,
+    /// The window is narrow (the compact panel): one column.
+    pub narrow: bool,
+    /// In a narrow window, the conversation is open (else the list shows).
+    pub narrow_chat: bool,
+    /// What the setup banner offers, as found at start and after each step.
+    pub setup: SetupState,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SetupState {
+    pub bar_has_tray: bool,
+    pub pinned: bool,
+    pub shortcut_possible: bool,
+    pub shortcut: bool,
+    pub start_at_login: bool,
+}
+
+impl SetupState {
+    pub fn read() -> SetupState {
+        SetupState {
+            bar_has_tray: crate::setup::bar_has_tray(),
+            pinned: crate::setup::pinned_in_bar(),
+            shortcut_possible: crate::setup::shortcut_possible(),
+            shortcut: crate::setup::has_shortcut(),
+            start_at_login: crate::setup::starts_at_login(),
+        }
+    }
+
+    /// Something left to offer.
+    pub fn pending(&self) -> bool {
+        (self.bar_has_tray && !self.pinned) || (self.shortcut_possible && !self.shortcut) || (!self.start_at_login && std::env::var_os("JOMA_PROFILE").is_none())
+    }
 }
 
 /// Received files up to this size download by themselves (the Jami app's default).
@@ -238,7 +274,7 @@ fn guard_qt() -> bool {
 
 /// Show the window, also when closing it had hidden it.
 fn raise(window: &mut Window) {
-    crate::hypr::show();
+    crate::hypr::show_as(crate::hypr::shape());
     window.activate_window();
 }
 
@@ -257,6 +293,7 @@ fn notify_desktop(title: &str, body: &str) {
 impl Joma {
     pub fn new(tx: UnboundedSender<AppMsg>, rx: futures::channel::mpsc::UnboundedReceiver<AppMsg>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let theme = Rc::new(Theme::current());
+        let tray_tx = tx.clone();
         let composer = cx.new(Composer::new);
         let input = cx.new(Composer::new);
         cx.subscribe(&composer, |this, _, _: &Submit, cx| this.send_composed(cx)).detach();
@@ -335,17 +372,28 @@ impl Joma {
             share_on_connect: HashSet::new(),
             downloads: HashMap::new(),
             presence: Presence::start(),
+            tray: Tray::start(tray_tx, Look { status: crate::tray::Status::Offline, fg: joma_theme::current().foreground, unread: 0, invisible: false, start_at_login: false }),
+            narrow: false,
+            narrow_chat: false,
+            setup: SetupState::read(),
         };
         j.configure_inputs(cx);
         j.boot(cx);
-        // Restarted while hidden (see `restart`): hide again once the window is mapped.
-        if std::env::var_os("JOMA_HIDDEN").is_some() {
-            cx.spawn(async move |_, cx| {
+        // Started in the tray: the window maps into `special:joma` (a rule on its first
+        // title, see `hypr::start_hidden`), or is hidden once mapped; then it takes its
+        // real title. A new account shows the window to be created.
+        if crate::hypr::START_HIDDEN.load(Ordering::SeqCst) {
+            let onboarding = j.gate == Gate::Onboarding;
+            cx.spawn_in(window, async move |_, cx| {
                 for _ in 0..20 {
                     cx.background_executor().timer(Duration::from_millis(100)).await;
-                    if crate::hypr::hide() {
+                    if crate::hypr::hidden() || crate::hypr::hide() {
                         break;
                     }
+                }
+                let _ = cx.update(|window, _| window.set_window_title("Joma"));
+                if onboarding {
+                    crate::hypr::show_as(Shape::Full);
                 }
             })
             .detach();
@@ -576,6 +624,7 @@ impl Joma {
             }
         }
         self.tell_presence();
+        self.update_tray();
         if self.presence.expire(Instant::now()) {
             cx.notify();
         }
@@ -646,6 +695,16 @@ impl Joma {
                 self.desk.portal_ready(&acc, &call, result);
                 cx.notify();
             }
+            AppMsg::Tray(action) => match action {
+                TrayAction::Toggle => self.toggle_window(window, cx),
+                TrayAction::Open => raise(window),
+                TrayAction::Invisible => self.toggle_invisible(cx),
+                TrayAction::StartAtLogin => self.set_start_at_login(!self.setup.start_at_login, cx),
+                TrayAction::Quit => {
+                    self.leave();
+                    cx.quit();
+                }
+            },
         }
     }
 
@@ -905,6 +964,84 @@ impl Joma {
     }
 
     /// Share the desktop with a conversation's peer without a call.
+    /// The tray icon or Super+Alt+M: show the window, or hide it when it has the focus.
+    pub fn toggle_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if crate::hypr::hidden() || !crate::hypr::focused() {
+            raise(window);
+        } else {
+            crate::hypr::hide();
+        }
+        cx.notify();
+    }
+
+    /// From the compact panel to the full window.
+    pub fn pop_out(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        crate::hypr::set_shape(Shape::Full);
+        raise(window);
+        cx.notify();
+    }
+
+    /// Back into the tray; the next show is the compact panel.
+    pub fn pop_in(&mut self, cx: &mut Context<Self>) {
+        crate::hypr::set_shape(Shape::Compact);
+        crate::hypr::hide();
+        cx.notify();
+    }
+
+    pub fn set_start_at_login(&mut self, on: bool, cx: &mut Context<Self>) {
+        match crate::setup::set_start_at_login(on) {
+            Ok(()) => self.show_flash(if on { "Joma starts at login, in the tray" } else { "Joma no longer starts at login" }, cx),
+            Err(e) => self.show_flash(format!("start at login: {e:#}"), cx),
+        }
+        self.setup = SetupState::read();
+        cx.notify();
+    }
+
+    pub fn pin_in_bar(&mut self, cx: &mut Context<Self>) {
+        match crate::setup::pin_in_bar() {
+            Ok(()) => self.show_flash("Joma's icon is pinned in the bar", cx),
+            Err(e) => self.show_flash(format!("pin in the bar: {e:#}"), cx),
+        }
+        self.setup = SetupState::read();
+        cx.notify();
+    }
+
+    pub fn add_shortcut(&mut self, cx: &mut Context<Self>) {
+        match crate::setup::add_shortcut() {
+            Ok(()) => self.show_flash("Super+Alt+M opens and closes Joma", cx),
+            Err(e) => self.show_flash(format!("shortcut: {e:#}"), cx),
+        }
+        self.setup = SetupState::read();
+        cx.notify();
+    }
+
+    pub fn dismiss_setup(&mut self, cx: &mut Context<Self>) {
+        self.quick.setup_dismissed = true;
+        self.save_quick(cx);
+    }
+
+    /// The tray icon follows the status, the theme and the settings.
+    fn update_tray(&mut self) {
+        let unread = self.listed_unread();
+        let registered = self.model.registration == "REGISTERED";
+        let status = if !registered {
+            crate::tray::Status::Offline
+        } else if unread > 0 {
+            crate::tray::Status::Unread
+        } else if self.quick.invisible {
+            crate::tray::Status::Invisible
+        } else {
+            crate::tray::Status::Online
+        };
+        self.tray.set(Look {
+            status,
+            fg: joma_theme::current().foreground,
+            unread,
+            invisible: self.quick.invisible,
+            start_at_login: self.setup.start_at_login,
+        });
+    }
+
     /// Peers of our one-to-one conversations still in the list: who hears our presence.
     fn presence_contacts(&self) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
@@ -1517,6 +1654,10 @@ impl Joma {
                 raise(window);
                 Reply::Done
             }
+            Request::Toggle => {
+                self.toggle_window(window, cx);
+                Reply::Done
+            }
             Request::Quick => {
                 // The file can change outside Joma (edited by hand, or another tool).
                 let quick = QuickConfig::load();
@@ -1602,6 +1743,7 @@ impl Joma {
                         self.set_mode(Mode::Chat, window, cx);
                     }
                     self.select(conv, cx);
+                    self.narrow_chat = true;
                     raise(window);
                     Reply::Done
                 }

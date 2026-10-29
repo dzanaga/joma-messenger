@@ -33,14 +33,37 @@ notifications when the window is not active. Names come from peers' profiles and
 name server.
 
 ## Files
-Send with the bar widget or `joma send-file`. Received files up to 20 MB download by
+Send with the clip button in a conversation or `joma send-file`. Received files up to 20 MB download by
 themselves into `~/Downloads/joma/` (a desktop notification says when); larger ones show
 their size in the chat: click to download. Click a received file to open it.
 
-## Running in the background
-Closing the window hides it (Hyprland's special workspace `special:joma`): Joma keeps
-receiving messages and calls, the bar widget keeps working, and `joma`, the launcher,
-`joma open` or an incoming call bring the window back. Ctrl+Q or `joma quit` quits.
+## In the bar
+Joma lives in the system tray, which the Omarchy bar shows: the j in the theme's
+colour, its dot lavender online, green with unread messages, red offline, grey invisible.
+- **Click the icon, or Super+Alt+M (`joma toggle`):** the compact panel drops down under
+  the bar at the right: the list, then one conversation at a time (Esc goes back).
+  Again: it hides.
+- **Right click:** open, invisible, start at login, quit.
+- **"full" in the top bar:** pops out to the full window. **"to the tray"** pops back in.
+- **Closing the window** (Super+W) hides it to the tray; Joma keeps receiving messages and
+  calls. `joma`, the launcher, `joma open` or an incoming call bring it back. Ctrl+Q,
+  `joma quit` or Quit in the tray's menu quits.
+- **`joma --hidden`** starts in the tray, as the login start does.
+
+## Setting up
+At every start Joma writes its launcher entry and icons (`~/.local/share/applications`,
+`~/.local/share/icons`). A banner offers the rest, each with one click, and goes away
+when done or closed:
+- **pin the icon in the bar:** new tray icons wait in the tray's drawer; this adds
+  `joma` to the tray's `pinned` in `~/.config/omarchy/shell.json`;
+- **Super+Alt+M:** a block in `~/.config/hypr/bindings.lua`, offered only when the keys
+  are free;
+- **start at login:** the systemd user unit `joma.service` (`joma --hidden`); also in
+  the tray's menu.
+
+Each piece names the `joma` that wrote it (the mise shim when installed with mise), and
+is rewritten at start if Joma moved. Backups: `shell.json.joma-backup`,
+`bindings.lua.joma-backup`.
 
 ## Beside the Jami app
 Joma and the Jami app share accounts and history, and only one may run at a time. When
@@ -52,8 +75,7 @@ Audio or video calls (Ctrl+Shift+C / V), answer (Ctrl+Shift+A), hang up (Ctrl+Sh
 mute, camera. Remote video in the call panel; F11 fills the window.
 
 ## Desktop share
-Without a call: the screen button in a conversation's header, the bar widget's share
-button or `joma share <to>`. The other Joma asks its user ("… wants to show you their
+Without a call: the screen button in a conversation's header or `joma share <to>`. The other Joma asks its user ("… wants to show you their
 screen": watch or decline, or `joma watch <to>`); no call starts and nothing goes into
 the history. Either side stops it; the sharer's share ends when the viewer leaves. If the
 peer has no Joma, Joma calls them with the microphone off and shares through Jami.
@@ -61,14 +83,7 @@ In a call: Ctrl+Shift+S. With a Joma peer: gliff's pipeline, sharp text, the poi
 drawn on the viewer. Otherwise: Jami's screen share through the portal.
 
 ## Quick Messages
-Ctrl+. and Alt+1…9 in the window; `joma send`; the Omarchy bar widget: contacts with
-pinned and unread on top, then whoever is online; click one for a quick chat (latest
-messages, reply box) with buttons to call, video call, share the screen, send a file or
-open the conversation in Joma. Its icon is the Joma j in the bar's colour, its dot
-showing the status: lavender online, green with unread messages, red offline, grey
-invisible (`onlineColor`, `unreadColor`, `offlineColor`, `invisibleColor` in the
-widget's entry in `~/.config/omarchy/shell.json`). Dimmed while Joma is not running (click it then to
-start Joma).
+Ctrl+. and Alt+1…9 in the window or the panel; `joma send` and `joma send-quick`.
 
 ## Command line
 `joma chat <to> [n]` (JSON), `joma call <to> [--video]`, `joma share <to>`, `joma watch <to>`,
@@ -80,6 +95,10 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
+- 0.4.0-rc.1 (2026-10-29): Joma lives in the tray (status dot, menu) instead of a bar
+  plugin; the compact panel under the bar, pop-out to the full window and back; `joma
+  toggle`, `joma --hidden`; the setup banner (pin in the bar, Super+Alt+M, start at
+  login); launcher and icons written by Joma itself; installable with mise.
 - unreleased: the v2 logo (app icon: the j with its lavender dot on black); the bar
   icon's dot shows the status (online, unread, offline, invisible).
 - 0.3.0 (2026-10-28): presence between Joma users (active, away, seen) and invisible mode;

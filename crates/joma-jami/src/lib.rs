@@ -194,7 +194,13 @@ pub fn update_profile(account: &str, display_name: &str) -> Result<()> {
 
 /// Register `name` on the name server for this account; the answer arrives as
 /// [`Event::NameRegistered`].
+///
+/// Never from a test profile (`JOMA_PROFILE`): a name on the public server cannot be
+/// taken back, and a test account's name would stay there forever.
 pub fn register_name(account: &str, name: &str) -> Result<bool> {
+    if std::env::var_os("JOMA_PROFILE").is_some() {
+        anyhow::bail!("test profiles never register usernames (the name server is public)");
+    }
     typed("registerName", json!([account, name]))
 }
 

@@ -12,7 +12,7 @@ to Jami's own screen share.
 | `joma-jami` | libjami in process: a C++ shim with one JSON call entry and one JSON signal callback; typed calls and `Event`s in Rust |
 | `joma-theme` | Omarchy's current `colors.toml` as a GPUI palette, with a fallback (Tokyo Night) |
 | `joma-desk` | Joma desktop share: signalling over in-call or account messages (share without a call), gliff's capture → split → H.264 pipeline on the sharer, decode → BGRA on the viewer, carried over a Jami service tunnel; plus the Jami portal fallback |
-| `joma-quick` | Quick Messages config and the socket protocol (CLI, bar plugin) |
+| `joma-quick` | Quick Messages config and the socket protocol (CLI) |
 | `joma` | The GPUI app and the CLI (`joma`, `joma send`, `joma share`, …) |
 
 Design notes live in `docs/design/`. Decisions are in `docs/DECISIONS.md`.
@@ -27,7 +27,7 @@ Design notes live in `docs/design/`. Decisions are in `docs/DECISIONS.md`.
 | **J3** | Joma desktop share (gliff pipeline over a Jami tunnel) with fallback to Jami screen share | verified between two profiles: 4:4:4 at ~55 fps (1280x800, Intel encode and decode); GPU tiers and `joma probe`; fallback not yet tested |
 | **J4** | Packaging: icon, desktop entry, `scripts/install.sh` (local or SSH), Hyprland binding; later a PKGBUILD | install script and launcher done; omatwin paused (development) |
 | **J5** | Remote control (gliff input), clipboard, multi-output picker, file transfer UI, group calls | files: send and receive done (verified between test profiles); the rest planned, remote control and clipboard next |
-| **J6** | Living in the bar: GPUI from Zed's git (layer shell), a dropdown panel drawn by Joma under the bar, pop-out to the full window and pop-in back, global shortcuts, a systemd user unit, start at login / in the bar | proposed: `docs/discussions/2026-10-29-joma-in-the-bar.qmd` |
+| **J6** | Living in the bar: a tray icon (StatusNotifierItem) with a status dot instead of a shell plugin; the compact panel under the bar (a floating window), pop-out to the full window and back; Super+Alt+M; start at login (systemd user unit) and in the tray; the setup banner | built (0.4.0-rc.1): `docs/design/05-tray-and-panel.md`; tray, panel, hidden start verified in the nest |
 | **J7** | Settings and management: settings view (`config.toml`), contacts page (nicknames, block, requests), clear / delete chats, profile, devices (link, revoke), backup | proposed (same discussion) |
 | **J8** | Multiple accounts: switcher, all connected, add / import / link / remove, combined bar status | proposed (same discussion) |
-| **J9** | Packaging: public repository, GitHub Actions release builds, AUR `joma-messenger-bin` (updates with `omarchy update`), first-run bar and shortcut integration; later the Omarchy repository | proposed (same discussion) |
+| **J9** | Packaging: public repository, pre-releases installable with mise (`github:dzanaga/joma-messenger`); later GitHub Actions builds, AUR `joma-messenger-bin` (updates with `omarchy update`), the Omarchy repository | mise pre-releases from 0.4.0-rc.1; the rest proposed |

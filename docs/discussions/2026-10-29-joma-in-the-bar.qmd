@@ -34,6 +34,11 @@ in the full window pops it back into the bar.
 
 **Q1. Draw the dropdown panel with Joma itself (GPUI), not with the QML plugin.**
 
+> Decided in chat (2026-10-29): no plugin. Joma lives in the system tray like Signal
+> (status dot, menu); a click or Super+Alt+M opens a compact floating window under the
+> bar, which pops out to the full window. Built in 0.4.0-rc.1
+> (`docs/design/05-tray-and-panel.md`).
+
 Zed's GPUI can now open Wayland layer-shell surfaces (`WindowKind::LayerShell`), the
 same kind of surface the Omarchy bar and its panels use. Joma can therefore draw a panel
 anchored under the bar, at the right edge, above the other windows.

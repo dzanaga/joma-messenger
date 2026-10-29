@@ -28,6 +28,11 @@
 - D-14 Presence: Jami's reachability is a faint dot; Joma users exchange active/away
   (full green dot, "active now", "away since", "seen"); invisible sends nothing.
   (User, 2026-10-28.)
+- D-15 No shell plugin: Joma lives in the system tray (StatusNotifierItem) with a status
+  dot; the panel is a compact floating window under the bar; a banner offers pinning,
+  Super+Alt+M and start at login. (User, 2026-10-29.)
+- D-16 The repository is public; pre-releases are installed with mise from GitHub
+  releases. (User, 2026-10-29.)
 
 ## Decided
 

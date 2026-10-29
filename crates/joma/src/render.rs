@@ -31,6 +31,9 @@ pub const G_CHECK: &str = "\u{f00c}";
 pub const G_TIMES: &str = "\u{f00d}";
 pub const G_EYE: &str = "\u{f06e}";
 pub const G_EXPAND: &str = "\u{f065}";
+pub const G_COMPRESS: &str = "\u{f066}";
+pub const G_BACK: &str = "\u{f053}";
+pub const G_CLIP: &str = "\u{f0c6}";
 pub const G_TRASH: &str = "\u{f1f8}";
 pub const G_UNDO: &str = "\u{f0e2}";
 
@@ -185,7 +188,7 @@ impl Joma {
                             .items_baseline()
                             .gap(px(5.))
                             .child(div().text_color(t.accent).font_weight(FontWeight::BOLD).child("joma"))
-                            .child(div().text_color(t.muted).text_size(px(t.size - 2.)).child(concat!("v", env!("CARGO_PKG_VERSION")))),
+                            .when(!self.narrow, |d| d.child(div().text_color(t.muted).text_size(px(t.size - 2.)).child(concat!("v", env!("CARGO_PKG_VERSION"))))),
                     )
                     .child(div().text_color(t.muted).child("·"))
                     .child(div().text_color(t.bright).child(if self.model.my_name.is_empty() {
@@ -196,7 +199,7 @@ impl Joma {
                     .when(!self.model.username.is_empty(), |d| {
                         d.child(div().text_color(t.muted).child(format!("@{}", self.model.username)))
                     })
-                    .when(self.model.username.is_empty() && self.gate == Gate::Ready, |d| {
+                    .when(self.model.username.is_empty() && self.gate == Gate::Ready && !self.narrow, |d| {
                         d.child(
                             div()
                                 .id("choose-username")
@@ -227,10 +230,69 @@ impl Joma {
                     .items_center()
                     .gap(px(12.))
                     .text_color(t.muted)
-                    .when(unread > 0, |d| d.child(div().text_color(t.accent).child(format!("{unread} unread"))))
-                    .child(format!("{} conversations", self.model.conversations.len())),
+                    .when(unread > 0 && !self.narrow, |d| d.child(div().text_color(t.accent).child(format!("{unread} unread"))))
+                    .when(!self.narrow, |d| d.child(format!("{} conversations", self.model.conversations.len())))
+                    .child({
+                        // Pop out to the full window, or back into the tray.
+                        let full = crate::hypr::shape() == crate::hypr::Shape::Full;
+                        div()
+                            .id("pop")
+                            .cursor_pointer()
+                            .hover(|d| d.text_color(t.accent))
+                            .child(if full { format!("{G_COMPRESS} to the tray") } else { format!("{G_EXPAND} full") })
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                if full {
+                                    this.pop_in(cx)
+                                } else {
+                                    this.pop_out(window, cx)
+                                }
+                            }))
+                    }),
             )
             .into_any_element()
+    }
+
+    /// Offers to set Joma up on this desktop, until done or closed.
+    fn setup_banner(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let s = self.setup;
+        if self.gate != Gate::Ready || self.quick.setup_dismissed || !s.pending() {
+            return None;
+        }
+        let test = std::env::var_os("JOMA_PROFILE").is_some();
+        Some(
+            div()
+                .flex()
+                .flex_none()
+                .flex_wrap()
+                .items_center()
+                .gap(px(8.))
+                .px(px(12.))
+                .py(px(6.))
+                .bg(t.accent_bg)
+                .border_b_1()
+                .border_color(t.border)
+                .child(div().text_color(t.bright).child("Set Joma up here:"))
+                .when(s.bar_has_tray && !s.pinned, |d| {
+                    d.child(button("setup-pin", G_CHECK, "pin the icon in the bar", t, false).on_click(cx.listener(|this, _, _, cx| this.pin_in_bar(cx))))
+                })
+                .when(s.shortcut_possible && !s.shortcut, |d| {
+                    d.child(button("setup-key", G_CHECK, "Super+Alt+M", t, false).on_click(cx.listener(|this, _, _, cx| this.add_shortcut(cx))))
+                })
+                .when(!s.start_at_login && !test, |d| {
+                    d.child(button("setup-login", G_CHECK, "start at login", t, false).on_click(cx.listener(|this, _, _, cx| this.set_start_at_login(true, cx))))
+                })
+                .child(div().flex_1())
+                .child(
+                    div()
+                        .id("setup-close")
+                        .text_color(t.muted)
+                        .cursor_pointer()
+                        .hover(|d| d.text_color(t.accent))
+                        .child(G_TIMES)
+                        .on_click(cx.listener(|this, _, _, cx| this.dismiss_setup(cx))),
+                )
+                .into_any_element(),
+        )
     }
 
     fn sidebar(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
@@ -270,6 +332,7 @@ impl Joma {
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.set_mode(Mode::Chat, window, cx);
                         this.select(id.clone(), cx);
+                        this.narrow_chat = true;
                     }))
                     .child(
                         div()
@@ -340,8 +403,8 @@ impl Joma {
         div()
             .flex()
             .flex_col()
-            .flex_none()
-            .w(px(290.))
+            .when(!self.narrow, |d| d.flex_none().w(px(290.)))
+            .when(self.narrow, |d| d.flex_1().min_w(px(0.)))
             .h_full()
             .bg(t.panel)
             .border_r_1()
@@ -722,10 +785,19 @@ impl Joma {
             .py(px(8.))
             .border_b_1()
             .border_color(t.border)
+            .when(self.narrow, |d| {
+                d.child(button("back", G_BACK, "", t, false).mr(px(8.)).on_click(cx.listener(|this, _, _, cx| {
+                    this.narrow_chat = false;
+                    cx.notify();
+                })))
+            })
             .child(
                 div()
                     .flex()
                     .flex_col()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .overflow_hidden()
                     .child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child(conv.title.clone()))
                     .child(div().text_size(px(t.size - 2.)).text_color(t.muted).child({
                         let who = if peers == conv.title { peer_ids } else { format!("{peers} · {peer_ids}") };
@@ -744,10 +816,14 @@ impl Joma {
                         let id = conv.id.clone();
                         d.child(button("remove", G_TRASH, "", t, false).on_click(cx.listener(move |this, _, _, cx| this.remove_from_list(&id, cx))))
                     })
-                    .child(button("quick", G_BOLT, "quick", t, self.quick_open).on_click(cx.listener(|this, _, _, cx| {
+                    .child(button("quick", G_BOLT, if self.narrow { "" } else { "quick" }, t, self.quick_open).on_click(cx.listener(|this, _, _, cx| {
                         this.quick_open = !this.quick_open;
                         cx.notify();
                     })))
+                    .when(!conv.request, |d| {
+                        let id = conv.id.clone();
+                        d.child(button("send-file", G_CLIP, "", t, false).on_click(cx.listener(move |this, _, _, cx| this.pick_and_send(id.clone(), cx))))
+                    })
                     .when(!has_call && !conv.request, |d| {
                         d.child(button("share-d", G_DESKTOP, "", t, false).on_click(cx.listener(|this, _, _, cx| {
                             if let Some(conv) = this.selected.clone() {
@@ -822,6 +898,8 @@ impl Joma {
                 Mode::Search => "enter: open first · esc: cancel",
                 Mode::Username => "enter: register · esc: cancel",
                 Mode::Removed => "removed contacts · esc: back",
+                Mode::Chat if self.narrow && self.narrow_chat => "esc: back · ctrl+.: quick",
+                Mode::Chat if self.narrow => "ctrl+n: add · ctrl+k: find · alt+j/k: move",
                 Mode::Chat => "alt+j/k: conversations · ctrl+n: add · ctrl+k: find · ctrl+shift+c/v: call · ctrl+shift+s: share · ctrl+.: quick",
             }),
         };
@@ -836,13 +914,13 @@ impl Joma {
             .border_t_1()
             .border_color(t.border)
             .text_size(px(t.size - 2.))
-            .child(left)
-            .child(div().text_color(t.muted).child(format!("libjami · {}", self.model.account)))
+            .child(left.overflow_hidden())
+            .when(!self.narrow, |d| d.child(div().text_color(t.muted).child(format!("libjami · {}", self.model.account))))
             .into_any_element()
     }
 
     fn gate_screen(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let card = div().flex().flex_col().gap(px(12.)).w(px(520.)).p(px(24.)).border_1().border_color(t.border).bg(t.panel);
+        let card = div().flex().flex_col().gap(px(12.)).w(px(520.)).max_w_full().p(px(24.)).border_1().border_color(t.border).bg(t.panel);
         let card = match &self.gate {
             Gate::QtRunning => card
                 .child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child("Jami is open"))
@@ -881,7 +959,18 @@ impl Render for Joma {
         } else if lost {
             window.focus(&self.focus);
         }
-        let body = if self.gate == Gate::Ready {
+        // A narrow window (the compact panel) shows the list or one conversation.
+        self.narrow = window.viewport_size().width < px(700.);
+        let body = if self.gate == Gate::Ready && self.narrow {
+            let chat = self.narrow_chat && self.selected.is_some();
+            div()
+                .flex()
+                .flex_1()
+                .min_h(px(0.))
+                .when(chat, |d| d.child(self.chat(&t, cx)))
+                .when(!chat, |d| d.child(self.sidebar(&t, cx)))
+                .into_any_element()
+        } else if self.gate == Gate::Ready {
             div()
                 .flex()
                 .flex_1()
@@ -912,6 +1001,12 @@ impl Render for Joma {
             .on_action(cx.listener(|this, _: &NewConversation, window, cx| this.set_mode(Mode::Add, window, cx)))
             .on_action(cx.listener(|this, _: &Search, window, cx| this.set_mode(Mode::Search, window, cx)))
             .on_action(cx.listener(|this, _: &Cancel, window, cx| {
+                // In the compact panel, Esc goes back to the list.
+                if this.narrow && this.narrow_chat && this.mode == Mode::Chat && !this.quick_open && !this.stage {
+                    this.narrow_chat = false;
+                    cx.notify();
+                    return;
+                }
                 this.quick_open = false;
                 this.stage = false;
                 this.set_mode(Mode::Chat, window, cx);
@@ -953,6 +1048,7 @@ impl Render for Joma {
             .on_action(cx.listener(|this, _: &Quick9, _, cx| this.send_quick(8, cx)))
             .on_mouse_down(MouseButton::Left, |_, _, _| {})
             .child(self.top_bar(&t, cx))
+            .children(self.setup_banner(&t, cx))
             .child(body)
             .child(self.status_line(&t))
     }
