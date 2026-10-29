@@ -11,8 +11,11 @@ the whole install, and it works with any tray (Omarchy's bar, waybar, KDE).
   when the look changes. `JOMA_TRAY=0` leaves it out.
 - **Activate** (left click) sends `TrayAction::Toggle`; the menu: open, invisible, start
   at login, quit.
-- **Window shapes** (`hypr.rs`): compact, a floating 460×680 window under the bar
-  (the monitor's reserved top) at the right; full, tiled. `joma toggle` shows the
+- **Window shapes** (`hypr.rs`), both floating: compact, 460×680 under the bar (the
+  monitor's reserved top) at the right; full, 980×680 centred (at most 90% of the
+  screen). A normal start maps it floating and centred through a rule on the first title
+  `Joma`. GPUI's Wayland window maps without the title of its options, so `main` sets it
+  in the open callback. `joma toggle` shows the
   window in its shape on the current workspace, or hides it to `special:joma` when it has
   the focus. Not pinned: a pinned window loses keys in Hyprland 0.56. Started with
   `--hidden`, a window rule on the first title (`joma-start-hidden`) maps it straight

@@ -192,6 +192,9 @@ fn main() {
     hypr::START_HIDDEN.store(hidden, std::sync::atomic::Ordering::SeqCst);
     // Started in the tray, the window opens as the panel; else as a full window.
     hypr::set_shape(if hidden { hypr::Shape::Compact } else { hypr::Shape::Full });
+    if !hidden {
+        hypr::float_at_start();
+    }
     let (tx, rx) = futures::channel::mpsc::unbounded::<AppMsg>();
     let ipc_tx = tx.clone();
     if let Err(e) = ipc::serve(move |p| {
@@ -245,6 +248,9 @@ fn main() {
         let tx = tx.clone();
         cx.open_window(options, move |window, cx| {
             let rx = rx.take().expect("one window");
+            // GPUI's Wayland window maps without the title of its options: set it now, so
+            // Hyprland's rules on the first title (see `hypr`) see it.
+            window.set_window_title(if hidden { hypr::HIDDEN_TITLE } else { "Joma" });
             // Closing hides the window and Joma keeps running; Ctrl+Q quits.
             window.on_window_should_close(cx, |_, _| !hypr::hide());
             cx.new(|cx| Joma::new(tx.clone(), rx, window, cx))

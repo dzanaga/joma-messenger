@@ -3,8 +3,8 @@
 //! `joma open` or a call. GPUI ends the app with its last window, and Hyprland has no
 //! minimize, so this is how Joma stays in the tray and keeps receiving messages and calls.
 //!
-//! The window has two shapes: compact, a floating panel under the bar at the right
-//! (like a tray app's popup), and full, an ordinary tiled window.
+//! The window has two shapes, both floating: compact, a panel under the bar at the right
+//! (like a tray app's popup), and full, a messenger-sized window centred on the screen.
 
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -70,8 +70,29 @@ pub fn set_shape(s: Shape) {
     FULL.store(s == Shape::Full, Ordering::Relaxed);
 }
 
-/// The compact panel's size, logical pixels.
+/// The compact panel's and the full window's sizes, logical pixels.
 const PANEL: (i64, i64) = (460, 680);
+const WINDOW: (i64, i64) = (980, 680);
+
+/// A normal start maps the window floating and centred (a rule on its first title).
+pub fn float_at_start() {
+    let (w, h) = WINDOW;
+    hyprctl(&[
+        "eval",
+        &format!("hl.window_rule({{ match = {{ class = '^joma$', initial_title = '^Joma$' }}, float = true, size = {{ {w}, {h} }}, center = true }})"),
+    ]);
+}
+
+/// The focused monitor's usable size, logical pixels.
+fn usable() -> Option<(i64, i64)> {
+    let monitors: serde_json::Value = serde_json::from_str(&hyprctl(&["monitors", "-j"])?).ok()?;
+    let m = monitors.as_array()?.iter().find(|m| m["focused"] == true)?;
+    let scale = m["scale"].as_f64().filter(|s| *s > 0.0).unwrap_or(1.0);
+    let r: Vec<i64> = m["reserved"].as_array()?.iter().filter_map(|v| v.as_i64()).collect();
+    let w = (m["width"].as_f64()? / scale) as i64 - r.first().unwrap_or(&0) - r.get(2).unwrap_or(&0);
+    let h = (m["height"].as_f64()? / scale) as i64 - r.get(1).unwrap_or(&0) - r.get(3).unwrap_or(&0);
+    Some((w, h))
+}
 const GAP: i64 = 8;
 
 /// Where the panel goes on the focused monitor: under the bar (the reserved top), at
@@ -105,7 +126,11 @@ pub fn show_as(shape: Shape) -> bool {
             }
         }
         Shape::Full => {
-            dispatch(&format!("hl.dsp.window.float({{ action = 'disable', {w} }})"));
+            dispatch(&format!("hl.dsp.window.float({{ action = 'enable', {w} }})"));
+            let (uw, uh) = usable().unwrap_or(WINDOW);
+            let (fw, fh) = (WINDOW.0.min(uw * 9 / 10), WINDOW.1.min(uh * 9 / 10));
+            dispatch(&format!("hl.dsp.window.resize({{ x = {fw}, y = {fh}, {w} }})"));
+            dispatch(&format!("hl.dsp.window.center({{ {w} }})"));
         }
     }
     dispatch(&format!("hl.dsp.focus({{ {w} }})"))

@@ -44,7 +44,9 @@ colour, its dot lavender online, green with unread messages, red offline, grey i
   the bar at the right: the list, then one conversation at a time (Esc goes back).
   Again: it hides.
 - **Right click:** open, invisible, start at login, quit.
-- **"full" in the top bar:** pops out to the full window. **"to the tray"** pops back in.
+- **Opening Joma** (the launcher, `joma`): a floating window, 980×680, centred, like a
+  messenger app. **"full" in the panel's top bar** pops out to it; **"to the tray"** pops
+  back in.
 - **Closing the window** (Super+W) hides it to the tray; Joma keeps receiving messages and
   calls. `joma`, the launcher, `joma open` or an incoming call bring it back. Ctrl+Q,
   `joma quit` or Quit in the tray's menu quits.
@@ -95,6 +97,8 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
+- 0.4.0-rc.2 (2026-10-29): Joma opens as a floating, centred window instead of a tiled
+  one; started over SSH it says how to start it instead of crashing.
 - 0.4.0-rc.1 (2026-10-29): Joma lives in the tray (status dot, menu) instead of a bar
   plugin; the compact panel under the bar, pop-out to the full window and back; `joma
   toggle`, `joma --hidden`; the setup banner (pin in the bar, Super+Alt+M, start at
