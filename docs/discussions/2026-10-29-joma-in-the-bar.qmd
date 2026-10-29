@@ -1,0 +1,272 @@
+---
+title: "Joma as an Omarchy app: living in the bar, settings, accounts, packaging"
+date: 2026-10-29
+lang: en
+---
+
+# How to read
+
+Under each question there is a `- [ ] A:` line.
+
+- **Tick it without writing anything:** you agree with the proposal.
+- **Tick it and add a detail:** you agree, with that detail.
+- **Leave it unticked and write:** I revise the proposal.
+
+Nothing here is built yet. The plan is in `docs/PLAN.md` (milestones J6 to J9).
+
+# Where we are
+
+- Joma is a normal window. Closing it hides it in `special:joma`, so it keeps running.
+- The bar shows a separate QML plugin, which talks to Joma through `joma quick --json`.
+- It has its own dropdown: contacts, quick chat, and call, share and file buttons.
+- Installing takes three steps:
+  1. `scripts/install.sh` puts the binary, icons and launcher in place;
+  2. the plugin is linked into `~/.config/omarchy/plugins` by hand;
+  3. the Super+Alt+M binding is added to `bindings.lua` by hand.
+- Joma does not start at login. It manages one account only, and nothing else (no
+  contacts, chats or profile) beyond what the chat view offers.
+
+# A. Living in the bar
+
+The idea: when Joma starts, it shows nothing but its icon in the bar. Clicking the icon
+drops a panel down from the bar. A button in the panel pops the full window out; a button
+in the full window pops it back into the bar.
+
+**Q1. Draw the dropdown panel with Joma itself (GPUI), not with the QML plugin.**
+
+Zed's GPUI can now open Wayland layer-shell surfaces (`WindowKind::LayerShell`), the
+same kind of surface the Omarchy bar and its panels use. Joma can therefore draw a panel
+anchored under the bar, at the right edge, above the other windows.
+
+- One interface, one codebase: the panel and the full window share views, theme, input
+  and keyboard shortcuts. The quick chat is the real chat (history, files, typing),
+  not a reduced copy over the socket.
+- The QML plugin shrinks to the icon with its status dot. A click runs `joma panel`.
+  The plugin no longer polls `joma quick --json` every 15 seconds: Joma pushes the
+  status.
+- Cost: Joma moves from GPUI 0.2.2 on crates.io, which has no layer shell, to a pinned
+  revision of Zed's git repository, as already done for gliff. The first attempt in Zed
+  was reverted (#32651) and later reintroduced (#35610), so I check it on Hyprland
+  before building on it.
+- If the layer shell does not work well enough, the fallback is a normal floating window
+  that Hyprland places under the bar with a window rule (like the old `joma quick`).
+
+Alternative: keep the QML panel and keep growing it. It looks native in the shell, but it
+is a second interface to maintain, and it only sees what the socket exposes.
+
+- [ ] A:
+
+**Q2. What the panel shows.**
+
+Proposal, about 420×560 px:
+
+- **Top:** your name, the status dot, buttons for invisible, settings and pop-out.
+- **Middle:** a search field, then contacts as now (pinned, unread, online, recent).
+- **Click a contact:** the conversation opens in the panel (last messages, composer,
+  call, share and file buttons); Esc goes back to the list.
+- **Incoming call:** the panel opens by itself with answer and decline, even when
+  closed.
+
+- [ ] A:
+
+**Q3. Pop-out and pop-in.**
+
+- **Pop-out** (button in the panel, or Ctrl+Shift+O): the panel closes and the full
+  window opens on the current workspace, on the same conversation.
+- **Pop-in** (button in the full window's top bar, or Ctrl+Shift+O again): the window
+  closes and Joma goes back to the bar.
+- **Closing the full window** (Super+W or Ctrl+W) pops it in, without quitting.
+- **Ctrl+Q** really quits (the dot turns red).
+
+GPUI ends the app when its last window closes; today Joma avoids that by hiding the
+window in `special:joma`. With the panel there is a way out: Joma keeps an invisible
+layer surface open, so no window is needed. If that does not hold, Joma keeps hiding the
+window as it does now.
+
+- [ ] A:
+
+**Q4. Global shortcuts.**
+
+| Keys | Action |
+|---|---|
+| Super+Alt+M | open or close the panel (as now) |
+| Super+Alt+Shift+M | open the full window, or bring it back |
+
+Joma registers them through the Hyprland binding file, after asking (see Q12).
+
+- [ ] A:
+
+# B. Start, settings
+
+**Q5. Start at login, in the bar.**
+
+- A systemd user unit, `joma.service`, tied to the graphical session.
+  - Omarchy starts the session with uwsm, so this is the standard way.
+  - It also restarts Joma if it crashes, which a `exec-once` line does not do.
+- "Start at login" in the settings turns the unit on or off.
+- "Start in the bar" is on by default; off opens the full window at start.
+- The service's journal (`journalctl --user -u joma`) replaces the log file.
+
+Defaults I propose: start at login **on** once installed from a package, **off** with
+`scripts/install.sh`.
+
+- [ ] A:
+
+**Q6. Settings, as a view of the full window (gear in the panel and the top bar).**
+
+Sections:
+
+- **General:** start at login, start in the bar, invisible, notifications (sound, show
+  the text or only the sender), download folder, automatic download limit (20 MB).
+- **Appearance:** follows the Omarchy theme (as now); font size.
+- **Shortcuts:** the list, editable later.
+- **Quick messages:** the list (today only `quick.toml`).
+- **About:** version, check for updates (see Q14).
+
+Everything saves to `~/.config/joma/config.toml`. `quick.toml` stays for the
+favourites and the removed list, which change often.
+
+- [ ] A:
+
+# C. Contacts, chats, account
+
+**Q7. A contacts page.**
+
+- The list of all contacts with:
+  - name, username, ID (copy), status;
+  - date added;
+  - a shared-conversation link.
+- Actions:
+  - **local nickname:** a name only you see, which beats theirs;
+  - **favourite;**
+  - **remove:** the current flow;
+  - **block:** Jami's ban: they cannot write or call;
+  - **unblock.**
+- Pending requests, received and sent, with accept, decline and cancel.
+
+- [ ] A:
+
+**Q8. Deleting chats.**
+
+Jami keeps conversations in a git repository copied on every member's devices, so no
+client can erase the other side's copy.
+
+- **Clear history** removes the messages on your devices only. The contact stays.
+- **Delete conversation:** you leave it and its data goes from your devices (today:
+  "delete for good" in the removed list).
+
+The confirmation says "only on your devices".
+
+- [ ] A:
+
+**Q9. Your account.**
+
+- **Profile:** name, picture (Jami supports one; Joma does not show pictures yet),
+  username (as now).
+- **Devices:**
+  - the list of devices on the account, with name, ID and whether it is this one;
+  - rename;
+  - revoke a lost device;
+  - **link a new device:** Jami's linking with a PIN or QR code.
+- **Backup:** export the account to a file (with its password), so it can be restored
+  on another machine. Recommended, since a Jami account lives only on its devices.
+- **Password:** set or change the account password.
+
+- [ ] A:
+
+**Q10. Multiple accounts.**
+
+- An account switcher at the top of the panel and of the window, with the unread count
+  on each. All accounts stay connected, so messages and calls arrive on every one.
+- **Add:** create, import from a backup file, or link from another device (Q9).
+- **Remove:** from this machine only, after a reminder to back up.
+- **The bar dot** sums them up: green when any account has unread messages, red when
+  none is online.
+- **Notifications** say which account they are for.
+- **Pending question:** one list per account (switcher), or one list merging everyone
+  with a small account mark? I propose per account, simpler and clearer; merged later
+  if you miss it.
+
+- [ ] A:
+
+# D. Packaging and updates
+
+**Q11. From scripts to a package, in steps.**
+
+1. **AUR first: `joma-messenger-bin`.**
+   - It installs a binary built by GitHub Actions at each tag, plus icons, launcher,
+     the systemd unit and the plugin.
+   - The `-bin` variant avoids every machine compiling GPUI (minutes and gigabytes).
+   - Installed with `omarchy pkg aur add joma-messenger-bin`; it depends on
+     `jami-daemon` (in Arch's `extra`).
+2. **Updates:** `omarchy update` updates the AUR packages too, so Joma updates with
+   the system. No updater of its own.
+3. **Later, the Omarchy repository** (`pkgs.omarchy.org`, already in your
+   `pacman.conf`). It is maintained by the Omarchy team: it needs a stable public
+   release and their consent. To propose once Joma has a few months of use.
+
+Both the AUR and Omarchy's repository need public sources: the repository becomes
+public (GPL-3.0-or-later, as declared). Before then, a review for anything personal in
+the history.
+
+- [ ] A:
+
+**Q12. The bar plugin from a package.**
+
+The shell loads plugins only from its own folder (owned by the `omarchy` package) and
+from `~/.config/omarchy/plugins`: a system package cannot add one by itself.
+
+Proposal:
+
+- The package puts the plugin in `/usr/share/joma/omarchy-plugin/`.
+- At the first start, Joma asks: "Add Joma to the bar and the Super+Alt+M shortcut?"
+  On yes, it:
+  - links the plugin into `~/.config/omarchy/plugins`;
+  - places it with `omarchy plugin enable io.github.dzanaga.joma-quick --section right`;
+  - adds the binding;
+  - enables the unit.
+- **Settings → Integration** shows what is installed, with buttons to add or remove
+  each piece.
+- **Later:** propose to Omarchy a system folder for plugins from packages
+  (`/usr/share/omarchy/plugins.d`), which would make that step automatic.
+
+- [ ] A:
+
+**Q13. Development and test builds.**
+
+`scripts/install.sh` stays for development: it installs over the package in
+`~/.local/bin`, and Settings → About says "development build". Tags `vX.Y.Z` make the
+releases; GitHub Actions builds the binary for the AUR.
+
+- [ ] A:
+
+**Q14. In-app update notice?**
+
+With pacman updating Joma, a check of its own is not needed. I propose only a line in
+About ("installed with pacman / development build").
+
+- [ ] A:
+
+# E. Order
+
+**Q15. Proposed order.**
+
+| | What | Why this order |
+|---|---|---|
+| J6 | Living in the bar: GPUI from git, layer-shell panel, pop-out/in, shortcuts, systemd unit, start at login / in the bar | the biggest change in daily use; the rest builds on it |
+| J7 | Settings and management: settings view, contacts page, clearing and deleting chats, profile, devices, backup | needs the new window structure |
+| J8 | Multiple accounts | touches the whole model: after J7, when the views are stable |
+| J9 | Packaging: public repository, GitHub Actions, AUR `-bin`, first-run integration; later the Omarchy repository | when Joma is worth installing on someone else's machine |
+
+- [ ] A:
+
+# Notes
+
+- omatwin stays paused for Joma until J9: after that, the package is recorded like any
+  other.
+- Joma still pauses while the Jami app runs (same data).
+- Sources:
+  - GPUI layer shell in Zed: [#32651](https://git.secluded.site/zed/commit/c110f7801516a1948ade4a51213f1fc8ea7f8efc)
+    (reverted in [#35331](https://git.secluded.site/zed/commit/4d66d967f2e3c7385f7dbe5c6cca6d8baa9d296f)),
+    reintroduced in [#35610](https://git.secluded.site/zed/commit/b92664c52d7c49bb49acd06d2d40eb23b4e8c601).
+  - Omarchy plugin folders: `omarchy-plugin-catalog`.
