@@ -19,15 +19,34 @@ Jami app in the background always do), so Joma users tell each other more:
 saw you active forget it; you still see theirs. Jami's own reachability cannot be
 hidden. Saved as `invisible` in `~/.config/joma/quick.toml`.
 
-## Removing contacts
+## Contacts
+The **contacts** tab next to **chats** (Ctrl+Shift+K) lists everyone you added, with or
+without a chat:
+- requests waiting for you on top (accept or decline);
+- each contact with the presence dot, a star, and quick buttons: message, call, video
+  call, share the desktop, send files ("waiting" until they accept your request);
+- **star:** the contact goes to the top; **drag** contacts (the ⋮ handle, or the whole
+  row) to put them in any order. Dropping one among the starred stars it, below them
+  unstars it;
+- **block** (click twice): Jami's ban. No messages, calls or requests from them, and no
+  Joma presence to them; they are not told. The history stays. Blocked contacts are at
+  the bottom with **unblock**; unblocking brings the old chat back (Jami also starts a
+  new empty one, which Joma hides);
+- **remove** (click twice): the contact and your chat with them leave Jami; add them
+  again with + if needed.
+
+Saved in `~/.config/joma/quick.toml` (`starred`, `contact_order`).
+
+## Removing chats
 The bin in a conversation's header takes it off the lists (window, bar, notifications);
-it stays in Jami, and its messages keep arriving quietly. The bin next to + in the list
-shows the removed ones: **restore** puts one back, **delete for good** (click twice)
-removes the contact and the conversation from Jami; add them again with + if needed.
-The removed list is `removed` in `~/.config/joma/quick.toml`.
+it stays in Jami, and its messages keep arriving quietly. The bin next to + in the chats
+list shows the removed ones: **restore** puts one back, **delete history** (click twice)
+deletes the conversation on your devices only. The contact stays: Jami starts a new
+empty chat with them. The removed list is `removed` in `~/.config/joma/quick.toml`.
 
 ## Messages
-Conversations newest first, requests on top (accept with Ctrl+Enter). Add a contact by
+Requests on top (accept with Ctrl+Enter), then starred chats (the star in the header,
+Ctrl+Shift+F) in the order you drag them to, then the others newest first. Add a contact by
 Jami username or ID (Ctrl+N). History, typing indicator, unread counts, desktop
 notifications when the window is not active. Names come from peers' profiles and the
 name server.
@@ -89,7 +108,7 @@ Ctrl+. and Alt+1…9 in the window or the panel; `joma send` and `joma send-quic
 
 ## Command line
 `joma chat <to> [n]` (JSON), `joma call <to> [--video]`, `joma share <to>`, `joma watch <to>`,
-`joma send-file <to> [path]`, `joma open <to>`, `joma quit`, `joma probe [--bench]` (the
+`joma send-file <to> [path]`, `joma open <to>`, `joma block <to>`, `joma unblock <to>`, `joma quit`, `joma probe [--bench]` (the
 GPUs the desktop share can use).
 
 ## Install
@@ -97,6 +116,9 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
+- 0.4.0-rc.3 (2026-10-29): the contacts tab (quick buttons, star, drag to reorder,
+  block and unblock, remove); starred chats stay on top in the order you drag them to;
+  deleting a chat's history no longer deletes the contact; `joma block`, `joma unblock`.
 - 0.4.0-rc.2 (2026-10-29): Joma opens as a floating, centred window instead of a tiled
   one; started over SSH it says how to start it instead of crashing.
 - 0.4.0-rc.1 (2026-10-29): Joma lives in the tray (status dot, menu) instead of a bar

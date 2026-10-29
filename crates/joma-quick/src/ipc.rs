@@ -35,6 +35,8 @@ pub enum Request {
     Open { to: String },
     /// Watch the desktop a peer offers without a call.
     Watch { to: String },
+    /// Block a contact (Jami's ban), or unblock them.
+    Block { to: String, block: bool },
     /// Quit Joma (closing its window only hides it).
     Quit,
 }

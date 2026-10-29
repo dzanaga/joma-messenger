@@ -43,6 +43,7 @@ actions!(
         ShareDesktop,
         ToggleQuick,
         ToggleFavorite,
+        ToggleContacts,
         Quick1,
         Quick2,
         Quick3,
@@ -91,6 +92,31 @@ pub enum Mode {
     Removed,
 }
 
+/// What the sidebar lists.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Tab {
+    Chats,
+    Contacts,
+}
+
+/// A row being dragged in the sidebar: a conversation id or a contact URI.
+#[derive(Clone)]
+pub struct Dragged {
+    pub tab: Tab,
+    pub id: String,
+    pub title: String,
+}
+
+/// What a contact's quick buttons do.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Quick {
+    Message,
+    Call,
+    Video,
+    Share,
+    File,
+}
+
 /// A username the name server can take: 3 to 32 of a-z, 0-9, `-` and `_`, lower-cased.
 pub fn valid_username(name: &str) -> Option<String> {
     let n = name.trim().trim_start_matches('@').to_lowercase();
@@ -126,6 +152,7 @@ pub struct Joma {
     pub model: Model,
     pub selected: Option<String>,
     pub mode: Mode,
+    pub tab: Tab,
     /// The input's text in search mode.
     pub search: String,
     pub composer: Entity<Composer>,
@@ -151,7 +178,8 @@ pub struct Joma {
     pub onboard_name: Option<String>,
     /// A username to register once the new account is online.
     pending_username: Option<String>,
-    /// "Delete for good" was clicked once on this conversation, at this time.
+    /// A step that asks twice ("delete for good" on a conversation id, "block:<uri>",
+    /// "remove:<uri>") was clicked once, at this time.
     pub confirm_delete: Option<(String, Instant)>,
     repaint_queued: Arc<AtomicBool>,
     composing_sent: Option<Instant>,
@@ -347,6 +375,7 @@ impl Joma {
             model: Model::default(),
             selected: None,
             mode: Mode::Chat,
+            tab: Tab::Chats,
             search: String::new(),
             composer,
             input,
@@ -469,11 +498,7 @@ impl Joma {
         };
         self.load_profiles();
         self.subscribed.clear();
-        for c in joma_jami::contacts(&self.model.account).unwrap_or_default() {
-            if let Some(uri) = c.get("id") {
-                self.follow(uri);
-            }
-        }
+        self.load_contacts();
         for id in joma_jami::conversations(&self.model.account).unwrap_or_default() {
             self.reload_conversation(&id, false);
         }
@@ -524,6 +549,16 @@ impl Joma {
         let bare = bare_uri(uri).to_owned();
         if !bare.is_empty() && bare != self.model.me && self.subscribed.insert(bare.clone()) {
             let _ = joma_jami::subscribe_presence(&self.model.account, &bare);
+        }
+    }
+
+    fn load_contacts(&mut self) {
+        let list = joma_jami::contacts(&self.model.account).unwrap_or_default();
+        self.model.set_contacts(&list);
+        let uris: Vec<String> = self.model.contacts.values().filter(|c| !c.banned).map(|c| c.uri.clone()).collect();
+        for uri in uris {
+            self.lookup(&uri);
+            self.follow(&uri);
         }
     }
 
@@ -900,6 +935,9 @@ impl Joma {
                 }
             }
         }
+        if changed.contacts {
+            self.load_contacts();
+        }
         for id in &changed.reload {
             self.reload_conversation(id, false);
         }
@@ -1204,9 +1242,38 @@ impl Joma {
         self.quick.removed.iter().any(|r| r == conv)
     }
 
-    /// Conversations newest first, without the removed ones.
+    /// Requests, then the starred conversations in their order, then the others newest
+    /// first; without the removed ones and those with blocked contacts.
     pub fn listed(&self) -> Vec<&crate::model::Conversation> {
-        self.model.ordered().into_iter().filter(|c| !self.is_removed(&c.id)).collect()
+        let mut v: Vec<&crate::model::Conversation> =
+            self.model.ordered().into_iter().filter(|c| !self.is_removed(&c.id) && !self.model.with_banned(c) && !self.model.is_duplicate(c))
+            .collect();
+        let star = |id: &str| self.quick.favorites.iter().position(|f| f == id);
+        // A stable sort keeps the newest-first order among the unstarred.
+        v.sort_by_key(|c| (!c.request, star(&c.id).is_none(), star(&c.id)));
+        v
+    }
+
+    /// Contacts we talk with: starred first in their order, then the dragged order, then
+    /// by name. Blocked ones are apart ([`Joma::blocked`]).
+    pub fn contact_list(&self) -> Vec<crate::model::Contact> {
+        let mut v: Vec<crate::model::Contact> = self.model.contacts.values().filter(|c| !c.banned).cloned().collect();
+        let star = |u: &str| self.quick.starred.iter().position(|s| s == u);
+        let placed = |u: &str| self.quick.contact_order.iter().position(|s| s == u);
+        v.sort_by_cached_key(|c| {
+            (star(&c.uri).is_none(), star(&c.uri), placed(&c.uri).is_none(), placed(&c.uri), self.model.name_of(&c.uri).to_lowercase())
+        });
+        if self.mode == Mode::Search {
+            let q = self.search.to_lowercase();
+            v.retain(|c| q.is_empty() || self.model.name_of(&c.uri).to_lowercase().contains(&q) || c.uri.starts_with(&q));
+        }
+        v
+    }
+
+    pub fn blocked(&self) -> Vec<crate::model::Contact> {
+        let mut v: Vec<crate::model::Contact> = self.model.contacts.values().filter(|c| c.banned).cloned().collect();
+        v.sort_by_cached_key(|c| self.model.name_of(&c.uri).to_lowercase());
+        v
     }
 
     /// Unread messages outside the removed conversations.
@@ -1289,24 +1356,32 @@ impl Joma {
         self.show_flash(format!("{title} is back in the list"), cx);
     }
 
-    /// Delete a removed conversation for good: the contact (for a one-to-one) and the
-    /// conversation leave Jami. A first click asks; a second within 5 s deletes.
+    /// A step that asks first: true on a second click within 5 s, else arms it and says
+    /// `ask`.
+    pub fn armed(&mut self, key: &str, ask: &str, cx: &mut Context<Self>) -> bool {
+        let armed = self.confirm_delete.as_ref().is_some_and(|(c, t)| c == key && t.elapsed() < Duration::from_secs(5));
+        if armed {
+            self.confirm_delete = None;
+        } else {
+            self.confirm_delete = Some((key.to_owned(), Instant::now()));
+            self.show_flash(ask.to_owned(), cx);
+        }
+        armed
+    }
+
+    /// The step `key` was clicked once and waits for the second click.
+    pub fn is_armed(&self, key: &str) -> bool {
+        self.confirm_delete.as_ref().is_some_and(|(c, t)| c == key && t.elapsed() < Duration::from_secs(5))
+    }
+
+    /// Delete a removed conversation's history from this machine's devices. The contact
+    /// stays: for a one-to-one, Jami starts a new empty conversation with them.
     pub fn delete_for_good(&mut self, conv: &str, cx: &mut Context<Self>) {
-        let armed = self.confirm_delete.as_ref().is_some_and(|(c, t)| c == conv && t.elapsed() < Duration::from_secs(5));
-        if !armed {
-            self.confirm_delete = Some((conv.to_owned(), Instant::now()));
-            self.show_flash("click delete again to delete for good (history included)", cx);
+        if !self.armed(conv, "click again to delete the history (only on your devices; the contact stays)", cx) {
             return;
         }
-        self.confirm_delete = None;
         let acc = self.model.account.clone();
         let Some(c) = self.model.conversations.get(conv).cloned() else { return };
-        if c.peers.len() == 1 {
-            if let Err(e) = joma_jami::remove_contact(&acc, &c.peers[0], false) {
-                self.show_flash(format!("could not remove the contact: {e}"), cx);
-                return;
-            }
-        }
         if let Err(e) = joma_jami::remove_conversation(&acc, conv) {
             self.show_flash(format!("could not delete the conversation: {e}"), cx);
             return;
@@ -1317,7 +1392,7 @@ impl Joma {
         if self.selected.as_deref() == Some(conv) {
             self.selected = None;
         }
-        self.show_flash(format!("{} deleted · add them again with + if needed", c.title), cx);
+        self.show_flash(format!("{}: history deleted on your devices", c.title), cx);
     }
 
     fn save_quick(&mut self, cx: &mut Context<Self>) {
@@ -1335,6 +1410,125 @@ impl Joma {
             }
             cx.notify();
         }
+    }
+
+    pub fn set_tab(&mut self, tab: Tab, window: &mut Window, cx: &mut Context<Self>) {
+        self.tab = tab;
+        if self.mode == Mode::Removed {
+            self.set_mode(Mode::Chat, window, cx);
+        }
+        cx.notify();
+    }
+
+    pub fn toggle_starred(&mut self, uri: &str, cx: &mut Context<Self>) {
+        self.quick.toggle_starred(uri);
+        self.save_quick(cx);
+    }
+
+    /// A row dropped on another: see [`joma_quick::drop_on`].
+    pub fn drop_row(&mut self, dragged: &Dragged, target: &str, cx: &mut Context<Self>) {
+        match dragged.tab {
+            Tab::Chats => {
+                let was = self.quick.favorites.contains(&dragged.id);
+                joma_quick::drop_on(&mut self.quick.favorites, None, &dragged.id, target);
+                if !was && !self.quick.favorites.contains(&dragged.id) {
+                    self.show_flash("star a chat to give it a place; the others follow the latest message", cx);
+                    return;
+                }
+            }
+            Tab::Contacts => {
+                let mut rest: Vec<String> =
+                    self.contact_list().into_iter().map(|c| c.uri).filter(|u| !self.quick.starred.contains(u)).collect();
+                joma_quick::drop_on(&mut self.quick.starred, Some(&mut rest), &dragged.id, target);
+                if !self.quick.starred.contains(&target.to_owned()) {
+                    self.quick.contact_order = rest;
+                }
+            }
+        }
+        self.save_quick(cx);
+    }
+
+    /// A contact's quick button: open the chat, call, share the desktop or send files.
+    pub fn quick_action(&mut self, uri: &str, what: Quick, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(conv) = self.model.chat_with(uri).filter(|c| !c.request).map(|c| c.id.clone()) else {
+            self.show_flash(format!("{} has not accepted yet", self.model.name_of(uri)), cx);
+            return;
+        };
+        if self.is_removed(&conv) {
+            self.restore(&conv, cx);
+        }
+        match what {
+            Quick::Message => {
+                self.set_mode(Mode::Chat, window, cx);
+                self.select(conv, cx);
+                self.narrow_chat = true;
+            }
+            Quick::Call | Quick::Video => {
+                self.select(conv.clone(), cx);
+                self.place_call_to(&conv, what == Quick::Video, cx);
+            }
+            Quick::Share => {
+                self.select(conv.clone(), cx);
+                if let Reply::Error { message } = self.share_direct(&conv, cx) {
+                    self.show_flash(message, cx);
+                }
+            }
+            Quick::File => self.pick_and_send(conv, cx),
+        }
+    }
+
+    /// Block a contact: Jami bans them (no messages, calls or requests from them) and keeps
+    /// the history. They are not told.
+    pub fn block(&mut self, uri: &str, cx: &mut Context<Self>) {
+        let name = self.model.name_of(uri);
+        if self.armed(&format!("block:{uri}"), &format!("click again to block {name}"), cx) {
+            self.block_now(uri, cx);
+        }
+    }
+
+    pub fn block_now(&mut self, uri: &str, cx: &mut Context<Self>) {
+        let name = self.model.name_of(uri);
+        if let Err(e) = joma_jami::remove_contact(&self.model.account, uri, true) {
+            self.show_flash(format!("could not block: {e}"), cx);
+            return;
+        }
+        if let Some(c) = self.model.contacts.get_mut(uri) {
+            c.banned = true;
+        }
+        self.presence.gone(uri);
+        if self.selected.as_ref().and_then(|s| self.model.conversations.get(s)).is_some_and(|c| self.model.with_banned(c)) {
+            self.selected = self.listed().first().map(|c| c.id.clone());
+        }
+        self.show_flash(format!("{name} is blocked · unblock them in contacts"), cx);
+    }
+
+    /// Unblock: they become a contact again, with the old history.
+    pub fn unblock(&mut self, uri: &str, cx: &mut Context<Self>) {
+        if let Err(e) = joma_jami::add_contact(&self.model.account, uri) {
+            self.show_flash(format!("could not unblock: {e}"), cx);
+            return;
+        }
+        if let Some(c) = self.model.contacts.get_mut(uri) {
+            c.banned = false;
+        }
+        self.show_flash(format!("{} is unblocked", self.model.name_of(uri)), cx);
+    }
+
+    /// Remove a contact: Jami drops them and your one-to-one conversation with them.
+    pub fn remove_contact(&mut self, uri: &str, cx: &mut Context<Self>) {
+        let name = self.model.name_of(uri);
+        if !self.armed(&format!("remove:{uri}"), &format!("click again to remove {name} and your chat with them"), cx) {
+            return;
+        }
+        if let Err(e) = joma_jami::remove_contact(&self.model.account, uri, false) {
+            self.show_flash(format!("could not remove: {e}"), cx);
+            return;
+        }
+        self.model.contacts.remove(uri);
+        self.quick.starred.retain(|s| s != uri);
+        self.quick.contact_order.retain(|s| s != uri);
+        self.save_quick(cx);
+        self.show_flash(format!("{name} removed · add them again with + if needed"), cx);
     }
 
     pub fn set_mode(&mut self, mode: Mode, window: &mut Window, cx: &mut Context<Self>) {
@@ -1717,6 +1911,20 @@ impl Joma {
                 },
                 Err(e) => e,
             },
+            Request::Block { to, block } => {
+                if self.gate != Gate::Ready {
+                    return Reply::Error { message: "Joma is not connected to Jami yet".into() };
+                }
+                let Some(uri) = self.model.contact_named(&to) else {
+                    return Reply::Error { message: format!("no contact matches “{to}”") };
+                };
+                if block {
+                    self.block_now(&uri, cx);
+                } else {
+                    self.unblock(&uri, cx);
+                }
+                Reply::Done
+            }
             Request::Watch { to } => match self.target(&to) {
                 Ok(conv) => match self.model.conversations.get(&conv).and_then(|c| c.peers.first()).cloned() {
                     Some(peer) => {

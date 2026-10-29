@@ -36,6 +36,10 @@ pub const G_BACK: &str = "\u{f053}";
 pub const G_CLIP: &str = "\u{f0c6}";
 pub const G_TRASH: &str = "\u{f1f8}";
 pub const G_UNDO: &str = "\u{f0e2}";
+pub const G_COMMENT: &str = "\u{f075}";
+pub const G_BAN: &str = "\u{f05e}";
+pub const G_USER_TIMES: &str = "\u{f235}";
+pub const G_GRIP: &str = "\u{f142}";
 
 /// Local "HH:MM" and a day key for separators.
 pub fn local_time(ts: i64) -> (String, i64, String) {
@@ -100,6 +104,29 @@ fn button(id: impl Into<SharedString>, glyph: &str, label: &str, t: &Theme, on: 
         .hover(|d| d.bg(t.raised).text_color(t.bright))
         .child(glyph.to_owned())
         .when(!label.is_empty(), |d| d.child(label.to_owned()))
+}
+
+/// What follows the pointer while a sidebar row is dragged.
+pub struct DragPreview {
+    title: String,
+    bg: Hsla,
+    fg: Hsla,
+    border: Hsla,
+}
+
+impl Render for DragPreview {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().px(px(10.)).py(px(4.)).bg(self.bg).border_1().border_color(self.border).text_color(self.fg).child(self.title.clone())
+    }
+}
+
+/// A sidebar row that can be dragged and dropped on another of its list.
+fn draggable(row: gpui::Stateful<gpui::Div>, dragged: Dragged, t: &Theme, cx: &mut Context<Joma>) -> gpui::Stateful<gpui::Div> {
+    let (bg, fg, border, accent) = (t.raised, t.bright, t.accent, t.accent);
+    let target = dragged.id.clone();
+    row.on_drag(dragged, move |d: &Dragged, _, _, cx| cx.new(|_| DragPreview { title: d.title.clone(), bg, fg, border }))
+        .drag_over::<Dragged>(move |s, _, _, _| s.border_t_2().border_color(accent))
+        .on_drop(cx.listener(move |this, d: &Dragged, _, cx| this.drop_row(d, &target, cx)))
 }
 
 impl Joma {
@@ -231,7 +258,7 @@ impl Joma {
                     .gap(px(12.))
                     .text_color(t.muted)
                     .when(unread > 0 && !self.narrow, |d| d.child(div().text_color(t.accent).child(format!("{unread} unread"))))
-                    .when(!self.narrow, |d| d.child(format!("{} conversations", self.model.conversations.len())))
+                    .when(!self.narrow, |d| d.child(format!("{} conversations", self.listed().len())))
                     .child({
                         // Pop out to the full window, or back into the tray.
                         let full = crate::hypr::shape() == crate::hypr::Shape::Full;
@@ -317,8 +344,8 @@ impl Joma {
                 c.last().map(|m| m.text.lines().next().unwrap_or("").to_owned()).unwrap_or_default()
             };
             let id = c.id.clone();
-            list = list.child(
-                div()
+            let dragged = Dragged { tab: Tab::Chats, id: c.id.clone(), title: c.title.clone() };
+            let row = div()
                     .id(SharedString::from(format!("conv-{}", c.id)))
                     .flex()
                     .flex_col()
@@ -380,7 +407,7 @@ impl Joma {
                                     },
                                 )))
                                 .child(
-                                    button(SharedString::from(format!("delete-{}", c.id)), G_TRASH, if armed { "sure? click again" } else { "delete for good" }, t, armed)
+                                    button(SharedString::from(format!("delete-{}", c.id)), G_TRASH, if armed { "sure? click again" } else { "delete history" }, t, armed)
                                         .text_color(t.red)
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             cx.stop_propagation();
@@ -388,8 +415,8 @@ impl Joma {
                                         })),
                                 ),
                         )
-                    }),
-            );
+                    });
+            list = list.child(if c.request || self.mode == Mode::Removed { row } else { draggable(row, dragged, t, cx) });
         }
         let header = |label: &str| {
             div()
@@ -415,7 +442,21 @@ impl Joma {
                     .items_center()
                     .justify_between()
                     .pr(px(8.))
-                    .child(header("conversations"))
+                    .child(
+                        div()
+                            .flex()
+                            .children([(Tab::Chats, "chats"), (Tab::Contacts, "contacts")].map(|(tab, label)| {
+                                let on = self.tab == tab;
+                                header(label)
+                                    .id(SharedString::from(format!("tab-{label}")))
+                                    .when(on, |d| d.text_color(t.bright))
+                                    .border_b_2()
+                                    .border_color(if on { t.accent } else { gpui::transparent_black() })
+                                    .cursor_pointer()
+                                    .hover(|d| d.text_color(t.bright))
+                                    .on_click(cx.listener(move |this, _, window, cx| this.set_tab(tab, window, cx)))
+                            })),
+                    )
                     .child(
                         div()
                             .flex()
@@ -429,7 +470,7 @@ impl Joma {
                                 button("btn-add", G_PLUS, "", t, self.mode == Mode::Add)
                                     .on_click(cx.listener(|this, _, window, cx| this.set_mode(Mode::Add, window, cx))),
                             )
-                            .when(!self.quick.removed.is_empty() || self.mode == Mode::Removed, |d| {
+                            .when(self.tab == Tab::Chats && (!self.quick.removed.is_empty() || self.mode == Mode::Removed), |d| {
                                 d.child(button("btn-removed", G_TRASH, "", t, self.mode == Mode::Removed).on_click(cx.listener(|this, _, window, cx| {
                                     let next = if this.mode == Mode::Removed { Mode::Chat } else { Mode::Removed };
                                     this.set_mode(next, window, cx);
@@ -457,8 +498,161 @@ impl Joma {
                         .child(self.input.clone()),
                 )
             })
-            .child(list)
+            .child(if self.tab == Tab::Contacts { self.contacts_list(t, cx) } else { list.into_any_element() })
             .into_any_element()
+    }
+
+    /// The Contacts tab: requests waiting for you, contacts (starred first, draggable) with
+    /// their quick buttons, and the blocked ones at the bottom.
+    fn contacts_list(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let mut list = div().id("contacts").flex().flex_col().flex_1().overflow_y_scroll();
+        let small = |label: &str| div().px(px(10.)).pt(px(8.)).pb(px(2.)).text_size(px(t.size - 2.5)).text_color(t.muted).child(label.to_uppercase());
+        let requests: Vec<Conversation> = self.model.ordered().into_iter().filter(|c| c.request).cloned().collect();
+        if !requests.is_empty() {
+            list = list.child(small("requests"));
+            for c in requests {
+                let (a, b) = (c.id.clone(), c.id.clone());
+                list = list.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(6.))
+                        .px(px(10.))
+                        .py(px(5.))
+                        .child(div().text_color(t.bright).truncate().child(c.title.clone()))
+                        .child(
+                            div()
+                                .flex()
+                                .gap(px(4.))
+                                .child(button(SharedString::from(format!("cr-ok-{}", c.id)), G_CHECK, "", t, true).on_click(cx.listener(move |this, _, _, cx| this.accept_request(a.clone(), true, cx))))
+                                .child(button(SharedString::from(format!("cr-no-{}", c.id)), G_TIMES, "", t, false).on_click(cx.listener(move |this, _, _, cx| this.accept_request(b.clone(), false, cx)))),
+                        ),
+                );
+            }
+        }
+        let contacts = self.contact_list();
+        if contacts.is_empty() {
+            list = list.child(div().px(px(10.)).py(px(8.)).text_color(t.muted).child(if self.mode == Mode::Search {
+                "no contact matches".to_owned()
+            } else {
+                format!("no contacts yet · {G_PLUS} adds one")
+            }));
+        }
+        for c in contacts {
+            let uri = c.uri.clone();
+            let name = self.model.name_of(&uri);
+            let starred = self.quick.starred.contains(&uri);
+            let waiting = !c.confirmed && self.model.chat_with(&uri).is_none_or(|v| v.request);
+            let dot = self.dot_of(&uri);
+            let selected = self.model.chat_with(&uri).is_some_and(|v| self.selected.as_deref() == Some(v.id.as_str()));
+            let quick = |id: &str, glyph: &str, what: Quick| {
+                let u = uri.clone();
+                button(SharedString::from(format!("{id}-{uri}")), glyph, "", t, false)
+                    .px(px(6.))
+                    .py(px(1.))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.quick_action(&u, what, window, cx);
+                    }))
+            };
+            let (u_star, u_block, u_remove, u_open) = (uri.clone(), uri.clone(), uri.clone(), uri.clone());
+            let block_armed = self.is_armed(&format!("block:{uri}"));
+            let remove_armed = self.is_armed(&format!("remove:{uri}"));
+            let row = div()
+                .id(SharedString::from(format!("contact-{uri}")))
+                .flex()
+                .flex_col()
+                .gap(px(3.))
+                .px(px(10.))
+                .py(px(6.))
+                .border_l_2()
+                .border_color(if selected { t.accent } else { gpui::transparent_black() })
+                .when(selected, |d| d.bg(t.accent_bg))
+                .hover(|d| d.bg(t.raised))
+                .cursor_pointer()
+                .on_click(cx.listener(move |this, _, window, cx| this.quick_action(&u_open, Quick::Message, window, cx)))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .child(div().flex_none().text_color(t.muted).text_size(px(t.size - 2.)).child(G_GRIP))
+                        .child(div().flex_none().size(px(7.)).rounded_full().when(dot != Dot::None, |d| {
+                            d.bg(if dot == Dot::Active { t.green } else { t.green.opacity(0.3) })
+                        }))
+                        .child(div().flex_1().min_w(px(0.)).text_color(if selected { t.bright } else { t.text }).truncate().child(name.clone()))
+                        .when(waiting, |d| d.child(div().text_color(t.yellow).text_size(px(t.size - 2.)).child("waiting")))
+                        .child(
+                            div()
+                                .id(SharedString::from(format!("star-{uri}")))
+                                .flex_none()
+                                .text_color(if starred { t.yellow } else { t.muted })
+                                .hover(|d| d.text_color(t.yellow))
+                                .child(if starred { G_STAR } else { G_STAR_O })
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.toggle_starred(&u_star, cx);
+                                })),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap(px(4.))
+                        .pl(px(13.))
+                        .text_size(px(t.size - 1.))
+                        .when(!waiting, |d| {
+                            d.child(quick("cq-msg", G_COMMENT, Quick::Message))
+                                .child(quick("cq-call", G_PHONE, Quick::Call))
+                                .child(quick("cq-video", G_VIDEO, Quick::Video))
+                                .child(quick("cq-share", G_DESKTOP, Quick::Share))
+                                .child(quick("cq-file", G_CLIP, Quick::File))
+                        })
+                        .child(div().flex_1())
+                        .child(
+                            button(SharedString::from(format!("cq-block-{uri}")), G_BAN, if block_armed { "block?" } else { "" }, t, block_armed)
+                                .px(px(6.))
+                                .py(px(1.))
+                                .text_color(if block_armed { t.red } else { t.muted })
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.block(&u_block, cx);
+                                })),
+                        )
+                        .child(
+                            button(SharedString::from(format!("cq-remove-{uri}")), G_USER_TIMES, if remove_armed { "remove?" } else { "" }, t, remove_armed)
+                                .px(px(6.))
+                                .py(px(1.))
+                                .text_color(if remove_armed { t.red } else { t.muted })
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.remove_contact(&u_remove, cx);
+                                })),
+                        ),
+                );
+            list = list.child(draggable(row, Dragged { tab: Tab::Contacts, id: uri.clone(), title: name }, t, cx));
+        }
+        let blocked = self.blocked();
+        if !blocked.is_empty() && self.mode != Mode::Search {
+            list = list.child(small("blocked"));
+            for c in blocked {
+                let u = c.uri.clone();
+                list = list.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(6.))
+                        .px(px(10.))
+                        .py(px(4.))
+                        .child(div().flex().gap(px(6.)).text_color(t.muted).truncate().child(div().text_color(t.red).child(G_BAN)).child(self.model.name_of(&c.uri)))
+                        .child(button(SharedString::from(format!("unblock-{}", c.uri)), G_UNDO, "unblock", t, false).on_click(cx.listener(move |this, _, _, cx| this.unblock(&u, cx)))),
+                );
+            }
+        }
+        list.into_any_element()
     }
 
     fn call_panel(&self, t: &Theme, conv: Option<&Conversation>, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -899,8 +1093,8 @@ impl Joma {
                 Mode::Username => "enter: register · esc: cancel",
                 Mode::Removed => "removed contacts · esc: back",
                 Mode::Chat if self.narrow && self.narrow_chat => "esc: back · ctrl+.: quick",
-                Mode::Chat if self.narrow => "ctrl+n: add · ctrl+k: find · alt+j/k: move",
-                Mode::Chat => "alt+j/k: conversations · ctrl+n: add · ctrl+k: find · ctrl+shift+c/v: call · ctrl+shift+s: share · ctrl+.: quick",
+                Mode::Chat if self.narrow => "ctrl+n: add · ctrl+k: find · ctrl+shift+k: contacts",
+                Mode::Chat => "alt+j/k: chats · ctrl+shift+k: contacts · ctrl+n: add · ctrl+k: find · ctrl+shift+c/v: call · ctrl+.: quick",
             }),
         };
         div()
@@ -1019,6 +1213,10 @@ impl Render for Joma {
             .on_action(cx.listener(|this, _: &ToggleCamera, _, cx| this.toggle_mute(true, cx)))
             .on_action(cx.listener(|this, _: &ShareDesktop, _, cx| this.toggle_share(cx)))
             .on_action(cx.listener(|this, _: &ToggleFavorite, _, cx| this.toggle_favorite(cx)))
+            .on_action(cx.listener(|this, _: &ToggleContacts, window, cx| {
+                let tab = if this.tab == Tab::Contacts { Tab::Chats } else { Tab::Contacts };
+                this.set_tab(tab, window, cx);
+            }))
             .on_action(cx.listener(|this, _: &AcceptRequest, _, cx| {
                 if let Some(id) = this.selected.clone().filter(|s| this.model.conversations.get(s).is_some_and(|c| c.request)) {
                     this.accept_request(id, true, cx);

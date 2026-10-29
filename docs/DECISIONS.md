@@ -33,6 +33,11 @@
   Super+Alt+M and start at login. (User, 2026-10-29.)
 - D-16 The repository is public; pre-releases are installed with mise from GitHub
   releases. (User, 2026-10-29.)
+- D-17 A contacts tab beside the chats: quick buttons (message, call, video, share,
+  file), star to the top, drag to reorder (contacts freely; chats among the starred,
+  the rest by latest message), block = Jami's ban, unblock = addContact. Deleting a chat
+  keeps the contact (only removeConversation); removing a contact is a separate action.
+  Replaces D-13's "delete for good". (User, 2026-10-29.)
 
 ## Decided
 

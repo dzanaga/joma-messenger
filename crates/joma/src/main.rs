@@ -37,6 +37,8 @@ const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); -
        joma send-file <to> [path]
                                  send a file (without a path, Joma asks for one)
        joma open <to>            show a conversation in Joma
+       joma block <to>           block a contact: no messages, calls or requests from them
+       joma unblock <to>         unblock a contact
        joma quit                 quit Joma (closing the window keeps it running)
        joma probe [--bench [--display-gpu]]
                                  the GPUs and codecs the desktop share can use
@@ -67,6 +69,7 @@ fn cli(args: &[String]) -> Option<i32> {
         Some("send-file") if args.len() >= 2 => Request::SendFile { to: args[1].clone(), path: args.get(2).cloned() },
         Some("watch") if args.len() == 2 => Request::Watch { to: args[1].clone() },
         Some("open") if args.len() == 2 => Request::Open { to: args[1].clone() },
+        Some(b @ ("block" | "unblock")) if args.len() == 2 => Request::Block { to: args[1].clone(), block: b == "block" },
         Some("send") if args.len() >= 3 => Request::Send { to: args[1].clone(), text: args[2..].join(" ") },
         Some("send-quick") if args.len() == 3 => match args[2].parse::<usize>() {
             Ok(n) if n >= 1 => Request::SendQuick { to: args[1].clone(), index: n - 1 },
@@ -223,6 +226,7 @@ fn main() {
             KeyBinding::new("ctrl-shift-o", ToggleCamera, None),
             KeyBinding::new("ctrl-shift-s", ShareDesktop, None),
             KeyBinding::new("ctrl-shift-f", ToggleFavorite, None),
+            KeyBinding::new("ctrl-shift-k", ToggleContacts, None),
             KeyBinding::new("f11", FocusStage, None),
             KeyBinding::new("ctrl-enter", AcceptRequest, None),
             KeyBinding::new("ctrl-backspace", DeclineRequest, None),

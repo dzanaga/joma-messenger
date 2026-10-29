@@ -23,8 +23,12 @@ pub struct Candidate {
 pub struct QuickConfig {
     /// The canned messages, in menu order (Alt+1…9 in Joma).
     pub messages: Vec<String>,
-    /// Conversation ids shown first. Empty: the most recent conversations.
+    /// Starred conversations: shown first, in this order (drag to reorder).
     pub favorites: Vec<String>,
+    /// Starred contacts (URIs): first in the contacts list, in this order.
+    pub starred: Vec<String>,
+    /// The other contacts in the order they were dragged to; new ones go last.
+    pub contact_order: Vec<String>,
     /// How many recent conversations fill the list when `favorites` is short.
     pub recent: usize,
     /// Conversations removed from the lists (Joma's "removed contacts"): kept in Jami,
@@ -50,6 +54,8 @@ impl Default for QuickConfig {
             .map(String::from)
             .to_vec(),
             favorites: Vec::new(),
+            starred: Vec::new(),
+            contact_order: Vec::new(),
             recent: 6,
             removed: Vec::new(),
             invisible: false,
@@ -88,6 +94,14 @@ impl QuickConfig {
         }
     }
 
+    pub fn toggle_starred(&mut self, uri: &str) {
+        if let Some(i) = self.starred.iter().position(|f| f == uri) {
+            self.starred.remove(i);
+        } else {
+            self.starred.push(uri.to_owned());
+        }
+    }
+
     /// The contacts the bar plugin lists: pinned ones and those with unread messages on
     /// top, then whoever is online; when that makes fewer than `recent`, the most recent
     /// offline ones fill the list. `candidates` is newest first.
@@ -115,6 +129,38 @@ impl QuickConfig {
     }
 }
 
+/// Move `item` to where `target` is in `order`: before it when moving up, after it when
+/// moving down. An `item` not in `order` lands before `target`.
+pub fn reorder(order: &mut Vec<String>, item: &str, target: &str) {
+    if item == target {
+        return;
+    }
+    let from = order.iter().position(|o| o == item);
+    if let Some(from) = from {
+        order.remove(from);
+    }
+    let Some(to) = order.iter().position(|o| o == target) else {
+        order.push(item.to_owned());
+        return;
+    };
+    let after = from.is_some_and(|f| f <= to);
+    order.insert(if after { to + 1 } else { to }, item.to_owned());
+}
+
+/// A drop in a list with a starred group on top. On a starred `target`, `item` joins the
+/// stars at its place. On an unstarred one, `item` leaves the stars, and when the rest has
+/// an order of its own (`rest`, as shown), it moves there.
+pub fn drop_on(stars: &mut Vec<String>, rest: Option<&mut Vec<String>>, item: &str, target: &str) {
+    if stars.iter().any(|s| s == target) {
+        reorder(stars, item, target);
+        return;
+    }
+    stars.retain(|s| s != item);
+    if let Some(rest) = rest {
+        reorder(rest, item, target);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,6 +181,39 @@ mod tests {
         assert_eq!(cfg.rank(&all), ["p", "u", "on", "a", "old"]);
         let cfg = QuickConfig { recent: 3, ..cfg };
         assert_eq!(cfg.rank(&all), ["p", "u", "on"]);
+    }
+
+    fn v(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn reorder_moves_up_before_and_down_after() {
+        let mut o = v(&["a", "b", "c", "d"]);
+        reorder(&mut o, "d", "b");
+        assert_eq!(o, ["a", "d", "b", "c"]);
+        reorder(&mut o, "a", "b");
+        assert_eq!(o, ["d", "b", "a", "c"]);
+        reorder(&mut o, "new", "b");
+        assert_eq!(o, ["d", "new", "b", "a", "c"]);
+        reorder(&mut o, "x", "missing");
+        assert_eq!(o.last().unwrap(), "x");
+    }
+
+    #[test]
+    fn drops_star_unstar_and_reorder() {
+        let mut stars = v(&["s1", "s2"]);
+        // An unstarred item dropped on a star joins the stars there.
+        drop_on(&mut stars, None, "x", "s2");
+        assert_eq!(stars, ["s1", "x", "s2"]);
+        // A star dropped on the rest leaves the stars; the rest keeps its own order.
+        let mut rest = v(&["a", "b"]);
+        drop_on(&mut stars, Some(&mut rest), "s1", "b");
+        assert_eq!(stars, ["x", "s2"]);
+        assert_eq!(rest, ["a", "s1", "b"]);
+        // Chats have no order of their own beyond the stars.
+        drop_on(&mut stars, None, "s2", "a");
+        assert_eq!(stars, ["x"]);
     }
 
     #[test]

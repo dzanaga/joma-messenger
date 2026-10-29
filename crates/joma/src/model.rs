@@ -208,6 +208,32 @@ fn vcard_text(vcard: &str) -> String {
     }
 }
 
+/// A Jami contact (`getContacts`): active ones and the banned.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Contact {
+    pub uri: String,
+    /// When added, seconds since the epoch.
+    pub added: i64,
+    /// They accepted (false: our request is still waiting).
+    pub confirmed: bool,
+    pub banned: bool,
+    /// The one-to-one conversation, empty until there is one.
+    pub conversation: String,
+}
+
+impl Contact {
+    pub fn from_details(d: &Details) -> Option<Contact> {
+        let uri = bare_uri(d.get("id")?).to_owned();
+        Some(Contact {
+            uri,
+            added: d.get("added").and_then(|a| a.parse().ok()).unwrap_or(0),
+            confirmed: d.get("confirmed").is_some_and(|c| c == "true"),
+            banned: d.get("banned").is_some_and(|b| b == "true"),
+            conversation: d.get("conversationId").cloned().unwrap_or_default(),
+        })
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Model {
     pub account: String,
@@ -218,6 +244,8 @@ pub struct Model {
     pub username: String,
     pub registration: String,
     pub conversations: HashMap<String, Conversation>,
+    /// Contacts by bare URI.
+    pub contacts: HashMap<String, Contact>,
     /// Names and registered names of peers, by bare URI.
     pub names: HashMap<String, String>,
     pub calls: HashMap<String, Call>,
@@ -246,6 +274,8 @@ pub struct Changed {
     pub lookup: Vec<String>,
     /// Conversations to (re)load.
     pub reload: Vec<String>,
+    /// The contact list changed: reload it.
+    pub contacts: bool,
 }
 
 impl Model {
@@ -284,6 +314,35 @@ impl Model {
         let mut v: Vec<&Conversation> = self.conversations.values().collect();
         v.sort_by(|a, b| b.request.cmp(&a.request).then(b.last_ts().cmp(&a.last_ts())).then(a.id.cmp(&b.id)));
         v
+    }
+
+    /// Replace the contacts with the daemon's list.
+    pub fn set_contacts(&mut self, list: &[Details]) {
+        self.contacts = list.iter().filter_map(Contact::from_details).filter(|c| c.uri != self.me).map(|c| (c.uri.clone(), c)).collect();
+    }
+
+    pub fn is_banned(&self, uri: &str) -> bool {
+        self.contacts.get(bare_uri(uri)).is_some_and(|c| c.banned)
+    }
+
+    /// A one-to-one conversation with someone we blocked.
+    pub fn with_banned(&self, c: &Conversation) -> bool {
+        c.peers.len() == 1 && self.is_banned(&c.peers[0])
+    }
+
+    /// The conversation to use with a contact: the best one-to-one with them, else the
+    /// one the daemon names.
+    pub fn chat_with(&self, uri: &str) -> Option<&Conversation> {
+        self.conversation_with(uri).or_else(|| self.contacts.get(bare_uri(uri)).and_then(|c| self.conversations.get(&c.conversation)))
+    }
+
+    /// A contact by URI or name (blocked ones too).
+    pub fn contact_named(&self, query: &str) -> Option<String> {
+        let q = bare_uri(query).to_lowercase();
+        self.contacts
+            .values()
+            .find(|c| c.uri == q || self.name_of(&c.uri).to_lowercase() == q)
+            .map(|c| c.uri.clone())
     }
 
     /// A member of the conversation is online.
@@ -333,10 +392,20 @@ impl Model {
         }
     }
 
-    /// The conversation with exactly this peer, if any.
+    /// The conversation with exactly this peer, if any. Jami can hold two (unblocking
+    /// starts a new one while the old one keeps working): the one with the latest real
+    /// message wins.
     pub fn conversation_with(&self, peer: &str) -> Option<&Conversation> {
         let peer = bare_uri(peer);
-        self.conversations.values().find(|c| c.peers.len() == 1 && c.peers[0] == peer)
+        self.conversations.values().filter(|c| c.peers.len() == 1 && c.peers[0] == peer).max_by_key(|c| {
+            let said = c.messages.iter().rev().find(|m| m.kind == MsgKind::Text).map_or(0, |m| m.ts);
+            (!c.request, said, c.last_ts(), c.id.clone())
+        })
+    }
+
+    /// A one-to-one conversation shadowed by another with the same peer.
+    pub fn is_duplicate(&self, c: &Conversation) -> bool {
+        c.peers.len() == 1 && self.conversation_with(&c.peers[0]).is_some_and(|b| b.id != c.id)
     }
 
     /// Find a conversation by id, title or a member's name or URI.
@@ -346,8 +415,9 @@ impl Model {
         }
         let q = query.to_lowercase();
         self.conversations.values().find(|c| {
-            c.title.to_lowercase() == q
-                || c.peers.iter().any(|p| p == bare_uri(query) || self.name_of(p).to_lowercase() == q)
+            !self.is_duplicate(c)
+                && (c.title.to_lowercase() == q
+                    || c.peers.iter().any(|p| p == bare_uri(query) || self.name_of(p).to_lowercase() == q))
         })
     }
 
@@ -405,6 +475,11 @@ impl Model {
                 if let Some(from) = metadata.get("from") {
                     ch.lookup.push(bare_uri(from).to_owned());
                 }
+                ch.any = true;
+            }
+            Event::ContactAdded { account, uri, .. } | Event::ContactRemoved { account, uri } if *account == self.account => {
+                ch.contacts = true;
+                ch.lookup.push(bare_uri(uri).to_owned());
                 ch.any = true;
             }
             Event::ConversationRemoved { account, conversation } if *account == self.account => {
@@ -545,6 +620,22 @@ mod tests {
         assert!(m.take_unsent(t + SEND_TIMEOUT).is_empty());
         assert_eq!(m.take_unsent(t + SEND_TIMEOUT * 2), vec![("c1".to_string(), "lost".to_string())]);
         assert!(m.unconfirmed.is_empty());
+    }
+
+    #[test]
+    fn after_an_unblock_the_chat_with_messages_wins() {
+        let mut m = model();
+        m.apply(&Event::MessageReceived { account: "acc".into(), conversation: "c1".into(), message: swarm("1", "bob", "hi", 5) });
+        // Unblocking made a new, empty one-to-one with bob, newer than c1's message.
+        m.set_conversation("c2", &Details::new(), &[[("uri".to_string(), "bob".to_string())].into()], false);
+        m.conversations.get_mut("c2").unwrap().messages.push(Msg { id: "e".into(), author: "me".into(), text: "joined".into(), ts: 9, kind: MsgKind::Event, file: None });
+        assert_eq!(m.conversation_with("bob").unwrap().id, "c1");
+        assert!(m.is_duplicate(&m.conversations["c2"]) && !m.is_duplicate(&m.conversations["c1"]));
+        assert_eq!(m.resolve("bob").unwrap().id, "c1");
+        // Banned contacts are known by name too, for `joma unblock`.
+        m.set_contacts(&[[("id".to_string(), "bob".to_string()), ("banned".to_string(), "true".to_string())].into()]);
+        assert!(m.is_banned("bob") && m.with_banned(&m.conversations["c1"]));
+        assert_eq!(m.contact_named("BOB").as_deref(), Some("bob"));
     }
 
     #[test]
