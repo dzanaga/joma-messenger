@@ -178,6 +178,15 @@ fn main() {
     if request(&if hidden { Request::Quick } else { Request::Show }).is_ok() {
         return;
     }
+    // Started from a shell without a desktop (over SSH, a TTY): say how to start it.
+    if std::env::var_os("WAYLAND_DISPLAY").is_none() && std::env::var_os("DISPLAY").is_none() {
+        eprintln!(
+            "joma: no desktop in this shell (over SSH?). Start Joma from the desktop, or through \
+             your session: systemd-run --user --unit=joma {}",
+            setup::exe().display()
+        );
+        std::process::exit(1);
+    }
     setup::refresh();
     let hidden = hidden && hypr::start_hidden();
     hypr::START_HIDDEN.store(hidden, std::sync::atomic::Ordering::SeqCst);
