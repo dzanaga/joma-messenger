@@ -1,0 +1,196 @@
+---
+title: "Joma with devices: your own devices, redundant delivery, agents"
+date: 2026-10-30
+lang: en
+---
+
+# How to read
+
+Under each question there is a `- [ ] A:` line.
+
+- **Tick it without writing anything:** you agree with the proposal.
+- **Tick it and add a detail:** you agree, with that detail.
+- **Leave it unticked and write:** I revise the proposal.
+
+Nothing here is built. The starting point is the idea in `TODO.md`: register your own
+devices in Joma; send them files, clipboard and images, and share or control their
+screens; messages reach a contact as long as any of your devices is online; choose what
+contacts see of your devices; later, agents among your devices.
+
+# What Jami already does
+
+Read in the daemon's code (`upstream/jami-daemon`), to verify in the test nest:
+
+- **One account, many devices.** A Jami account is one identity; each device linked to it
+  (with a PIN or QR code: `addDevice`) gets its own certificate. Contacts see one
+  person. `getKnownRingDevices` lists the account's devices; `revokeDevice` removes a
+  lost one; each has a name.
+- **Conversations live on every device.** A conversation is a git repository copied on
+  every member's devices, ours included.
+- **Sending already has redundancy.** A message is committed on the device that writes
+  it, announced *first to our own other devices*, then to the members
+  (`sendMessageNotification`). A peer's device syncs from any member device it reaches.
+  The airplane case then already works: the laptop sends, the phone gets the commit, the
+  contact comes online later and fetches it from the phone.
+  - The gap: none of our other devices was online while the laptop was. The message then
+    waits on the laptop.
+- **Statuses** per member: sent, delivered, read (`messageStatus`).
+- **Presence** is per device on the network; the daemon sums it up per contact (online
+  when any device is reachable). Contacts reach our devices directly, so Jami's
+  reachability cannot be hidden per device.
+- **Notes to self** (a conversation with only us) is synced to all our devices.
+
+# A. The model
+
+**Q1. Devices are devices of one Jami account, not separate accounts tied by Joma.**
+
+- **Proposal:** your devices are linked to the same account, Jami's way. Joma adds what
+  Jami lacks: a page of your devices, actions aimed at one device, and per-device
+  presence for Joma users.
+- **Why:**
+  - the redundancy and the sync of history come for free (above);
+  - contacts keep seeing one person;
+  - the Jami app on the phone keeps working: an Android phone with Jami is just one more
+    device.
+- **Alternative** (one account per device, linked by Joma under a "user"):
+  - contacts would see one contact per device unless every Joma merged them;
+  - redundancy, history and read status would have to be rebuilt by Joma;
+  - the Jami app would not understand any of it.
+
+- [ ] A:
+
+**Q2. A "your devices" page.**
+
+- **The list:** name, "this device", online or last seen, platform (Joma, Jami app),
+  and the device ID (copy).
+- **Link a new device:** Jami's PIN or QR code, both directions:
+  - this one invites another;
+  - a new Joma joins an existing account.
+- **Rename** a device; **revoke** a lost one (password asked when the account has one).
+- **Where:**
+  - in Contacts, a "you" group on top with your devices, each with the same quick
+    buttons as a contact (Q3);
+  - the full management in the account settings (J7).
+
+- [ ] A:
+
+# B. Doing things with your devices
+
+**Q3. Sending to your devices.**
+
+- **To all of them:** files, images, clipboard and text go to *Notes to self*, which
+  every device syncs. This needs no new protocol.
+- **To one device:** the same, plus a Joma account message naming the target device
+  (`to_device`). Only that one acts:
+  - it saves the file;
+  - it puts the text or image on its clipboard;
+  - it notifies.
+- **Clipboard:** a "send clipboard" button and a key (proposal: Ctrl+Shift+V is taken
+  by video calls, so Ctrl+Alt+C). The receiving device sets its clipboard
+  (`wl-copy` on Omarchy) and says so in a notification. Never set silently: a
+  per-device switch, off by default, allows it.
+
+- [ ] A:
+
+**Q4. Screen and remote control between your devices.**
+
+- **The screen:** the desktop share without a call already exists between Joma peers.
+  It works between your own devices too, through a Jami service tunnel to *that*
+  device. To verify: Jami routes a call to our own account to the other devices.
+- **Remote control is new:**
+  - the viewer sends pointer and key events over the same tunnel;
+  - the shared device injects them through the desktop portal's RemoteDesktop. Hyprland
+    supports it through xdg-desktop-portal-hyprland: to verify.
+- **Rules:**
+  - only between your own devices;
+  - the first time on each device it asks, and it remembers per device;
+  - a red frame and a banner on the controlled screen;
+  - Esc three times, or the banner button, stops it.
+
+- [ ] A:
+
+**Q5. Message delivery: rely on Jami, measure it, add only what is missing.**
+
+- **First,** a test in the nest with three profiles:
+  - two are linked devices of one account;
+  - the sender goes offline right after sending;
+  - the contact comes online later.
+
+  Jami's sync should deliver the message from the second device.
+- **Joma adds:**
+  - the message status in the chat (sent, delivered, read);
+  - a line on the sender's other devices: "waiting for Bob: kept by 2 of your devices".
+- **A retry layer of its own** (each device checks every N minutes and resends) only if
+  the test shows gaps. Jami's commits are already shared state, so "sent" and
+  "delivered" update on every device without Joma marking anything.
+
+- [ ] A:
+
+# C. What contacts see
+
+**Q6. Online, active, and your devices.**
+
+- **Two states for contacts, as now:**
+  - *reachable* (Jami: a device can receive messages; a faint dot);
+  - *active* (Joma: you are using a device; a full dot).
+- **Proposal for the default:** contacts see one sum of your devices: active if any
+  device is active, else reachable, else nothing.
+- **Per contact, you can show your devices:** "active on laptop", "phone reachable".
+  It is useful for close people and colleagues, off for everyone else.
+- **Per device, you can make it invisible:** for example, a work machine never says
+  you are active.
+- **What cannot be hidden:** Jami's reachability per device, since contacts connect to
+  each device directly. Invisible only covers what Joma sends.
+- **Proposal for "online":** make it quieter. The faint dot stays, but the header says
+  "can receive messages" instead of "on Jami".
+
+- [ ] A:
+
+# D. Accounts and agents
+
+**Q7. Multiple accounts and multiple devices are two different things.**
+
+- **Accounts (J8):** separate identities, like private and work. Each has its own
+  contacts and devices.
+- **Devices** (this discussion): the places one identity lives.
+- **Proposal:** devices first (Q2–Q5), then multiple accounts. The devices page is built
+  per account from the start, so J8 does not have to redo it.
+
+- [ ] A:
+
+**Q8. Agents (ACP) among your things.**
+
+ACP, the Agent Client Protocol, connects a client to a coding agent: JSON-RPC, usually
+over the agent's standard input and output. Joma would be the client: it runs an
+agent and lets you talk to it, from any of your devices.
+
+- **Proposal: an agent is not a linked device.** A linked device holds the account's
+  keys and receives every conversation: an agent would read all your chats.
+- **An agent gets its own Jami account, created by Joma on the machine where it runs**
+  ("claude@zoma"). Joma marks it as yours in the "you" group of Contacts.
+  - You write to it like a contact, from the laptop or the phone.
+  - The Joma on that machine passes the messages to the agent through ACP and sends
+    back the answers, the tool permissions to approve, and the files.
+- **Permissions:**
+  - an agent sees only its own conversation;
+  - it acts only on its machine;
+  - the tool approvals arrive as messages with buttons.
+- **Later:** an agent can be shared with a contact (a colleague talks to your agent) by
+  adding them to its conversation.
+
+- [ ] A:
+
+# E. Order
+
+**Q9. Proposed order.**
+
+| | What | Why |
+|---|---|---|
+| D1 | The delivery test (Q5) and the devices page with linking (Q2) | checks the base; linking is needed for everything else |
+| D2 | Sending to your devices: files, clipboard, images (Q3) | small, daily use |
+| D3 | What contacts see per device (Q6) | extends the presence already built |
+| D4 | Screen between your devices, then remote control (Q4) | the share exists; the control is new and needs care |
+| D5 | Agents through ACP (Q8) | builds on D1–D2 |
+| J8 | Multiple accounts | after the devices, on the same pages |
+
+- [ ] A:
