@@ -38,6 +38,14 @@
   the rest by latest message), block = Jami's ban, unblock = addContact. Deleting a chat
   keeps the contact (only removeConversation); removing a contact is a separate action.
   Replaces D-13's "delete for good". (User, 2026-10-29.)
+- D-18 Your devices are devices linked to one Jami account (not accounts tied by Joma):
+  a "you" group in Contacts and a devices page (link with jami-auth PIN/QR, rename,
+  revoke); sending to all devices through Notes to self, to one device with a Joma
+  message naming it; screen and remote control only between your own devices, asked
+  once per device; delivery relies on Jami's sync, measured first; contacts see one
+  sum of your devices unless you show them per contact; agents get their own account,
+  not a linked device, and talk through ACP. Devices before multiple accounts.
+  (User, 2026-10-30, `docs/discussions/2026-10-30-devices.qmd`.)
 
 ## Decided
 

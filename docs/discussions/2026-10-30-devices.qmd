@@ -57,7 +57,7 @@ Read in the daemon's code (`upstream/jami-daemon`), to verify in the test nest:
   - redundancy, history and read status would have to be rebuilt by Joma;
   - the Jami app would not understand any of it.
 
-- [ ] A:
+- [x] A:
 
 **Q2. A "your devices" page.**
 
@@ -72,7 +72,7 @@ Read in the daemon's code (`upstream/jami-daemon`), to verify in the test nest:
     buttons as a contact (Q3);
   - the full management in the account settings (J7).
 
-- [ ] A:
+- [x] A:
 
 # B. Doing things with your devices
 
@@ -90,7 +90,7 @@ Read in the daemon's code (`upstream/jami-daemon`), to verify in the test nest:
   (`wl-copy` on Omarchy) and says so in a notification. Never set silently: a
   per-device switch, off by default, allows it.
 
-- [ ] A:
+- [x] A:
 
 **Q4. Screen and remote control between your devices.**
 
@@ -107,7 +107,7 @@ Read in the daemon's code (`upstream/jami-daemon`), to verify in the test nest:
   - a red frame and a banner on the controlled screen;
   - Esc three times, or the banner button, stops it.
 
-- [ ] A:
+- [x] A:
 
 **Q5. Message delivery: rely on Jami, measure it, add only what is missing.**
 
@@ -124,7 +124,7 @@ Read in the daemon's code (`upstream/jami-daemon`), to verify in the test nest:
   the test shows gaps. Jami's commits are already shared state, so "sent" and
   "delivered" update on every device without Joma marking anything.
 
-- [ ] A:
+- [x] A:
 
 # C. What contacts see
 
@@ -144,7 +144,7 @@ Read in the daemon's code (`upstream/jami-daemon`), to verify in the test nest:
 - **Proposal for "online":** make it quieter. The faint dot stays, but the header says
   "can receive messages" instead of "on Jami".
 
-- [ ] A:
+- [x] A:
 
 # D. Accounts and agents
 
@@ -156,7 +156,7 @@ Read in the daemon's code (`upstream/jami-daemon`), to verify in the test nest:
 - **Proposal:** devices first (Q2–Q5), then multiple accounts. The devices page is built
   per account from the start, so J8 does not have to redo it.
 
-- [ ] A:
+- [x] A:
 
 **Q8. Agents (ACP) among your things.**
 
@@ -178,7 +178,7 @@ agent and lets you talk to it, from any of your devices.
 - **Later:** an agent can be shared with a contact (a colleague talks to your agent) by
   adding them to its conversation.
 
-- [ ] A:
+- [x] A:
 
 # E. Order
 
@@ -193,4 +193,4 @@ agent and lets you talk to it, from any of your devices.
 | D5 | Agents through ACP (Q8) | builds on D1–D2 |
 | J8 | Multiple accounts | after the devices, on the same pages |
 
-- [ ] A:
+- [x] A:
