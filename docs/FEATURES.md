@@ -77,6 +77,11 @@ notifications when the window is not active. Names come from peers' profiles and
 name server.
 
 ## Files
+Paste a picture (Ctrl+V), paste files copied in the file manager, or drop files on the
+conversation: they wait above the composer (✕ removes one) and Enter sends them, after
+the text if any. Pictures (png, jpg, gif, webp, bmp) show in the conversation once here;
+a click opens them. Pasted pictures are kept in `~/.cache/joma/pasted` (Jami sends files
+from where they are).
 Send with the clip button in a conversation or `joma send-file`. Received files up to 20 MB download by
 themselves into `~/Downloads/joma/` (a desktop notification says when); larger ones show
 their size in the chat: click to download. Click a received file to open it.
@@ -163,6 +168,8 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
+- unreleased: paste or drop pictures and files (they wait above the composer); pictures
+  show in the conversation; the conversation stays at its end while pictures load.
 - unreleased: share an area of a screen (area… draws it with slurp); the bar under the
   stage resizes it against the chat; a stage that takes the window hides the contact
   list too.

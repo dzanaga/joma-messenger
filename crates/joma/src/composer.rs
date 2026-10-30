@@ -12,6 +12,53 @@ use crate::theme::Theme;
 pub struct Submit;
 /// The text changed (for the "typing" indicator).
 pub struct Edited;
+/// Something pasted that is not text: a picture, or files copied in a file manager.
+pub enum Attach {
+    Files(Vec<std::path::PathBuf>),
+    /// The picture's bytes and their file extension.
+    Image(&'static str, Vec<u8>),
+}
+
+/// Text that is only `file://` URIs of existing files (a file manager's copy).
+fn file_uris(text: &str) -> Option<Vec<std::path::PathBuf>> {
+    let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let paths: Vec<std::path::PathBuf> = lines
+        .iter()
+        .map(|l| l.strip_prefix("file://").map(|p| std::path::PathBuf::from(percent_decode(p))))
+        .collect::<Option<_>>()?;
+    (!paths.is_empty() && paths.iter().all(|p| p.is_file())).then_some(paths)
+}
+
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let Some(v) = std::str::from_utf8(&b[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The file extension for a pasted picture's format.
+fn image_ext(format: gpui::ImageFormat) -> &'static str {
+    match format.mime_type() {
+        "image/jpeg" => "jpg",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        "image/svg+xml" => "svg",
+        "image/bmp" => "bmp",
+        "image/tiff" => "tiff",
+        _ => "png",
+    }
+}
 pub struct Composer {
     focus: FocusHandle,
     text: String,
@@ -30,6 +77,7 @@ pub struct Composer {
 }
 impl EventEmitter<Submit> for Composer {}
 impl EventEmitter<Edited> for Composer {}
+impl EventEmitter<Attach> for Composer {}
 impl Focusable for Composer {
     fn focus_handle(&self, _: &gpui::App) -> FocusHandle {
         self.focus.clone()
@@ -126,8 +174,16 @@ impl Composer {
                     }
                 }
                 "v" => {
-                    if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
-                        self.replace(None, &text, false, cx);
+                    let Some(item) = cx.read_from_clipboard() else { return };
+                    if let Some(gpui::ClipboardEntry::Image(img)) = item.entries().first() {
+                        if self.enabled {
+                            cx.emit(Attach::Image(image_ext(img.format), img.bytes.clone()));
+                        }
+                    } else if let Some(text) = item.text() {
+                        match file_uris(&text).filter(|_| self.enabled) {
+                            Some(paths) => cx.emit(Attach::Files(paths)),
+                            None => self.replace(None, &text, false, cx),
+                        }
                     }
                 }
                 _ => return,
@@ -347,5 +403,20 @@ mod tests {
         assert_eq!(units(s, 7), 4);
         assert_eq!(prev(s, 5), 1);
         assert_eq!(next(s, 1), 5);
+    }
+}
+
+#[cfg(test)]
+mod paste_tests {
+    use super::{file_uris, percent_decode};
+
+    #[test]
+    fn copied_files_are_recognised() {
+        assert_eq!(percent_decode("/tmp/a%20b.png"), "/tmp/a b.png");
+        let me = std::env::current_exe().unwrap();
+        let uri = format!("file://{}\n", me.display());
+        assert_eq!(file_uris(&uri), Some(vec![me]));
+        assert_eq!(file_uris("hello"), None);
+        assert_eq!(file_uris("file:///no/such/file"), None);
     }
 }

@@ -7,7 +7,7 @@ use gpui::prelude::*;
 use gpui::{
     Focusable,
     canvas, div, point, px, size, AnyElement, Bounds, ContentMask, Context, Corners, FontWeight, Hsla, MouseButton,
-    MouseDownEvent, MouseMoveEvent, Pixels, RenderImage, ScrollDelta, ScrollWheelEvent, SharedString, Window,
+    ExternalPaths, MouseDownEvent, MouseMoveEvent, ObjectFit, Pixels, RenderImage, ScrollDelta, ScrollWheelEvent, SharedString, Window,
 };
 use smallvec::smallvec;
 
@@ -1211,6 +1211,53 @@ impl Joma {
         )
     }
 
+    /// Files waiting to go with the next Enter: a picture shows itself, a file its name.
+    fn attachment_strip(&self, t: &Theme, conv: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let files = self.attachments.get(conv).filter(|f| !f.is_empty())?;
+        let items = files.iter().enumerate().map(|(i, path)| {
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+            let c = conv.to_owned();
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .p(px(4.))
+                .border_1()
+                .border_color(t.border)
+                .bg(t.panel)
+                .child(if is_picture(path) {
+                    div().size(px(56.)).child(gpui::img(path.clone()).size(px(56.)).object_fit(ObjectFit::Contain)).into_any_element()
+                } else {
+                    div().text_color(t.muted).child(G_CLIP).into_any_element()
+                })
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .max_w(px(180.))
+                        .child(div().truncate().text_color(t.bright).child(name))
+                        .child(div().text_size(px(t.size - 2.)).text_color(t.muted).child(size_label(size))),
+                )
+                .child(
+                    button(SharedString::from(format!("unattach-{i}")), G_TIMES, "", t, false)
+                        .on_click(cx.listener(move |this, _, _, cx| this.unattach(&c, i, cx))),
+                )
+        });
+        Some(
+            div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap(px(8.))
+                .px(px(12.))
+                .pt(px(8.))
+                .children(items)
+                .child(div().text_size(px(t.size - 2.)).text_color(t.muted).child("Enter sends them, with the text if any"))
+                .into_any_element(),
+        )
+    }
+
     /// What we share and how it looks to the peer, with a way to change or stop it.
     fn share_strip(&self, t: &Theme, key: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
         use crate::desk::Sharing;
@@ -1508,7 +1555,8 @@ impl Joma {
                 MsgKind::Event => match m.file.clone() {
                     // A file: click to open it, or to download one too big to come by itself.
                     Some(file) => {
-                        let have = self.saved_file(&conv.id, &file.id).is_some();
+                        let saved = self.saved_file(&conv.id, &file.id);
+                        let have = saved.is_some();
                         let hint = match (have, me, self.downloads.contains_key(&file.id)) {
                             (true, _, _) => " · open".to_owned(),
                             (false, true, _) => String::new(),
@@ -1528,7 +1576,19 @@ impl Joma {
                                         cx.notify();
                                     }))
                                 })
-                                .child(format!("{who} · {}{hint}", m.text)),
+                                .child(format!("{who} · {}{hint}", m.text))
+                                // A picture shows itself once it is here.
+                                .when_some(saved.filter(|p| is_picture(p)), |d, path| {
+                                    d.child(
+                                        div()
+                                            .mt(px(4.))
+                                            .max_w(px(360.))
+                                            .max_h(px(260.))
+                                            .border_1()
+                                            .border_color(t.border)
+                                            .child(gpui::img(path).max_w(px(358.)).max_h(px(258.)).object_fit(ObjectFit::Contain)),
+                                    )
+                                }),
                         )
                     }
                     None => row.child(div().flex_1().text_color(t.muted).italic().child(format!("{who} · {}", m.text))),
@@ -1650,7 +1710,13 @@ impl Joma {
                 )
                 .into_any_element()
         } else {
-            if std::mem::take(&mut self.pinned_bottom) {
+            // Stay at the end while it grows (a picture that loads makes it taller), unless
+            // the user scrolled up.
+            let at_end = {
+                let h = &self.messages_scroll;
+                f32::from(h.max_offset().height) > 0. && f32::from(-h.offset().y) >= f32::from(h.max_offset().height) - 4.
+            };
+            if std::mem::take(&mut self.pinned_bottom) || at_end {
                 self.messages_scroll.scroll_to_bottom();
             }
             self.messages(t, &conv, cx)
@@ -1667,18 +1733,22 @@ impl Joma {
             row
         });
 
+        let accent_bg = t.accent_bg;
         div()
             .flex()
             .flex_col()
             .flex_1()
             .min_w(px(0.))
+            // Files dropped on the conversation wait beside the composer.
+            .drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(accent_bg))
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach(paths.paths().to_vec(), cx)))
             .child(header)
             .when_some(call_panel, |d, p| d.child(p))
             .children(direct)
             .when(!self.stage, |d| {
                 d.child(body)
                     .when_some(quick, |d, q| d.child(q))
-                    .when(!conv.request, |d| d.child(div().px(px(12.)).py(px(8.)).child(self.composer.clone())))
+                    .when(!conv.request, |d| d.children(self.attachment_strip(t, &conv.id, cx)).child(div().px(px(12.)).py(px(8.)).child(self.composer.clone())))
             })
             .into_any_element()
     }
@@ -1922,6 +1992,13 @@ impl Render for Joma {
             .when(!self.fullscreen, |d| d.child(self.status_line(&t)))
             .children(picker)
     }
+}
+
+/// A file Joma shows as a picture.
+fn is_picture(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"))
 }
 
 /// "screen DP-1 · 5120×1440" or "window firefox — the title".

@@ -18,7 +18,7 @@ use joma_jami::Event;
 use joma_quick::ipc::{ChatLine, ChatState, QuickState, Reply, Request, Target};
 use joma_quick::{Candidate, QuickConfig};
 
-use crate::composer::{Composer, Edited, Submit};
+use crate::composer::{Attach, Composer, Edited, Submit};
 use crate::desk::{After, Desk};
 use crate::ipc::Pending;
 use crate::model::{bare_uri, Call, CallState, FileRef, Model};
@@ -266,6 +266,8 @@ pub struct Joma {
     share_on_connect: HashSet<String>,
     /// Files being or already downloaded this session: file id to where.
     pub downloads: HashMap<String, std::path::PathBuf>,
+    /// Files pasted or dropped, waiting for Enter, by conversation.
+    pub attachments: HashMap<String, Vec<std::path::PathBuf>>,
     /// Joma presence: ours and our contacts'.
     pub presence: Presence,
     pub tray: Tray,
@@ -416,6 +418,11 @@ impl Joma {
         let input = cx.new(Composer::new);
         cx.subscribe(&composer, |this, _, _: &Submit, cx| this.send_composed(cx)).detach();
         cx.subscribe(&composer, |this, _, _: &Edited, cx| this.typing(cx)).detach();
+        cx.subscribe(&composer, |this, _, a: &Attach, cx| match a {
+            Attach::Files(paths) => this.attach(paths.clone(), cx),
+            Attach::Image(ext, bytes) => this.attach_image(ext, bytes, cx),
+        })
+        .detach();
         cx.subscribe_in(&input, window, |this, _, _: &Submit, window, cx| this.submit_input(window, cx)).detach();
         cx.subscribe(&input, |this, input, _: &Edited, cx| {
             this.search = input.read(cx).text();
@@ -498,6 +505,7 @@ impl Joma {
             subscribed: HashSet::new(),
             share_on_connect: HashSet::new(),
             downloads: HashMap::new(),
+            attachments: HashMap::new(),
             presence: Presence::start(),
             tray: Tray::start(tray_tx, Look { status: crate::tray::Status::Offline, fg: joma_theme::current().foreground, unread: 0, invisible: false, start_at_login: false }),
             narrow: false,
@@ -657,11 +665,14 @@ impl Joma {
     }
 
     /// Where a file of a conversation is on disk, once received or sent: the daemon links
-    /// each one from its conversation folder (also those the Jami app downloaded).
+    /// each one from its conversation folder (also those the Jami app downloaded): a
+    /// symbolic link to a download, a hard link (the file itself) for one we sent.
     pub fn saved_file(&self, conv: &str, file_id: &str) -> Option<std::path::PathBuf> {
         let link = self.account_dir()?.join("conversation_data").join(conv).join(file_id);
-        let target = std::fs::read_link(&link).ok()?;
-        target.exists().then_some(target)
+        match std::fs::read_link(&link) {
+            Ok(target) => target.exists().then_some(target),
+            Err(_) => link.is_file().then_some(link),
+        }
     }
 
     /// Display names from the vCards the daemon keeps per peer.
@@ -721,7 +732,11 @@ impl Joma {
         let theme = self.theme.clone();
         let key = self.selected.clone().unwrap_or_default();
         let chat = self.gate == Gate::Ready && self.selected.as_ref().is_some_and(|s| !self.model.conversations.get(s).is_some_and(|c| c.request));
-        self.composer.update(cx, |c, _| c.configure(key, theme.clone(), chat));
+        self.composer.update(cx, |c, _| {
+            c.configure(key, theme.clone(), chat);
+            // Enter alone sends what is attached; an empty text alone is ignored.
+            c.set_allow_empty(true);
+        });
         let (key, placeholder) = match (self.gate.clone(), self.mode) {
             (Gate::Onboarding, _) if self.linking.as_ref().is_some_and(|l| l.password_scheme.is_some()) => {
                 ("link-password", "The account's password, then Enter")
@@ -1657,10 +1672,25 @@ impl Joma {
 
     fn send_composed(&mut self, cx: &mut Context<Self>) {
         let Some(conv) = self.selected.clone() else { return };
+        let files = self.attachments.remove(&conv).unwrap_or_default();
         let text = self.composer.read(cx).text();
-        if text.trim().is_empty() {
-            return;
+        // The text first: it reads as the pictures' caption.
+        if !text.trim().is_empty() {
+            self.send_text(&conv, &text, cx);
         }
+        for f in &files {
+            if let Reply::Error { message } = self.send_file(&conv, &f.to_string_lossy()) {
+                self.show_flash(format!("not sent: {message}"), cx);
+            }
+        }
+        if !files.is_empty() {
+            self.pinned_bottom = true;
+            cx.notify();
+        }
+    }
+
+    fn send_text(&mut self, conv: &str, text: &str, cx: &mut Context<Self>) {
+        let conv = conv.to_owned();
         match joma_jami::send_message(&self.model.account, &conv, text.trim_end(), "") {
             Ok(()) => {
                 self.model.sent(&conv, text.trim_end(), Instant::now());
@@ -2753,6 +2783,44 @@ impl Joma {
             Ok(()) => Reply::Done,
             Err(e) => Reply::Error { message: e.to_string() },
         }
+    }
+
+    /// Put files beside the composer of the open conversation; Enter sends them.
+    pub fn attach(&mut self, paths: Vec<std::path::PathBuf>, cx: &mut Context<Self>) {
+        let Some(conv) = self.selected.clone().filter(|c| self.model.conversations.get(c).is_some_and(|c| !c.request)) else {
+            return self.show_flash("open a conversation to send files", cx);
+        };
+        let list = self.attachments.entry(conv).or_default();
+        for p in paths.into_iter().filter(|p| p.is_file()) {
+            if !list.contains(&p) {
+                list.push(p);
+            }
+        }
+        self.focus_composer = true;
+        cx.notify();
+    }
+
+    /// A pasted picture: kept as a file (Jami sends files by path) and attached.
+    fn attach_image(&mut self, ext: &str, bytes: &[u8], cx: &mut Context<Self>) {
+        let dir = std::env::current_dir().unwrap_or_default().join("pasted");
+        let stamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+        let path = dir.join(format!("picture-{stamp}.{ext}"));
+        match std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, bytes)) {
+            Ok(()) => self.attach(vec![path], cx),
+            Err(e) => self.show_flash(format!("cannot keep the picture: {e}"), cx),
+        }
+    }
+
+    pub fn unattach(&mut self, conv: &str, index: usize, cx: &mut Context<Self>) {
+        if let Some(list) = self.attachments.get_mut(conv) {
+            if index < list.len() {
+                list.remove(index);
+            }
+            if list.is_empty() {
+                self.attachments.remove(conv);
+            }
+        }
+        cx.notify();
     }
 
     /// Ask for a file (the desktop's file chooser) and send it.
