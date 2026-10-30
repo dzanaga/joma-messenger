@@ -31,7 +31,9 @@ its identifier, which Hyprland gives as `stableId` in `hyprctl clients`. gliff's
 `hypr-capture` only captures outputs, so Joma vendors it (`crates/hypr-capture`, MIT)
 with `CaptureConfig::toplevel` added. `Share::set_source` switches source while the
 viewer watches: the capture restarts, the encoder follows the new size (a new
-`StreamConfig`), the connection stays. Odd window sizes are cropped to even.
+`StreamConfig`), the connection stays. Odd window sizes are cropped to even. An area (`Source::Area`, drawn with `slurp`) is
+the output's capture cut on the CPU before encoding: its ring is CPU-readable (linear
+or wl_shm), and the pointer is moved into the area and hidden outside it.
 
 **Preview** (`joma-desk/preview.rs`): picker thumbnails and the sharer's live preview
 (1 fps) capture into wl_shm (the compositor copies the frame; no encoder, no render

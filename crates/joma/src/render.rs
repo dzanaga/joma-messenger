@@ -47,6 +47,7 @@ pub const G_COPY: &str = "\u{f0c5}";
 pub const G_USER_PLUS: &str = "\u{f234}";
 pub const G_EXCHANGE: &str = "\u{f0ec}";
 pub const G_WINDOW: &str = "\u{f2d0}";
+pub const G_CROP: &str = "\u{f125}";
 pub const G_CROSSHAIRS: &str = "\u{f05b}";
 pub const G_ZOOM_IN: &str = "\u{f00e}";
 pub const G_ZOOM_OUT: &str = "\u{f010}";
@@ -993,7 +994,7 @@ impl Joma {
             let stage = self.stage_canvas(t, image, pointer, cx);
             panel = panel
                 .when(self.stage, |d| d.flex_1())
-                .child(div().relative().when(self.stage, |d| d.flex_1()).when(!self.stage, |d| d.h(px(260.))).child(stage))
+                .child(self.stage_box(t, stage, cx))
                 .child(self.stage_tools(t, info, cx));
         } else if let Some(note) = session.and_then(|s| s.note.clone()) {
             panel = panel.child(div().px(px(12.)).pb(px(6.)).text_size(px(t.size - 2.)).text_color(t.yellow).child(note));
@@ -1089,6 +1090,42 @@ impl Joma {
             .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, _| {
                 this.stage_view.borrow_mut().drag = None;
             }))
+            .into_any_element()
+    }
+
+    /// The stage in the call or share panel: as tall as set, with a bar under it to drag
+    /// (double click: the stage takes the whole window), or the whole window.
+    fn stage_box(&self, t: &Theme, stage: AnyElement, cx: &mut Context<Self>) -> AnyElement {
+        if self.stage {
+            return div().relative().flex_1().min_h(px(0.)).child(stage).into_any_element();
+        }
+        let dragging = self.resizing.is_some();
+        div()
+            .flex()
+            .flex_col()
+            .flex_none()
+            .child(div().relative().h(px(self.stage_height)).child(stage))
+            .child(
+                div()
+                    .id("stage-resize")
+                    .h(px(7.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_row_resize()
+                    .bg(if dragging { t.accent_bg } else { t.bar })
+                    .hover(|d| d.bg(t.accent_bg))
+                    .child(div().w(px(36.)).h(px(2.)).bg(if dragging { t.accent } else { t.border }))
+                    .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, _, cx| {
+                        if e.click_count == 2 {
+                            this.resizing = None;
+                            this.stage = true;
+                        } else {
+                            this.resizing = Some((f32::from(e.position.y), this.stage_height));
+                        }
+                        cx.notify();
+                    })),
+            )
             .into_any_element()
     }
 
@@ -1346,6 +1383,7 @@ impl Joma {
                                     div()
                                         .flex()
                                         .gap(px(6.))
+                                        .child(button("pick-area", G_CROP, "area…", t, false).on_click(cx.listener(|this, _, window, cx| this.pick_area(window, cx))))
                                         .when(portal, |d| {
                                             d.child(button("pick-portal", G_EXCHANGE, "Jami's share", t, false).on_click(cx.listener(|this, _, window, cx| this.pick(None, window, cx))))
                                         })
@@ -1362,7 +1400,7 @@ impl Joma {
                                 .p(px(12.))
                                 .children(cards),
                         )
-                        .child(div().px(px(12.)).pb(px(8.)).text_size(px(t.size - 2.)).text_color(t.muted).child("A window is sent alone, even when covered; you can change it while sharing. Esc closes.")),
+                        .child(div().px(px(12.)).pb(px(8.)).text_size(px(t.size - 2.)).text_color(t.muted).child("A window is sent alone, even when covered; area… lets you draw a rectangle. You can change it while sharing. Esc closes.")),
                 )
                 .into_any_element(),
         )
@@ -1425,7 +1463,7 @@ impl Joma {
                     let stage = self.stage_canvas(t, image, pointer, cx);
                     panel = panel
                         .when(self.stage, |d| d.flex_1())
-                        .child(div().relative().when(self.stage, |d| d.flex_1()).when(!self.stage, |d| d.h(px(260.))).child(stage))
+                        .child(self.stage_box(t, stage, cx))
                         .child(self.stage_tools(t, info, cx));
                 }
             }
@@ -1772,7 +1810,8 @@ impl Render for Joma {
                 .flex()
                 .flex_1()
                 .min_h(px(0.))
-                .child(self.sidebar(&t, cx))
+                // A stage that takes the window takes the sidebar's room too.
+                .when(!(self.stage && self.has_stage()), |d| d.child(self.sidebar(&t, cx)))
                 .child(self.chat(&t, cx))
                 .into_any_element()
         } else {
@@ -1861,6 +1900,22 @@ impl Render for Joma {
             .on_action(cx.listener(|this, _: &Quick8, _, cx| this.send_quick(7, cx)))
             .on_action(cx.listener(|this, _: &Quick9, _, cx| this.send_quick(8, cx)))
             .on_mouse_down(MouseButton::Left, |_, _, _| {})
+            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, window, cx| {
+                let Some((y0, h0)) = this.resizing else { return };
+                if e.pressed_button != Some(MouseButton::Left) {
+                    this.resizing = None;
+                } else {
+                    // The chat keeps at least a few lines.
+                    let max = (f32::from(window.viewport_size().height) - 220.).max(120.);
+                    this.stage_height = (h0 + f32::from(e.position.y) - y0).clamp(120., max);
+                }
+                cx.notify();
+            }))
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                if this.resizing.take().is_some() {
+                    cx.notify();
+                }
+            }))
             .relative()
             .when(!self.fullscreen, |d| d.child(self.top_bar(&t, cx)).children(self.setup_banner(&t, cx)))
             .child(body)
@@ -1874,6 +1929,7 @@ fn source_label(source: &joma_desk::share::Source, screen: &joma_desk::share::Sc
     match source {
         joma_desk::share::Source::Screen { output } => format!("screen {output} · {}×{}", screen.width, screen.height),
         joma_desk::share::Source::Window { class, title, .. } => format!("window {class} — {title}"),
+        joma_desk::share::Source::Area { output, .. } => format!("an area of {output} · {}×{}", screen.width, screen.height),
     }
 }
 

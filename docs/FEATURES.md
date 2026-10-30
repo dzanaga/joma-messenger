@@ -130,16 +130,19 @@ In a call: Ctrl+Shift+S. With a Joma peer: gliff's pipeline, sharp text, the poi
 drawn on the viewer. Otherwise: Jami's screen share through the portal.
 
 **What to share.** With a Joma peer, Joma first shows every screen and window with a
-thumbnail; pick one. A window is sent alone, even when other windows cover it or it is
-on another workspace. In a call, "Jami's share" goes through the portal instead.
-`joma share <to> --source screen:<output>|window:<address>|focused` skips the question
+thumbnail; pick one, or **area…** to draw a rectangle on a screen. A window is sent
+alone, even when other windows cover it or it is on another workspace. In a call, "Jami's share" goes through the portal instead.
+`joma share <to> --source screen:<output>|window:<address>|area:<output>@x,y,wxh|focused`
+skips the question
 (addresses as `hyprctl clients` prints them).
 
 **What you share.** While sharing, a strip under the call (or the share's panel) shows
 what goes out, as a live picture refreshed about once a second, with its name; "change"
 picks another screen or window without interrupting the viewer.
 
-**Watching.** The shared screen fills the stage, fitted; below it: **fit** (all of it),
+**Watching.** The bar under the stage drags to share the height between the stage and
+the chat (double click: the stage takes the window, the contact list steps aside too).
+The shared screen fills the stage, fitted; below it: **fit** (all of it),
 **fill** (fills the stage, the rest by panning: for an ultrawide, the full height),
 **1:1** (one pixel per screen pixel, the sharpest), zoom out/in, **follow** (when zoomed,
 the view follows the sharer's pointer) and **full screen**. The mouse wheel or Ctrl with
@@ -160,6 +163,9 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
+- unreleased: share an area of a screen (area… draws it with slurp); the bar under the
+  stage resizes it against the chat; a stage that takes the window hides the contact
+  list too.
 - 0.4.0-rc.6 (2026-10-30): desktop share: choose a screen or a single window (with
   thumbnails), change it while sharing, a live preview of what you share; the viewer
   zooms (fit, fill, 1:1, wheel), pans, follows the pointer and goes full screen (F11,

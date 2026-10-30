@@ -58,6 +58,21 @@ pub enum Source {
     /// `address` as `hyprctl clients` prints it, `id` its `stableId` (the Wayland
     /// toplevel identifier); `monitor` is the output it is on.
     Window { address: String, id: String, class: String, title: String, monitor: String },
+    /// A rectangle of an output, in its pixels (x, y, width, height).
+    Area { output: String, rect: (u32, u32, u32, u32) },
+}
+
+/// Cut `bgra` (tight rows, `width` wide) to `rect`, clamped to the picture and even-sized.
+pub fn crop_bgra(bgra: &[u8], width: usize, height: usize, rect: (u32, u32, u32, u32)) -> (Vec<u8>, usize, usize) {
+    let x = (rect.0 as usize).min(width.saturating_sub(2));
+    let y = (rect.1 as usize).min(height.saturating_sub(2));
+    let w = (rect.2 as usize).min(width - x) & !1;
+    let h = (rect.3 as usize).min(height - y) & !1;
+    let mut out = Vec::with_capacity(w * h * 4);
+    for row in bgra.chunks_exact(width * 4).skip(y).take(h) {
+        out.extend_from_slice(&row[x * 4..(x + w) * 4]);
+    }
+    (out, w, h)
 }
 
 /// A source offered to the user, with what to show for it.
@@ -82,6 +97,16 @@ impl Source {
         if let Some(o) = s.strip_prefix("screen:") {
             return Ok(Source::Screen { output: o.to_owned() });
         }
+        if let Some(a) = s.strip_prefix("area:") {
+            // area:<output>@<x>,<y>,<w>x<h>
+            let (output, r) = a.split_once('@').context("area:<output>@<x>,<y>,<w>x<h>")?;
+            let n: Vec<u32> = r.split([',', 'x']).map(|v| v.trim().parse()).collect::<std::result::Result<_, _>>().context("area numbers")?;
+            let [x, y, w, h] = n[..] else { bail!("area:<output>@<x>,<y>,<w>x<h>") };
+            if w < 16 || h < 16 {
+                bail!("the area is too small");
+            }
+            return Ok(Source::Area { output: output.to_owned(), rect: (x, y, w, h) });
+        }
         if let Some(a) = s.strip_prefix("window:") {
             let a = a.trim_start_matches("0x");
             return sources()?
@@ -98,7 +123,39 @@ impl Source {
         match self {
             Source::Screen { output } => format!("screen:{output}"),
             Source::Window { address, .. } => format!("window:{address}"),
+            Source::Area { output, rect: (x, y, w, h) } => format!("area:{output}@{x},{y},{w}x{h}"),
         }
+    }
+
+    /// The part of the captured frame that is sent (an area), else all of it.
+    pub fn crop(&self) -> Option<(u32, u32, u32, u32)> {
+        match self {
+            Source::Area { rect, .. } => Some(*rect),
+            _ => None,
+        }
+    }
+
+    /// Ask the user to draw a rectangle (`slurp`) and make it an area of the output it
+    /// starts on, in that output's pixels.
+    pub fn draw_area() -> Result<Source> {
+        let out = std::process::Command::new("slurp").args(["-f", "%o %x %y %w %h"]).output().context("slurp is not installed")?;
+        if !out.status.success() {
+            bail!("no area chosen");
+        }
+        let text = String::from_utf8_lossy(&out.stdout);
+        let f: Vec<&str> = text.split_whitespace().collect();
+        let [output, x, y, w, h] = f[..] else { bail!("slurp said {text:?}") };
+        let num = |v: &str| v.parse::<f64>().context("slurp numbers");
+        let inst = hypr_ipc::Instance::discover(None).context("no Hyprland session")?;
+        let m = inst.monitors()?.into_iter().find(|m| m.name == output).context("the area is on no screen")?;
+        let k = m.scale as f64;
+        let px = |v: f64| (v * k).round().max(0.) as u32;
+        let (x, y) = (px(num(x)? - m.x as f64), px(num(y)? - m.y as f64));
+        let (w, h) = (px(num(w)?).min(m.width.saturating_sub(x)), px(num(h)?).min(m.height.saturating_sub(y)));
+        if w < 16 || h < 16 {
+            bail!("the area is too small");
+        }
+        Ok(Source::Area { output: output.to_owned(), rect: (x, y, w & !1, h & !1) })
     }
 
     /// What it looks like now: the output's mode, or the window's size and title.
@@ -108,16 +165,20 @@ impl Source {
             .find(|i| match (&i.source, self) {
                 (Source::Screen { output: a }, Source::Screen { output: b }) => a == b,
                 (Source::Window { address: a, .. }, Source::Window { address: b, .. }) => a == b,
+                (Source::Screen { output: a }, Source::Area { output: b, .. }) => a == b,
                 _ => false,
             })
-            .map(|i| i.screen)
+            .map(|i| match self {
+                Source::Area { output, rect, .. } => Screen { name: format!("{output} area"), width: rect.2, height: rect.3, scale: i.screen.scale },
+                _ => i.screen,
+            })
             .context("that screen or window is gone")
     }
 
     /// The capture for this source.
     pub(crate) fn capture_config(&self) -> CaptureConfig {
         match self {
-            Source::Screen { output } => CaptureConfig::new(output.clone()),
+            Source::Screen { output } | Source::Area { output, .. } => CaptureConfig::new(output.clone()),
             Source::Window { id, class, title, monitor, .. } => {
                 let mut cc = CaptureConfig::new(monitor.clone());
                 cc.toplevel = Some(Toplevel { identifier: id.clone(), app_id: class.clone(), title: title.clone() });
@@ -388,8 +449,27 @@ impl Video {
         Ok(())
     }
 
-    fn encode(&mut self, frame: &CapturedFrame, keyframe: bool) -> Result<(Vec<u8>, Option<Vec<u8>>, bool)> {
+    fn encode(&mut self, frame: &CapturedFrame, crop: Option<(u32, u32, u32, u32)>, keyframe: bool) -> Result<(Vec<u8>, Option<Vec<u8>>, bool)> {
         let enc = self.enc.as_mut().ok_or_else(|| anyhow!("no encoder"))?;
+        if let Some(rect) = crop {
+            // An area: cut it out of the frame's pixels, whatever the encoder.
+            let img = frame.read_bgra()?;
+            let (px, w, _) = crop_bgra(&img.pixels, img.width, img.height, rect);
+            return Ok(match enc {
+                Enc::Gpu(e) => {
+                    let f = e.encode_bgra(&px, keyframe)?;
+                    (f.main, f.aux, f.keyframe)
+                }
+                Enc::Va(e) => {
+                    let (au, key) = e.encode_bgra(&px, w * 4, keyframe)?;
+                    (au, None, key)
+                }
+                Enc::Cpu(e) => {
+                    let f = e.encode_bgra(&px, keyframe)?;
+                    (f.main, f.aux, f.keyframe)
+                }
+            });
+        }
         let out = match enc {
             Enc::Gpu(e) if frame.buffer.is_shm() || !self.tier.takes_dmabufs() => {
                 // Shared memory, or a GPU other than the compositor's: upload the pixels.
@@ -481,7 +561,9 @@ async fn serve(
 
     let (cap_tx, mut cap_rx) = mpsc::unbounded_channel::<CaptureEvent>();
     let current = source.borrow_and_update().clone();
-    let mut capturer = start_capture(&current, dmabufs, cap_tx.clone())?;
+    // An area is cut out on the CPU: its capture must be readable there.
+    let mut crop = current.crop();
+    let mut capturer = start_capture(&current, dmabufs && crop.is_none(), cap_tx.clone())?;
 
     // A writer task owns the socket, so a slow write never stalls reading acks.
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Out>();
@@ -542,6 +624,14 @@ async fn serve(
                     send(msg, vec![argb])?;
                 }
                 Some(CaptureEvent::CursorPos { x, y, visible }) => {
+                    // Over an area, the pointer is placed in it, and hidden outside.
+                    let (x, y, visible) = match crop {
+                        Some((cx, cy, cw, ch)) => {
+                            let (x, y) = (x - cx as i32, y - cy as i32);
+                            (x, y, visible && x >= 0 && y >= 0 && x < cw as i32 && y < ch as i32)
+                        }
+                        None => (x, y, visible),
+                    };
                     send(ServerMsg::CursorPos { x: x as f64, y: y as f64, shape_id, visible }, vec![])?;
                 }
                 Some(CaptureEvent::Ready { .. }) => {}
@@ -595,7 +685,8 @@ async fn serve(
                 // Another screen or window: a fresh capture; the encoder follows its size.
                 let next = source.borrow_and_update().clone();
                 pending = None;
-                drop(std::mem::replace(&mut capturer, match start_capture(&next, dmabufs, cap_tx.clone()) {
+                crop = next.crop();
+                drop(std::mem::replace(&mut capturer, match start_capture(&next, dmabufs && crop.is_none(), cap_tx.clone()) {
                     Ok(c) => c,
                     Err(e) => break Err(e),
                 }));
@@ -620,7 +711,18 @@ async fn serve(
             continue;
         }
         let frame = pending.take().expect("checked above");
-        let stream = video.stream_for(frame.extent())?;
+        let extent = match crop {
+            Some((x, y, w, h)) => {
+                let (fw, fh) = frame.extent();
+                (w.min(fw.saturating_sub(x)), h.min(fh.saturating_sub(y)))
+            }
+            None => frame.extent(),
+        };
+        let stream = video.stream_for(extent)?;
+        if crop.is_some() && stream != (extent.0 & !1, extent.1 & !1) {
+            // An area's pixels go to the encoder as they are: it must take that size.
+            break Err(anyhow!("a {}x{} area is larger than the encoder takes", extent.0, extent.1));
+        }
         let dual = want_dual && video.gpu.is_some();
         if video.enc.is_none() || video.stream != stream || video.dual != dual {
             if video.stream != stream && video.enc.is_some() {
@@ -629,7 +731,6 @@ async fn serve(
                 ctl.reconfigure(pixels, if dual { 2 } else { 1 }, MAX_FPS);
             }
             video.rebuild(stream, dual, ctl.stream_bitrate(), fps, ctl.vbv_ms(fps))?;
-            let extent = frame.extent();
             let effective = screen.scale * stream.0 as f32 / extent.0.max(1) as f32;
             send(
                 ServerMsg::StreamConfig {
@@ -650,7 +751,7 @@ async fn serve(
             )?;
             force_key = true;
         }
-        let (main, aux, keyframe) = video.encode(&frame, force_key)?;
+        let (main, aux, keyframe) = video.encode(&frame, crop, force_key)?;
         // Hand the buffer back to the capture ring before waiting for the next one.
         drop(frame);
         force_key = false;
@@ -676,4 +777,23 @@ async fn serve(
     drop(out_tx);
     let _ = writer.await;
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{crop_bgra, Source};
+
+    #[test]
+    fn area_round_trips_and_crops_even() {
+        let a = Source::parse("area:DP-1@10,20,301x200").unwrap();
+        assert_eq!(a, Source::Area { output: "DP-1".into(), rect: (10, 20, 301, 200) });
+        assert_eq!(Source::parse(&a.key()).unwrap(), a);
+        assert!(Source::parse("area:DP-1@0,0,4x4").is_err());
+        // 4x3 picture, pixel value = its index; cut 3x2 at (1,1): even-sized 2x2.
+        let px: Vec<u8> = (0..12u8).flat_map(|i| [i, i, i, 255]).collect();
+        let (out, w, h) = crop_bgra(&px, 4, 3, (1, 1, 3, 2));
+        assert_eq!((w, h), (2, 2));
+        let firsts: Vec<u8> = out.chunks_exact(4).map(|p| p[0]).collect();
+        assert_eq!(firsts, [5, 6, 9, 10]);
+    }
 }

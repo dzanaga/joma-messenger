@@ -76,6 +76,8 @@ pub enum AppMsg {
     Tray(crate::tray::TrayAction),
     /// A thumbnail for the source picker: the picker's generation, the source's key.
     Thumb(u64, String, Picture),
+    /// The area drawn with `slurp`, for what the picker was asked for.
+    Area(PickFor, anyhow::Result<Source>),
 }
 
 /// What the source picker starts once the user chooses.
@@ -226,6 +228,10 @@ pub struct Joma {
     pub pointer: Option<Frame>,
     /// The call view fills the window (desktop share).
     pub stage: bool,
+    /// The stage's height above the chat, while it does not fill the window.
+    pub stage_height: f32,
+    /// Dragging the bar under the stage: where the drag started and the height then.
+    pub resizing: Option<(f32, f32)>,
     /// The stage fills the screen.
     pub fullscreen: bool,
     /// The window has been full screen since we asked (so leaving it is the user's doing).
@@ -470,6 +476,8 @@ impl Joma {
             desk_frame: None,
             pointer: None,
             stage: false,
+            stage_height: 260.,
+            resizing: None,
             fullscreen: false,
             fullscreen_seen: false,
             stage_view: Rc::new(RefCell::new(crate::stage::StageView::default())),
@@ -861,6 +869,10 @@ impl Joma {
                 self.desk.portal_ready(&acc, &call, result);
                 cx.notify();
             }
+            AppMsg::Area(target, area) => match area {
+                Ok(src) => self.apply_pick(target, Some(src), cx),
+                Err(e) => self.show_flash(format!("no area: {e}"), cx),
+            },
             AppMsg::Thumb(gen, key, pic) => {
                 if let Some(p) = self.picker.as_mut().filter(|p| p.gen == gen) {
                     if let Some(image) = crate::render::bgra_image(pic.width, pic.height, pic.bgra.as_ref().clone()) {
@@ -1445,6 +1457,20 @@ impl Joma {
         let target = p.target.clone();
         let source = index.and_then(|i| p.sources.get(i)).map(|s| s.source.clone());
         self.close_picker(window, cx);
+        self.apply_pick(target, source, cx);
+    }
+
+    /// Draw the area to share (the picker closes so the screen is free to draw on).
+    pub fn pick_area(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(target) = self.picker.as_ref().map(|p| p.target.clone()) else { return };
+        self.close_picker(window, cx);
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.unbounded_send(AppMsg::Area(target, Source::draw_area()));
+        });
+    }
+
+    fn apply_pick(&mut self, target: PickFor, source: Option<Source>, cx: &mut Context<Self>) {
         match (target, source) {
             (PickFor::Call(id), None) => self.start_portal(id, cx),
             (PickFor::Call(id), Some(src)) => self.share_in_with(&id, src, cx),

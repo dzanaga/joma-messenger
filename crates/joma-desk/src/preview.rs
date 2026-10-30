@@ -34,7 +34,7 @@ fn start(source: &Source) -> Result<(Capturer, Receiver<CaptureEvent>)> {
 }
 
 /// The next frame, shrunk to fit `max`.
-fn grab(cap: &Capturer, rx: &Receiver<CaptureEvent>, max: (u32, u32), serial: u64) -> Result<Picture> {
+fn grab(cap: &Capturer, rx: &Receiver<CaptureEvent>, crop: Option<(u32, u32, u32, u32)>, max: (u32, u32), serial: u64) -> Result<Picture> {
     cap.request_frame()?;
     let t = Instant::now();
     let mut rescued = false;
@@ -44,6 +44,10 @@ fn grab(cap: &Capturer, rx: &Receiver<CaptureEvent>, max: (u32, u32), serial: u6
         match rx.recv_timeout(wait.saturating_sub(t.elapsed()).max(Duration::from_millis(1))) {
             Ok(CaptureEvent::Frame(f)) => {
                 let img = f.read_bgra()?;
+                if let Some(rect) = crop {
+                    let (px, w, h) = crate::share::crop_bgra(&img.pixels, img.width, img.height, rect);
+                    return Ok(shrink(&px, w, h, max, serial));
+                }
                 return Ok(shrink(&img.pixels, img.width, img.height, max, serial));
             }
             Ok(CaptureEvent::Error(e)) => return Err(anyhow!("capture: {e}")),
@@ -62,7 +66,7 @@ fn grab(cap: &Capturer, rx: &Receiver<CaptureEvent>, max: (u32, u32), serial: u6
 /// One picture of `source`, at most `max` pixels.
 pub fn thumbnail(source: &Source, max: (u32, u32)) -> Result<Picture> {
     let (cap, rx) = start(source)?;
-    grab(&cap, &rx, max, 1)
+    grab(&cap, &rx, source.crop(), max, 1)
 }
 
 /// Box-filter `bgra` (tight rows) down to fit `max`, keeping the aspect; opaque alpha.
@@ -124,7 +128,7 @@ impl Preview {
                 };
                 loop {
                     serial += 1;
-                    match grab(&cap, &frames, max, serial) {
+                    match grab(&cap, &frames, source.crop(), max, serial) {
                         Ok(p) => *pic.lock().unwrap() = Some(p),
                         Err(e) => tracing::debug!(error = %e, "preview frame failed"),
                     }
