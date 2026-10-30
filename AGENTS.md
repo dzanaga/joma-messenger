@@ -9,7 +9,10 @@
   with `- [ ] A:` answer lines, as in Vetro.
 - `upstream/` holds read-only clones of jami-daemon, jami-client-qt and gliff for
   reference (ignored by git). gliff's crates are used as git dependencies pinned to a
-  reviewed revision; `crates/joma-desk/src/rate.rs` is vendored from gliff (MIT).
+  reviewed revision; `crates/joma-desk/src/rate.rs` is vendored from gliff (MIT), and so
+  is `crates/hypr-capture` (window capture added, see its README).
+- In the nest, run `grim` with the nest's `WAYLAND_DISPLAY` set:
+  with the host's display, `grim -o HEADLESS-1` captures the user's real screen.
 - **Never touch the user's real Jami data or desktop in tests.** Joma shares
   `~/.local/share/jami` with the Jami app. Tests run with `JOMA_PROFILE=<dir>` (its own
   data, config and socket) and `HOME=<dir>/home` after `scripts/test-profile.sh <dir>`

@@ -19,7 +19,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use joma_desk::portal::PortalShare;
-use joma_desk::share::{Share, ShareEvent};
+use joma_desk::preview::Preview;
+use joma_desk::share::{Share, ShareEvent, Source};
 use joma_desk::signal::{self, DeskMsg};
 use joma_desk::view::Viewer;
 use joma_jami::Details;
@@ -30,6 +31,9 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(8);
 const ASK_TIMEOUT: Duration = Duration::from_secs(90);
 /// Older offers without a call are dropped (they can arrive late through the DHT).
 const OFFER_MAX_AGE: u64 = 60;
+/// The sharer's own preview: its size and how often it changes.
+const PREVIEW_MAX: (u32, u32) = (480, 270);
+const PREVIEW_EVERY: Duration = Duration::from_millis(1000);
 
 const DIRECT: &str = "direct:";
 
@@ -47,8 +51,9 @@ pub enum Sharing {
     Off,
     /// Asking the portal; the user is picking a screen.
     Picking,
-    /// `answered`: the peer said hello (always so in a call).
-    Joma { share: Share, service: String, offered: Instant, answered: bool, accepted: bool },
+    /// `answered`: the peer said hello (always so in a call). `preview` shows the sharer
+    /// what goes out.
+    Joma { share: Share, preview: Option<Preview>, service: String, offered: Instant, answered: bool, accepted: bool },
     Portal { portal: PortalShare, input: String },
 }
 
@@ -127,14 +132,18 @@ impl Desk {
         send(account, call, &DeskMsg::Hello { v: signal::VERSION, share: joma_desk::share::available(), view: true });
     }
 
-    /// Start sharing: Joma's way if the peer can take it, else the portal.
+    /// Start sharing `source`: Joma's way if the peer can take it, else the portal (which
+    /// asks the user what to share itself). `changed` runs on each new preview picture.
+    #[allow(clippy::too_many_arguments)]
     pub fn start(
         &mut self,
         account: &str,
         call: &str,
         peer: &str,
         peer_joma: bool,
+        source: Source,
         events: impl Fn(ShareEvent) + Send + 'static,
+        changed: impl Fn() + Send + 'static,
     ) -> After {
         if !matches!(self.session(call).sharing, Sharing::Off) {
             return After::Nothing;
@@ -146,7 +155,7 @@ impl Desk {
             self.session(call).note = Some("not on Hyprland: using Jami's screen share".into());
             return After::Portal(call.to_owned());
         }
-        match self.offer(account, call, peer, events) {
+        match self.offer(account, call, peer, source, events, changed) {
             Ok(()) => After::Nothing,
             Err(e) => {
                 tracing::warn!(error = %format!("{e:#}"), "Joma share failed; falling back");
@@ -156,8 +165,15 @@ impl Desk {
         }
     }
 
-    /// Share with a peer without a call.
-    pub fn start_direct(&mut self, account: &str, uri: &str, events: impl Fn(ShareEvent) + Send + 'static) -> After {
+    /// Share `source` with a peer without a call.
+    pub fn start_direct(
+        &mut self,
+        account: &str,
+        uri: &str,
+        source: Source,
+        events: impl Fn(ShareEvent) + Send + 'static,
+        changed: impl Fn() + Send + 'static,
+    ) -> After {
         let key = direct_key(uri);
         if !matches!(self.session(&key).sharing, Sharing::Off) {
             return After::Nothing;
@@ -165,7 +181,7 @@ impl Desk {
         if !joma_desk::share::available() {
             return After::Call(uri.to_owned());
         }
-        match self.offer(account, &key, uri, events) {
+        match self.offer(account, &key, uri, source, events, changed) {
             Ok(()) => After::Nothing,
             Err(e) => {
                 tracing::warn!(error = %format!("{e:#}"), "Joma share failed; calling instead");
@@ -199,9 +215,17 @@ impl Desk {
         }
     }
 
-    fn offer(&mut self, account: &str, call: &str, peer: &str, events: impl Fn(ShareEvent) + Send + 'static) -> Result<()> {
+    fn offer(
+        &mut self,
+        account: &str,
+        call: &str,
+        peer: &str,
+        source: Source,
+        events: impl Fn(ShareEvent) + Send + 'static,
+        changed: impl Fn() + Send + 'static,
+    ) -> Result<()> {
         let token = signal::token();
-        let share = Share::start(token.clone(), events)?;
+        let share = Share::start(token.clone(), source.clone(), events)?;
         let service = joma_jami::expose_service(account, "joma-desk", share.port, &[peer])?;
         let msg = DeskMsg::Offer {
             v: signal::VERSION,
@@ -216,8 +240,33 @@ impl Desk {
         };
         send(account, call, &msg);
         let answered = direct_peer(call).is_none();
-        self.session(call).sharing = Sharing::Joma { share, service, offered: Instant::now(), answered, accepted: false };
+        let preview = Preview::start(source, PREVIEW_MAX, PREVIEW_EVERY, changed)
+            .map_err(|e| tracing::warn!(error = %e, "no share preview"))
+            .ok();
+        self.session(call).sharing = Sharing::Joma { share, preview, service, offered: Instant::now(), answered, accepted: false };
         Ok(())
+    }
+
+    /// Share another screen or window in a running Joma share.
+    pub fn set_source(&mut self, key: &str, source: Source) -> Result<()> {
+        match &mut self.session(key).sharing {
+            Sharing::Joma { share, preview, .. } => {
+                share.set_source(source.clone())?;
+                if let Some(p) = preview {
+                    p.set_source(source);
+                }
+                Ok(())
+            }
+            _ => anyhow::bail!("not sharing the Joma way"),
+        }
+    }
+
+    /// What a running Joma share sends, and its preview.
+    pub fn shared(&self, key: &str) -> Option<(&Share, Option<&Preview>)> {
+        match &self.sessions.get(key)?.sharing {
+            Sharing::Joma { share, preview, .. } => Some((share, preview.as_ref())),
+            _ => None,
+        }
     }
 
     /// The portal answered: share its stream as the call's video.

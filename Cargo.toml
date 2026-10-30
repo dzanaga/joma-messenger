@@ -1,11 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["crates/joma-jami", "crates/joma-theme", "crates/joma-desk", "crates/joma-quick", "crates/joma"]
+members = ["crates/hypr-capture", "crates/joma-jami", "crates/joma-theme", "crates/joma-desk", "crates/joma-quick", "crates/joma"]
 
 [workspace.package]
 edition = "2021"
 license = "GPL-3.0-or-later"
-version = "0.4.0-rc.5"
+version = "0.4.0-rc.6"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -20,7 +20,7 @@ gliff-transport = { git = "https://github.com/omacom/gliff", rev = "58c742452ded
 gliff-vk = { git = "https://github.com/omacom/gliff", rev = "58c742452ded3f10a2ce61f60eb4845f18205e29" }
 gliff-sw = { git = "https://github.com/omacom/gliff", rev = "58c742452ded3f10a2ce61f60eb4845f18205e29" }
 gliff-va = { git = "https://github.com/omacom/gliff", rev = "58c742452ded3f10a2ce61f60eb4845f18205e29" }
-hypr-capture = { git = "https://github.com/omacom/gliff", rev = "58c742452ded3f10a2ce61f60eb4845f18205e29" }
+hypr-capture = { path = "crates/hypr-capture" }
 hypr-ipc = { git = "https://github.com/omacom/gliff", rev = "58c742452ded3f10a2ce61f60eb4845f18205e29" }
 
 [profile.release]

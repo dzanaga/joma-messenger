@@ -46,6 +46,11 @@
   sum of your devices unless you show them per contact; agents get their own account,
   not a linked device, and talk through ACP. Devices before multiple accounts.
   (User, 2026-10-30, `docs/discussions/2026-10-30-devices.qmd`.)
+- D-19 Joma's share asks what to share (a screen or one window, with thumbnails) and
+  shows the sharer a live preview; the viewer zooms, pans, follows the pointer and goes
+  full screen. Window capture needs `hypr-capture` vendored with a toplevel source.
+  F11 = full screen. (User asked for zoom, full screen, the choice and a preview,
+  2026-10-30.)
 
 ## Decided
 

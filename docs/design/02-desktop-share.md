@@ -24,6 +24,19 @@ Two ways, chosen per call:
 The tunnel is Jami's own peer-to-peer channel (ICE, TLS, TURN when needed), authorised
 by contact identity. The token guards the loopback port against other local processes.
 
+**Source.** The user picks an output or one window (`share::sources()`: Hyprland's
+monitors and clients). A window is captured on its own through
+`ext-foreign-toplevel-image-capture-source`, found in `ext-foreign-toplevel-list` by
+its identifier, which Hyprland gives as `stableId` in `hyprctl clients`. gliff's
+`hypr-capture` only captures outputs, so Joma vendors it (`crates/hypr-capture`, MIT)
+with `CaptureConfig::toplevel` added. `Share::set_source` switches source while the
+viewer watches: the capture restarts, the encoder follows the new size (a new
+`StreamConfig`), the connection stays. Odd window sizes are cropped to even.
+
+**Preview** (`joma-desk/preview.rs`): picker thumbnails and the sharer's live preview
+(1 fps) capture into wl_shm (the compositor copies the frame; no encoder, no render
+node of ours) and shrink on the CPU.
+
 **Sharer** (`joma-desk/share.rs`): `hypr-capture` fills GBM dmabufs from
 `ext-image-copy-capture` on demand (a still screen costs nothing; a 700 ms rescue
 recaptures a first frame the compositor withholds). `gliff-vk` splits each frame into two
@@ -33,7 +46,11 @@ recaptures a first frame the compositor withholds). `gliff-vk` splits each frame
 
 **Viewer** (`joma-desk/view.rs`): two VA-API decoders and the `gliff-vk` recombine
 shader, or `gliff-sw`; each picture is read back once as BGRA for GPUI, and the remote
-pointer is drawn over it (gliff never bakes the cursor into the video).
+pointer is drawn over it (gliff never bakes the cursor into the video). The stage
+(`joma/stage.rs`) zooms (fit, fill, 1:1, free up to 8 screen pixels per picture pixel),
+pans, keeps the remote pointer 15 % away from the edges when following, and resets to
+fit when the picture's size changes. Full screen is the window's own
+(`xdg_toplevel.set_fullscreen`) with only the stage in it.
 
 Only viewing for now: no remote control, no clipboard (gliff has both; see the plan).
 

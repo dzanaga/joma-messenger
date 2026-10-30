@@ -1,5 +1,6 @@
 //! The Joma window: state, daemon events and user actions. Rendering is in `render.rs`.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -10,7 +11,8 @@ use futures::channel::mpsc::UnboundedSender;
 use futures::StreamExt;
 use gpui::{actions, App, AppContext, Context, Entity, FocusHandle, Focusable, RenderImage, ScrollHandle, Window};
 use joma_desk::portal::PortalShare;
-use joma_desk::share::ShareEvent;
+use joma_desk::share::{ShareEvent, Source, SourceInfo};
+use joma_desk::view::Picture;
 use joma_desk::signal::{DeskMsg, MIME};
 use joma_jami::Event;
 use joma_quick::ipc::{ChatLine, ChatState, QuickState, Reply, Request, Target};
@@ -54,6 +56,10 @@ actions!(
         Quick8,
         Quick9,
         FocusStage,
+        ToggleFullscreen,
+        ZoomIn,
+        ZoomOut,
+        ZoomFit,
         AcceptRequest,
         DeclineRequest,
     ]
@@ -68,6 +74,29 @@ pub enum AppMsg {
     Ipc(Pending),
     Portal(String, anyhow::Result<PortalShare>),
     Tray(crate::tray::TrayAction),
+    /// A thumbnail for the source picker: the picker's generation, the source's key.
+    Thumb(u64, String, Picture),
+}
+
+/// What the source picker starts once the user chooses.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PickFor {
+    /// Share in this call.
+    Call(String),
+    /// Share without a call with this conversation's peer.
+    Direct(String),
+    /// Switch a running share (by session key) to another source.
+    Switch(String),
+}
+
+/// The source picker: the screens and windows to share, with thumbnails as they come.
+pub struct Picker {
+    pub target: PickFor,
+    pub gen: u64,
+    pub sources: Vec<SourceInfo>,
+    pub thumbs: HashMap<String, Arc<RenderImage>>,
+    /// Who sees it.
+    pub peer: String,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -197,6 +226,17 @@ pub struct Joma {
     pub pointer: Option<Frame>,
     /// The call view fills the window (desktop share).
     pub stage: bool,
+    /// The stage fills the screen.
+    pub fullscreen: bool,
+    /// The window has been full screen since we asked (so leaving it is the user's doing).
+    pub fullscreen_seen: bool,
+    /// Zoom and pan on the stage; the paint code updates its layout.
+    pub stage_view: Rc<RefCell<crate::stage::StageView>>,
+    /// Choosing what to share.
+    pub picker: Option<Picker>,
+    picker_gen: u64,
+    /// The sharer's preview of each running Joma share, by session key.
+    pub previews: HashMap<String, Frame>,
     pub flash: Option<(String, Instant)>,
     pub focus: FocusHandle,
     pub messages_scroll: ScrollHandle,
@@ -430,6 +470,12 @@ impl Joma {
             desk_frame: None,
             pointer: None,
             stage: false,
+            fullscreen: false,
+            fullscreen_seen: false,
+            stage_view: Rc::new(RefCell::new(crate::stage::StageView::default())),
+            picker: None,
+            picker_gen: 0,
+            previews: HashMap::new(),
             flash: None,
             focus: cx.focus_handle(),
             messages_scroll: ScrollHandle::new(),
@@ -815,6 +861,16 @@ impl Joma {
                 self.desk.portal_ready(&acc, &call, result);
                 cx.notify();
             }
+            AppMsg::Thumb(gen, key, pic) => {
+                if let Some(p) = self.picker.as_mut().filter(|p| p.gen == gen) {
+                    if let Some(image) = crate::render::bgra_image(pic.width, pic.height, pic.bgra.as_ref().clone()) {
+                        if let Some(old) = p.thumbs.insert(key, image) {
+                            cx.drop_image(old, Some(window));
+                        }
+                    }
+                    cx.notify();
+                }
+            }
             AppMsg::Tray(action) => match action {
                 TrayAction::Toggle => self.toggle_window(window, cx),
                 TrayAction::Open => raise(window),
@@ -922,14 +978,9 @@ impl Joma {
                 return;
             }
             Event::TunnelOpened { tunnel, port, .. } => {
-                let tx = self.tx.clone();
-                let queued = self.repaint_queued.clone();
-                self.desk.tunnel_opened(tunnel, *port, move || {
-                    if !queued.swap(true, Ordering::SeqCst) {
-                        let _ = tx.unbounded_send(AppMsg::Repaint);
-                    }
-                });
+                self.desk.tunnel_opened(tunnel, *port, self.repaint());
                 self.stage = true;
+                self.stage_view.borrow_mut().reset();
                 cx.notify();
                 return;
             }
@@ -1298,19 +1349,168 @@ impl Joma {
         (!parts.is_empty()).then(|| parts.join(" · "))
     }
 
+    /// Share with a conversation's peer without a call: ask what to share first, when
+    /// sharing the Joma way is possible here.
     pub fn share_direct(&mut self, conv: &str, cx: &mut Context<Self>) -> Reply {
         let Some(peer) = self.model.conversations.get(conv).filter(|c| c.peers.len() == 1).map(|c| c.peers[0].clone()) else {
             return Reply::Error { message: "sharing without a call needs a one-to-one conversation".into() };
         };
+        if joma_desk::share::available() {
+            let name = self.model.name_of(&peer);
+            self.open_picker(PickFor::Direct(conv.to_owned()), name, cx);
+            return Reply::Done;
+        }
+        self.share_direct_with(conv, None, cx)
+    }
+
+    /// Share `source` (the focused screen if none) with a conversation's peer without a call.
+    fn share_direct_with(&mut self, conv: &str, source: Option<Source>, cx: &mut Context<Self>) -> Reply {
+        let Some(peer) = self.model.conversations.get(conv).filter(|c| c.peers.len() == 1).map(|c| c.peers[0].clone()) else {
+            return Reply::Error { message: "sharing without a call needs a one-to-one conversation".into() };
+        };
+        let source = match source.map(Ok).unwrap_or_else(|| Source::parse("focused")) {
+            Ok(s) => s,
+            // Not on Hyprland: the desk calls instead and shares through the portal.
+            Err(_) => Source::Screen { output: String::new() },
+        };
         let acc = self.model.account.clone();
         let tx = self.tx.clone();
         let key = crate::desk::direct_key(&peer);
-        let after = self.desk.start_direct(&acc, &peer, move |ev| {
-            let _ = tx.unbounded_send(AppMsg::Share(key.clone(), ev));
-        });
+        let after = self.desk.start_direct(
+            &acc,
+            &peer,
+            source,
+            move |ev| {
+                let _ = tx.unbounded_send(AppMsg::Share(key.clone(), ev));
+            },
+            self.repaint(),
+        );
         self.after(after, cx);
         cx.notify();
         Reply::Done
+    }
+
+    /// Wake the window from another thread, once per frame at most.
+    fn repaint(&self) -> impl Fn() + Send + 'static {
+        let tx = self.tx.clone();
+        let queued = self.repaint_queued.clone();
+        move || {
+            if !queued.swap(true, Ordering::SeqCst) {
+                let _ = tx.unbounded_send(AppMsg::Repaint);
+            }
+        }
+    }
+
+    // ---- Choosing what to share -------------------------------------------------
+
+    /// List the screens and windows and ask which one to share; thumbnails follow.
+    pub fn open_picker(&mut self, target: PickFor, peer: String, cx: &mut Context<Self>) {
+        let sources = match joma_desk::share::sources() {
+            Ok(s) if !s.is_empty() => s,
+            Ok(_) => return self.show_flash("nothing to share: no screen found", cx),
+            Err(e) => return self.show_flash(format!("cannot list screens: {e}"), cx),
+        };
+        self.picker_gen += 1;
+        let gen = self.picker_gen;
+        let list: Vec<Source> = sources.iter().map(|s| s.source.clone()).collect();
+        // One thread each: a screen that never draws must not hold up the others.
+        for src in list {
+            let tx = self.tx.clone();
+            std::thread::Builder::new()
+                .name("joma-thumb".into())
+                .spawn(move || match joma_desk::preview::thumbnail(&src, (320, 180)) {
+                    Ok(p) => {
+                        let _ = tx.unbounded_send(AppMsg::Thumb(gen, src.key(), p));
+                    }
+                    Err(e) => tracing::debug!(source = %src.key(), error = %e, "no thumbnail"),
+                })
+                .ok();
+        }
+        self.picker = Some(Picker { target, gen, sources, thumbs: HashMap::new(), peer });
+        cx.notify();
+    }
+
+    pub fn close_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(p) = self.picker.take() {
+            for (_, image) in p.thumbs {
+                cx.drop_image(image, Some(window));
+            }
+        }
+        cx.notify();
+    }
+
+    /// The user chose source `index` of the picker (or `None`: Jami's own share).
+    pub fn pick(&mut self, index: Option<usize>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(p) = self.picker.as_ref() else { return };
+        let target = p.target.clone();
+        let source = index.and_then(|i| p.sources.get(i)).map(|s| s.source.clone());
+        self.close_picker(window, cx);
+        match (target, source) {
+            (PickFor::Call(id), None) => self.start_portal(id, cx),
+            (PickFor::Call(id), Some(src)) => self.share_in_with(&id, src, cx),
+            (PickFor::Direct(conv), src) => {
+                if let Reply::Error { message } = self.share_direct_with(&conv, src, cx) {
+                    self.show_flash(message, cx);
+                }
+            }
+            (PickFor::Switch(key), Some(src)) => {
+                let label = src.key();
+                match self.desk.set_source(&key, src) {
+                    Ok(()) => self.show_flash(format!("now sharing {label}"), cx),
+                    Err(e) => self.show_flash(format!("could not switch: {e}"), cx),
+                }
+            }
+            (PickFor::Switch(_), None) => {}
+        }
+        cx.notify();
+    }
+
+    /// Ask what to share instead, in a running Joma share.
+    pub fn change_source(&mut self, key: &str, cx: &mut Context<Self>) {
+        let peer = crate::desk::direct_peer(key)
+            .map(str::to_owned)
+            .or_else(|| self.model.calls.get(key).map(|c| c.peer.clone()))
+            .unwrap_or_default();
+        let name = self.model.name_of(&peer);
+        self.open_picker(PickFor::Switch(key.to_owned()), name, cx);
+    }
+
+    // ---- The stage --------------------------------------------------------------
+
+    /// Fill the screen with the stage, or come back.
+    pub fn toggle_fullscreen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.fullscreen && !self.has_stage() {
+            self.show_flash("nothing to show full screen: no shared desktop or video", cx);
+            return;
+        }
+        self.fullscreen = !self.fullscreen;
+        self.fullscreen_seen = false;
+        if self.fullscreen {
+            self.stage = true;
+        }
+        if window.is_fullscreen() != self.fullscreen {
+            window.toggle_fullscreen();
+        }
+        cx.notify();
+    }
+
+    /// A peer's desktop or video is there to show.
+    pub fn has_stage(&self) -> bool {
+        self.desk_frame.is_some() || self.active_call().is_some_and(|c| c.sinks.iter().any(|s| self.frames.contains_key(s)))
+    }
+
+    pub fn zoom(&mut self, how: crate::stage::Zoom, cx: &mut Context<Self>) {
+        if self.has_stage() {
+            self.stage_view.borrow_mut().set(how);
+            cx.notify();
+        }
+    }
+
+    pub fn zoom_by(&mut self, factor: f32, cx: &mut Context<Self>) {
+        if self.has_stage() {
+            self.stage_view.borrow_mut().zoom_by(factor);
+            cx.notify();
+        }
     }
 
     /// Stop a share without a call (`key` from [`crate::desk::direct_key`]): ours, or the
@@ -2199,8 +2399,23 @@ impl Joma {
         self.share_in(&call.id.clone(), cx);
     }
 
-    /// Start sharing the desktop in a connected call.
+    /// Start sharing the desktop in a connected call: ask what to share when the peer
+    /// takes Joma's share, else go straight to Jami's (its portal asks).
     fn share_in(&mut self, call_id: &str, cx: &mut Context<Self>) {
+        let Some(call) = self.model.calls.get(call_id).cloned() else { return };
+        if self.desk.session(&call.id).sharing_label().is_some() {
+            return;
+        }
+        if call.peer_joma && joma_desk::share::available() {
+            let name = self.model.name_of(&call.peer);
+            self.open_picker(PickFor::Call(call.id.clone()), name, cx);
+            return;
+        }
+        let source = Source::parse("focused").unwrap_or(Source::Screen { output: String::new() });
+        self.share_in_with(call_id, source, cx);
+    }
+
+    fn share_in_with(&mut self, call_id: &str, source: Source, cx: &mut Context<Self>) {
         let Some(call) = self.model.calls.get(call_id).cloned() else { return };
         if self.desk.session(&call.id).sharing_label().is_some() {
             return;
@@ -2208,9 +2423,18 @@ impl Joma {
         let acc = self.model.account.clone();
         let tx = self.tx.clone();
         let id = call.id.clone();
-        let after = self.desk.start(&acc, &call.id, &call.peer, call.peer_joma, move |ev| {
-            let _ = tx.unbounded_send(AppMsg::Share(id.clone(), ev));
-        });
+        let repaint = self.repaint();
+        let after = self.desk.start(
+            &acc,
+            &call.id,
+            &call.peer,
+            call.peer_joma,
+            source,
+            move |ev| {
+                let _ = tx.unbounded_send(AppMsg::Share(id.clone(), ev));
+            },
+            repaint,
+        );
         self.after(after, cx);
         cx.notify();
     }
@@ -2321,16 +2545,31 @@ impl Joma {
                 },
                 Err(e) => e,
             },
-            Request::ShareScreen { to } => match self.target(&to) {
+            Request::ShareScreen { to, source } => match self.target(&to) {
                 Ok(conv) => {
+                    let source = match source.as_deref().map(Source::parse).transpose() {
+                        Ok(s) => s,
+                        Err(e) => return Reply::Error { message: e.to_string() },
+                    };
                     let running = self.model.calls.values().find(|c| c.conversation.as_deref() == Some(conv.as_str())).cloned();
-                    match running {
-                        Some(c) if c.state == CallState::Current => self.share_in(&c.id, cx),
-                        Some(c) => {
+                    match (running, source) {
+                        (Some(c), Some(src)) if c.state == CallState::Current => self.share_in_with(&c.id, src, cx),
+                        (Some(c), None) if c.state == CallState::Current => self.share_in(&c.id, cx),
+                        (Some(c), _) => {
                             self.share_on_connect.insert(c.id);
                         }
                         // No call: share straight away, without one.
-                        None => return self.share_direct(&conv, cx),
+                        (None, Some(src)) => return self.share_direct_with(&conv, Some(src), cx),
+                        (None, None) => {
+                            let r = self.share_direct(&conv, cx);
+                            if self.picker.is_some() {
+                                raise(window);
+                            }
+                            return r;
+                        }
+                    }
+                    if self.picker.is_some() {
+                        raise(window);
                     }
                     Reply::Done
                 }

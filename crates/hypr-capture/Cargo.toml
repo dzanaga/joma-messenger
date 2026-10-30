@@ -1,0 +1,19 @@
+[package]
+# Vendored from gliff (github.com/omacom/gliff, rev 58c74245, MIT); Joma adds window
+# capture (`CaptureConfig::toplevel`). See README.md.
+name = "hypr-capture"
+version = "0.4.1"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+thiserror = "2"
+tracing.workspace = true
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
+calloop = "0.14"
+calloop-wayland-source = "0.4"
+gbm = "0.15"
+drm-fourcc = "2"
+nix = { version = "0.30", features = ["fs", "socket", "uio", "poll"] }
+hypr-wl = { git = "https://github.com/omacom/gliff", rev = "58c742452ded3f10a2ce61f60eb4845f18205e29" }

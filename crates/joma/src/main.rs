@@ -16,6 +16,7 @@ mod ipc;
 mod model;
 mod presence;
 mod setup;
+mod stage;
 mod tray;
 mod render;
 mod theme;
@@ -32,7 +33,9 @@ const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); -
        joma send-quick <to> <n>  send quick message n (1-9)
        joma chat <to> [n]        the last n messages (default 20), as JSON; marks them read
        joma call <to> [--video]  call a conversation
-       joma share <to>           share the desktop (in the running call, else without a call)
+       joma share <to> [--source screen:<output>|window:<address>|focused]
+                                 share the desktop (in the running call, else without a
+                                 call); without --source Joma asks what to share
        joma watch <to>           watch the desktop <to> offers you
        joma send-file <to> [path]
                                  send a file (without a path, Joma asks for one)
@@ -70,7 +73,9 @@ fn cli(args: &[String]) -> Option<i32> {
         Some("quit") => Request::Quit,
         Some("chat") if args.len() >= 2 => Request::Chat { to: args[1].clone(), limit: args.get(2).and_then(|n| n.parse().ok()).unwrap_or(20) },
         Some("call") if args.len() >= 2 => Request::Call { to: args[1].clone(), video: args[2..].iter().any(|a| a == "--video") },
-        Some("share") if args.len() == 2 => Request::ShareScreen { to: args[1].clone() },
+        Some("share") if args.len() == 2 || (args.len() == 4 && args[2] == "--source") => {
+            Request::ShareScreen { to: args[1].clone(), source: args.get(3).cloned() }
+        }
         Some("send-file") if args.len() >= 2 => Request::SendFile {
             to: args[1].clone(),
             // The running Joma has its own working directory.
@@ -255,7 +260,12 @@ fn main() {
             KeyBinding::new("ctrl-shift-s", ShareDesktop, None),
             KeyBinding::new("ctrl-shift-f", ToggleFavorite, None),
             KeyBinding::new("ctrl-shift-k", ToggleContacts, None),
-            KeyBinding::new("f11", FocusStage, None),
+            KeyBinding::new("f11", ToggleFullscreen, None),
+            KeyBinding::new("ctrl-shift-enter", FocusStage, None),
+            KeyBinding::new("ctrl-=", ZoomIn, None),
+            KeyBinding::new("ctrl-+", ZoomIn, None),
+            KeyBinding::new("ctrl--", ZoomOut, None),
+            KeyBinding::new("ctrl-0", ZoomFit, None),
             KeyBinding::new("ctrl-enter", AcceptRequest, None),
             KeyBinding::new("ctrl-backspace", DeclineRequest, None),
             KeyBinding::new("ctrl-.", ToggleQuick, None),

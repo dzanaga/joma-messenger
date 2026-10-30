@@ -2711,7 +2711,6 @@ dependencies = [
 [[package]]
 name = "hypr-capture"
 version = "0.4.1"
-source = "git+https://github.com/omacom/gliff?rev=58c742452ded3f10a2ce61f60eb4845f18205e29#58c742452ded3f10a2ce61f60eb4845f18205e29"
 dependencies = [
  "calloop 0.14.5",
  "calloop-wayland-source 0.4.1",
@@ -3025,7 +3024,7 @@ dependencies = [
 
 [[package]]
 name = "joma"
-version = "0.4.0-rc.5"
+version = "0.4.0-rc.6"
 dependencies = [
  "anyhow",
  "futures",
@@ -3049,7 +3048,7 @@ dependencies = [
 
 [[package]]
 name = "joma-desk"
-version = "0.4.0-rc.5"
+version = "0.4.0-rc.6"
 dependencies = [
  "anyhow",
  "ashpd 0.11.1",
@@ -3071,7 +3070,7 @@ dependencies = [
 
 [[package]]
 name = "joma-jami"
-version = "0.4.0-rc.5"
+version = "0.4.0-rc.6"
 dependencies = [
  "anyhow",
  "cc",
@@ -3082,7 +3081,7 @@ dependencies = [
 
 [[package]]
 name = "joma-quick"
-version = "0.4.0-rc.5"
+version = "0.4.0-rc.6"
 dependencies = [
  "anyhow",
  "serde",
@@ -3092,7 +3091,7 @@ dependencies = [
 
 [[package]]
 name = "joma-theme"
-version = "0.4.0-rc.5"
+version = "0.4.0-rc.6"
 
 [[package]]
 name = "js-sys"

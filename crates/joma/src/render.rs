@@ -6,8 +6,8 @@ use std::sync::Arc;
 use gpui::prelude::*;
 use gpui::{
     Focusable,
-    canvas, div, point, px, size, AnyElement, Bounds, Context, Corners, FontWeight, Hsla, MouseButton, Pixels,
-    RenderImage, SharedString, Window,
+    canvas, div, point, px, size, AnyElement, Bounds, ContentMask, Context, Corners, FontWeight, Hsla, MouseButton,
+    MouseDownEvent, MouseMoveEvent, Pixels, RenderImage, ScrollDelta, ScrollWheelEvent, SharedString, Window,
 };
 use smallvec::smallvec;
 
@@ -46,6 +46,10 @@ pub const G_PENCIL: &str = "\u{f040}";
 pub const G_COPY: &str = "\u{f0c5}";
 pub const G_USER_PLUS: &str = "\u{f234}";
 pub const G_EXCHANGE: &str = "\u{f0ec}";
+pub const G_WINDOW: &str = "\u{f2d0}";
+pub const G_CROSSHAIRS: &str = "\u{f05b}";
+pub const G_ZOOM_IN: &str = "\u{f00e}";
+pub const G_ZOOM_OUT: &str = "\u{f010}";
 
 /// Local "HH:MM" and a day key for separators.
 pub fn local_time(ts: i64) -> (String, i64, String) {
@@ -185,6 +189,14 @@ impl Joma {
             Some(st) => {
                 if let Some(p) = st.picture {
                     if self.desk_frame.as_ref().is_none_or(|f| f.serial != p.serial) {
+                        // Another screen or window (a new size): show it whole again.
+                        let resized = self.desk_frame.as_ref().is_some_and(|f| {
+                            let sz = f.image.size(0);
+                            (sz.width.0 as u32, sz.height.0 as u32) != (p.width, p.height)
+                        });
+                        if resized {
+                            self.stage_view.borrow_mut().reset();
+                        }
                         if let Some(image) = bgra_image(p.width, p.height, p.bgra.as_ref().clone()) {
                             let old = self.desk_frame.replace(Frame { image, serial: p.serial, buf: Vec::new() });
                             if let Some(old) = old {
@@ -206,6 +218,25 @@ impl Joma {
                 if let Some(old) = self.desk_frame.take() {
                     cx.drop_image(old.image, Some(window));
                 }
+            }
+        }
+        // The sharer's own previews.
+        let keys: Vec<String> = self.desk.sessions.keys().cloned().collect();
+        for key in &keys {
+            let Some(pic) = self.desk.shared(key).and_then(|(_, p)| p).and_then(|p| p.picture.lock().unwrap().clone()) else { continue };
+            if self.previews.get(key).is_some_and(|f| f.serial == pic.serial) {
+                continue;
+            }
+            if let Some(image) = bgra_image(pic.width, pic.height, pic.bgra.as_ref().clone()) {
+                if let Some(old) = self.previews.insert(key.clone(), Frame { image, serial: pic.serial, buf: Vec::new() }) {
+                    cx.drop_image(old.image, Some(window));
+                }
+            }
+        }
+        let gone: Vec<String> = self.previews.keys().filter(|k| self.desk.shared(k).is_none()).cloned().collect();
+        for k in gone {
+            if let Some(old) = self.previews.remove(&k) {
+                cx.drop_image(old.image, Some(window));
             }
         }
     }
@@ -864,6 +895,7 @@ impl Joma {
         let session = self.desk.sessions.get(&call.id);
         let sharing = session.and_then(|s| s.sharing_label());
         let viewing = self.desk.viewer(&call.id).is_some();
+        let joma_sharing = self.desk.shared(&call.id).is_some();
         let joma_badge = if call.peer_joma { "joma" } else { "jami" };
 
         if call.state == CallState::Incoming {
@@ -942,21 +974,7 @@ impl Joma {
             .when(!here, |d| d.child(div().text_color(t.muted).child("(other conversation)")))
             .child(div().text_color(t.muted).child(format!("{}{elapsed}", call.state.label())))
             .child(div().px(px(4.)).border_1().border_color(t.border).text_color(if call.peer_joma { t.accent } else { t.muted }).child(joma_badge))
-            .when_some(sharing, |d, s| d.child(div().text_color(t.yellow).child(format!("{G_BOLT} {s}"))));
-
-        // The stage: the peer's desktop (Joma), else their video.
-        let desk = self.desk_frame.as_ref().map(|f| f.image.clone());
-        let video = call.sinks.iter().find_map(|s| self.frames.get(s)).map(|f| f.image.clone());
-        let stage_image = desk.clone().or(video);
-        let pointer = if desk.is_some() {
-            self.desk.viewer(&call.id).map(|v| v.state.lock().unwrap().pointer.clone()).zip(self.pointer.as_ref().map(|p| p.image.clone()))
-        } else {
-            None
-        };
-        let info = self.desk.viewer(&call.id).map(|v| {
-            let s = v.state.lock().unwrap();
-            format!("{G_EYE} {name}'s desktop · {} · {}→{} · {:.0} fps", s.chroma, s.remote_pipeline, s.local_pipeline, s.fps)
-        });
+            .when_some(sharing.filter(|_| !joma_sharing), |d, s| d.child(div().text_color(t.yellow).child(format!("{G_BOLT} {s}"))));
 
         let mut panel = div()
             .flex()
@@ -965,28 +983,44 @@ impl Joma {
             .border_color(t.border)
             .bg(t.panel)
             .child(div().flex().flex_wrap().items_center().justify_between().gap(px(6.)).px(px(12.)).py(px(6.)).child(status).child(controls));
-        if let Some(image) = stage_image {
-            let stage = self.stage_canvas(t, image, pointer);
+        if let Some(strip) = self.share_strip(t, &call.id, cx) {
+            panel = panel.child(strip);
+        }
+        // The stage: the peer's desktop (Joma), else their video. A share without a call
+        // has its own panel.
+        let stage = self.stage_source().filter(|_| self.viewing_key().is_none_or(|k| k == call.id));
+        if let Some((image, pointer, info)) = stage {
+            let stage = self.stage_canvas(t, image, pointer, cx);
             panel = panel
                 .when(self.stage, |d| d.flex_1())
                 .child(div().relative().when(self.stage, |d| d.flex_1()).when(!self.stage, |d| d.h(px(260.))).child(stage))
-                .when_some(info, |d, i| d.child(div().px(px(12.)).py(px(3.)).text_size(px(t.size - 2.)).text_color(t.muted).child(i)));
+                .child(self.stage_tools(t, info, cx));
         } else if let Some(note) = session.and_then(|s| s.note.clone()) {
             panel = panel.child(div().px(px(12.)).pb(px(6.)).text_size(px(t.size - 2.)).text_color(t.yellow).child(note));
         }
         Some(panel.into_any_element())
     }
 
-    /// A peer's desktop (or video), fitted, with their pointer on top.
-    fn stage_canvas(&self, t: &Theme, image: Arc<RenderImage>, pointer: Option<(joma_desk::view::Pointer, Arc<RenderImage>)>) -> AnyElement {
+    /// A peer's desktop (or video), fitted or zoomed, with their pointer on top. The wheel
+    /// zooms (Ctrl + touchpad too), the touchpad pans, dragging pans, a double click fills
+    /// the screen.
+    fn stage_canvas(&self, t: &Theme, image: Arc<RenderImage>, pointer: Option<(joma_desk::view::Pointer, Arc<RenderImage>)>, cx: &mut Context<Self>) -> AnyElement {
         let bg = t.bar;
-        canvas(
-                |_, _, _| {},
-                move |bounds, _, window, _| {
-                    window.paint_quad(gpui::fill(bounds, bg));
-                    let sz = image.size(0);
-                    let (w, h) = (sz.width.0 as f32, sz.height.0 as f32);
-                    let r = fit(bounds, w, h);
+        let view = self.stage_view.clone();
+        let painted = canvas(
+            |_, _, _| {},
+            move |bounds, _, window, _| {
+                window.paint_quad(gpui::fill(bounds, bg));
+                let sz = image.size(0);
+                let (w, h) = (sz.width.0 as f32, sz.height.0 as f32);
+                let mut v = view.borrow_mut();
+                v.layout(bounds, (w, h), window.scale_factor());
+                if let Some((p, _)) = pointer.as_ref().filter(|(p, _)| p.visible) {
+                    v.follow_pointer(p.x as f32, p.y as f32);
+                }
+                let r = v.rect();
+                drop(v);
+                window.with_content_mask(Some(ContentMask { bounds }), |window| {
                     let _ = window.paint_image(r, Corners::default(), image.clone(), 0, false);
                     if let Some((p, cursor)) = &pointer {
                         if p.visible {
@@ -996,14 +1030,342 @@ impl Joma {
                                 r.origin.x + px((p.x as f32 - p.hot_x as f32) * k),
                                 r.origin.y + px((p.y as f32 - p.hot_y as f32) * k),
                             );
-                            let cb = Bounds::new(origin, size(px(csz.width.0 as f32 * k), px(csz.height.0 as f32 * k)));
+                            // The pointer keeps a readable size when the picture is shrunk.
+                            let ck = k.max(0.6);
+                            let cb = Bounds::new(origin, size(px(csz.width.0 as f32 * ck), px(csz.height.0 as f32 * ck)));
                             let _ = window.paint_image(cb, Corners::default(), cursor.clone(), 0, false);
                         }
                     }
-                },
-            )
+                });
+            },
+        )
+        .size_full();
+        div()
+            .id("stage")
             .size_full()
+            .child(painted)
+            .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, cx| {
+                let mut v = this.stage_view.borrow_mut();
+                match e.delta {
+                    // A touchpad pans; with Ctrl (or a pinch) it zooms.
+                    // Panning by hand stops following the pointer (the tools turn it back on).
+                    ScrollDelta::Pixels(d) if !e.modifiers.control => {
+                        v.follow = false;
+                        v.pan(f32::from(d.x), f32::from(d.y));
+                    }
+                    ScrollDelta::Pixels(d) => v.zoom_at(e.position, (1. + f32::from(d.y) / 200.).clamp(0.5, 2.)),
+                    // A mouse wheel zooms; with Shift it pans sideways.
+                    ScrollDelta::Lines(d) if e.modifiers.shift => {
+                        v.follow = false;
+                        v.pan(d.y * 60., 0.);
+                    }
+                    ScrollDelta::Lines(d) => v.zoom_at(e.position, 1.2f32.powf(d.y)),
+                }
+                drop(v);
+                cx.notify();
+            }))
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, window, cx| {
+                if e.click_count == 2 {
+                    this.stage_view.borrow_mut().drag = None;
+                    this.toggle_fullscreen(window, cx);
+                    return;
+                }
+                let mut v = this.stage_view.borrow_mut();
+                v.drag = Some((e.position, v.center));
+            }))
+            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
+                let mut v = this.stage_view.borrow_mut();
+                if v.drag.is_some() {
+                    if e.pressed_button == Some(MouseButton::Left) {
+                        v.follow = false;
+                        v.drag_to(e.position);
+                        drop(v);
+                        cx.notify();
+                    } else {
+                        v.drag = None;
+                    }
+                }
+            }))
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, _| {
+                this.stage_view.borrow_mut().drag = None;
+            }))
             .into_any_element()
+    }
+
+    /// Under the stage: what it shows, and the zoom.
+    fn stage_tools(&self, t: &Theme, info: Option<String>, cx: &mut Context<Self>) -> AnyElement {
+        use crate::stage::Zoom;
+        let (zoom, pct, follow, zoomed) = {
+            let v = self.stage_view.borrow();
+            (v.zoom, v.percent(), v.follow, v.zoomed())
+        };
+        let small = |id: &'static str, glyph: &str, label: &str, on: bool| button(id, glyph, label, t, on).px(px(6.)).py(px(1.));
+        div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .justify_between()
+            .gap(px(6.))
+            .px(px(12.))
+            .py(px(3.))
+            .text_size(px(t.size - 2.))
+            .child(div().flex_1().min_w(px(0.)).truncate().text_color(t.muted).child(info.unwrap_or_default()))
+            .child(
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap(px(4.))
+                    .child(small("z-fit", "", "fit", zoom == Zoom::Fit).on_click(cx.listener(|this, _, _, cx| this.zoom(Zoom::Fit, cx))))
+                    .child(small("z-fill", "", "fill", zoom == Zoom::Fill).on_click(cx.listener(|this, _, _, cx| this.zoom(Zoom::Fill, cx))))
+                    .child(small("z-1", "", "1:1", zoom == Zoom::Actual).on_click(cx.listener(|this, _, _, cx| this.zoom(Zoom::Actual, cx))))
+                    .child(small("z-out", G_ZOOM_OUT, "", false).on_click(cx.listener(|this, _, _, cx| this.zoom_by(1. / 1.25, cx))))
+                    .child(div().w(px(44.)).flex().justify_center().text_color(t.text).child(format!("{pct}%")))
+                    .child(small("z-in", G_ZOOM_IN, "", false).on_click(cx.listener(|this, _, _, cx| this.zoom_by(1.25, cx))))
+                    .child(
+                        small("z-follow", G_CROSSHAIRS, "follow", follow && zoomed).on_click(cx.listener(|this, _, _, cx| {
+                            let mut v = this.stage_view.borrow_mut();
+                            v.follow = !v.follow;
+                            drop(v);
+                            cx.notify();
+                        })),
+                    )
+                    .child(
+                        small("z-full", if self.fullscreen { G_COMPRESS } else { G_EXPAND }, if self.fullscreen { "exit" } else { "full screen" }, self.fullscreen)
+                            .on_click(cx.listener(|this, _, window, cx| this.toggle_fullscreen(window, cx))),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// What the stage shows: the desktop being watched, else the call's video; with the
+    /// peer's pointer and a line about it.
+    fn stage_source(&self) -> Option<(Arc<RenderImage>, Option<(joma_desk::view::Pointer, Arc<RenderImage>)>, Option<String>)> {
+        if let (Some(key), Some(f)) = (self.viewing_key(), self.desk_frame.as_ref()) {
+            let v = self.desk.viewer(&key)?;
+            let st = v.state.lock().unwrap();
+            let who = crate::desk::direct_peer(&key)
+                .map(str::to_owned)
+                .or_else(|| self.model.calls.get(&key).map(|c| c.peer.clone()))
+                .map(|p| self.model.name_of(&p))
+                .unwrap_or_default();
+            let (w, h) = st.picture.as_ref().map_or((0, 0), |p| (p.width, p.height));
+            let info = format!("{G_EYE} {who}'s screen · {w}×{h} · {} · {}→{} · {:.0} fps", st.chroma, st.remote_pipeline, st.local_pipeline, st.fps);
+            let pointer = self.pointer.as_ref().map(|p| (st.pointer.clone(), p.image.clone()));
+            return Some((f.image.clone(), pointer, Some(info)));
+        }
+        let call = self.active_call()?;
+        let video = call.sinks.iter().find_map(|s| self.frames.get(s))?;
+        Some((video.image.clone(), None, Some(format!("{G_VIDEO} {}", self.model.name_of(&call.peer)))))
+    }
+
+    /// The stage alone, filling the screen, with its tools below.
+    fn fullscreen_stage(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (image, pointer, info) = self.stage_source()?;
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .size_full()
+                .bg(t.bar)
+                .child(div().flex_1().min_h(px(0.)).child(self.stage_canvas(t, image, pointer, cx)))
+                .child(div().bg(t.panel).border_t_1().border_color(t.border).child(self.stage_tools(t, info.map(|i| format!("{i} · Esc to leave")), cx)))
+                .into_any_element(),
+        )
+    }
+
+    /// What we share and how it looks to the peer, with a way to change or stop it.
+    fn share_strip(&self, t: &Theme, key: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use crate::desk::Sharing;
+        let s = self.desk.sessions.get(key)?;
+        let (what, joma) = match &s.sharing {
+            Sharing::Joma { share, .. } => (source_label(&share.source, &share.screen), true),
+            Sharing::Portal { .. } => ("the screen or window chosen in the portal (Jami's share)".to_owned(), false),
+            Sharing::Off | Sharing::Picking => return None,
+        };
+        let state = s.sharing_label().unwrap_or_default();
+        let preview = self.previews.get(key).map(|f| f.image.clone());
+        let bg = t.bar;
+        let thumb = div()
+            .flex_none()
+            .w(px(160.))
+            .h(px(90.))
+            .border_1()
+            .border_color(t.yellow)
+            .bg(t.bar)
+            .when_some(preview, |d, image| {
+                d.child(
+                    canvas(
+                        |_, _, _| {},
+                        move |bounds, _, window, _| {
+                            window.paint_quad(gpui::fill(bounds, bg));
+                            let sz = image.size(0);
+                            let r = fit(bounds, sz.width.0 as f32, sz.height.0 as f32);
+                            let _ = window.paint_image(r, Corners::default(), image.clone(), 0, false);
+                        },
+                    )
+                    .size_full(),
+                )
+            })
+            .when(!joma, |d| d.flex().items_center().justify_center().text_color(t.muted).child(G_DESKTOP));
+        let k1 = key.to_owned();
+        Some(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(10.))
+                .px(px(12.))
+                .py(px(6.))
+                .border_t_1()
+                .border_color(t.border)
+                .child(thumb)
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .gap(px(2.))
+                        .child(div().text_color(t.yellow).child(format!("{G_BOLT} {state}")))
+                        .child(div().truncate().text_color(t.bright).child(format!("you share: {what}")))
+                        .child(div().text_size(px(t.size - 2.)).text_color(t.muted).child(if joma { "the picture is what they see, about once a second" } else { "Jami's share shows no preview here" })),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_none()
+                        .gap(px(6.))
+                        .when(joma, |d| {
+                            d.child(button(SharedString::from(format!("src-{key}")), G_EXCHANGE, "change", t, false).on_click(cx.listener(move |this, _, _, cx| this.change_source(&k1, cx))))
+                        })
+                        // A share without a call has its stop in the panel's header.
+                        .when(crate::desk::direct_peer(key).is_none(), |d| {
+                            d.child(button(SharedString::from(format!("unshare-{key}")), G_TIMES, "stop", t, false).text_color(t.red).on_click(cx.listener(|this, _, _, cx| this.toggle_share(cx))))
+                        }),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// Choosing what to share: every screen and window, with a thumbnail.
+    fn picker_overlay(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let p = self.picker.as_ref()?;
+        let bg = t.bar;
+        let title = match &p.target {
+            PickFor::Switch(_) => format!("Share something else with {}", p.peer),
+            _ => format!("What do you want to show {}?", p.peer),
+        };
+        let cards = p.sources.iter().enumerate().map(|(i, s)| {
+            let thumb = p.thumbs.get(&s.source.key()).cloned();
+            let window_src = matches!(s.source, joma_desk::share::Source::Window { .. });
+            let glyph = if window_src { G_WINDOW } else { G_DESKTOP };
+            let accent = if s.focused { t.accent } else { t.border };
+            div()
+                .id(SharedString::from(format!("pick-{i}")))
+                .flex()
+                .flex_col()
+                .w(px(236.))
+                .p(px(6.))
+                .gap(px(4.))
+                .border_1()
+                .border_color(accent)
+                .bg(t.panel)
+                .cursor_pointer()
+                .hover(|d| d.border_color(t.accent).bg(t.raised))
+                .child(
+                    div()
+                        .w(px(222.))
+                        .h(px(125.))
+                        .bg(t.bar)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_color(t.muted)
+                        .when_some(thumb.clone(), |d, image| {
+                            d.child(
+                                canvas(
+                                    |_, _, _| {},
+                                    move |bounds, _, window, _| {
+                                        window.paint_quad(gpui::fill(bounds, bg));
+                                        let sz = image.size(0);
+                                        let r = fit(bounds, sz.width.0 as f32, sz.height.0 as f32);
+                                        let _ = window.paint_image(r, Corners::default(), image.clone(), 0, false);
+                                    },
+                                )
+                                .size_full(),
+                            )
+                        })
+                        .when(thumb.is_none(), |d| d.child("…")),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(6.))
+                        .text_color(t.bright)
+                        .child(div().text_color(if s.focused { t.accent } else { t.muted }).child(glyph))
+                        .child(div().flex_1().min_w(px(0.)).truncate().child(s.label.clone()))
+                        .child(div().flex_none().text_size(px(t.size - 2.)).text_color(t.muted).child(format!("{}×{}", s.screen.width, s.screen.height))),
+                )
+                .child(div().truncate().text_size(px(t.size - 2.)).text_color(t.muted).child(if s.detail.is_empty() { " ".to_owned() } else { s.detail.clone() }))
+                .on_click(cx.listener(move |this, _, window, cx| this.pick(Some(i), window, cx)))
+        });
+        let portal = matches!(p.target, PickFor::Call(_));
+        Some(
+            div()
+                .id("picker")
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(gpui::black().opacity(0.55))
+                .occlude()
+                .child(
+                    div()
+                        .id("picker-box")
+                        .flex()
+                        .flex_col()
+                        .max_w(px(1040.))
+                        .max_h_full()
+                        .m(px(16.))
+                        .bg(t.bg)
+                        .border_1()
+                        .border_color(t.accent)
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .gap(px(8.))
+                                .px(px(12.))
+                                .py(px(8.))
+                                .border_b_1()
+                                .border_color(t.border)
+                                .child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child(title))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap(px(6.))
+                                        .when(portal, |d| {
+                                            d.child(button("pick-portal", G_EXCHANGE, "Jami's share", t, false).on_click(cx.listener(|this, _, window, cx| this.pick(None, window, cx))))
+                                        })
+                                        .child(button("pick-cancel", G_TIMES, "cancel", t, false).on_click(cx.listener(|this, _, window, cx| this.close_picker(window, cx)))),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .id("picker-list")
+                                .overflow_y_scroll()
+                                .flex()
+                                .flex_wrap()
+                                .gap(px(10.))
+                                .p(px(12.))
+                                .children(cards),
+                        )
+                        .child(div().px(px(12.)).pb(px(8.)).text_size(px(t.size - 2.)).text_color(t.muted).child("A window is sent alone, even when covered; you can change it while sharing. Esc closes.")),
+                )
+                .into_any_element(),
+        )
     }
 
     /// Shares without a call: an offer to answer, ours running, or theirs on the stage.
@@ -1018,7 +1380,7 @@ impl Joma {
                 (Viewing::On { .. }, _) => (format!("{G_EYE} {name}'s screen"), false),
                 (Viewing::Querying { .. } | Viewing::Opening { .. }, _) => (format!("connecting to {name}'s screen…"), false),
                 (Viewing::Off, Sharing::Off) => continue,
-                (Viewing::Off, _) => (format!("{G_DESKTOP} {} · {name}", s.sharing_label().unwrap_or("sharing")), false),
+                (Viewing::Off, _) => (format!("{G_DESKTOP} sharing with {name}"), false),
             };
             let (k1, k2) = (key.clone(), key.clone());
             let controls = div()
@@ -1055,19 +1417,17 @@ impl Joma {
                         .child(div().flex_1().min_w(px(0.)).truncate().text_color(t.bright).child(text))
                         .child(controls.flex_none()),
                 );
-            if let (Some(v), Some(f)) = (self.desk.viewer(&key), self.desk_frame.as_ref()) {
-                let (pointer, info) = {
-                    let st = v.state.lock().unwrap();
-                    (
-                        self.pointer.as_ref().map(|p| (st.pointer.clone(), p.image.clone())),
-                        format!("{} · {}→{} · {:.0} fps", st.chroma, st.remote_pipeline, st.local_pipeline, st.fps),
-                    )
-                };
-                let stage = self.stage_canvas(t, f.image.clone(), pointer);
-                panel = panel
-                    .when(self.stage, |d| d.flex_1())
-                    .child(div().relative().when(self.stage, |d| d.flex_1()).when(!self.stage, |d| d.h(px(260.))).child(stage))
-                    .child(div().px(px(12.)).py(px(3.)).text_size(px(t.size - 2.)).text_color(t.muted).child(info));
+            if let Some(strip) = self.share_strip(t, &key, cx) {
+                panel = panel.child(strip);
+            }
+            if self.desk.viewer(&key).is_some() && self.viewing_key().as_deref() == Some(key.as_str()) {
+                if let Some((image, pointer, info)) = self.stage_source() {
+                    let stage = self.stage_canvas(t, image, pointer, cx);
+                    panel = panel
+                        .when(self.stage, |d| d.flex_1())
+                        .child(div().relative().when(self.stage, |d| d.flex_1()).when(!self.stage, |d| d.h(px(260.))).child(stage))
+                        .child(self.stage_tools(t, info, cx));
+                }
             }
             out.push(panel.into_any_element());
         }
@@ -1373,7 +1733,16 @@ impl Render for Joma {
         // Keys reach actions only through a focused element: when the focused input is not
         // on screen (a request has no composer), the window itself takes the focus.
         let conv = self.selected.as_ref().and_then(|s| self.model.conversations.get(s));
-        let composer_shown = self.gate == Gate::Ready && conv.is_some_and(|c| !c.request) && !self.stage;
+        // Full screen ends with what it showed (or when the compositor took it away).
+        if self.fullscreen && (!self.has_stage() || !window.is_fullscreen() && self.fullscreen_seen) {
+            self.fullscreen = false;
+            self.fullscreen_seen = false;
+            if window.is_fullscreen() {
+                window.toggle_fullscreen();
+            }
+        }
+        self.fullscreen_seen |= self.fullscreen && window.is_fullscreen();
+        let composer_shown = self.gate == Gate::Ready && conv.is_some_and(|c| !c.request) && !self.stage && !self.fullscreen && self.picker.is_none();
         let input_shown = self.gate == Gate::Onboarding || (self.gate == Gate::Ready && !matches!(self.mode, Mode::Chat | Mode::Removed));
         let lost = (!composer_shown && self.composer.focus_handle(cx).is_focused(window))
             || (!input_shown && self.input.focus_handle(cx).is_focused(window))
@@ -1385,7 +1754,11 @@ impl Render for Joma {
         }
         // A narrow window (the compact panel) shows the list or one conversation.
         self.narrow = window.viewport_size().width < px(700.);
-        let body = if self.gate == Gate::Ready && self.narrow {
+        let full = if self.fullscreen { self.fullscreen_stage(&t, cx) } else { None };
+        let picker = self.picker_overlay(&t, cx);
+        let body = if let Some(full) = full {
+            full
+        } else if self.gate == Gate::Ready && self.narrow {
             let chat = self.narrow_chat && self.selected.is_some();
             div()
                 .flex()
@@ -1425,6 +1798,15 @@ impl Render for Joma {
             .on_action(cx.listener(|this, _: &NewConversation, window, cx| this.set_mode(Mode::Add, window, cx)))
             .on_action(cx.listener(|this, _: &Search, window, cx| this.set_mode(Mode::Search, window, cx)))
             .on_action(cx.listener(|this, _: &Cancel, window, cx| {
+                // Esc closes the picker, then leaves full screen.
+                if this.picker.is_some() {
+                    this.close_picker(window, cx);
+                    return;
+                }
+                if this.fullscreen {
+                    this.toggle_fullscreen(window, cx);
+                    return;
+                }
                 // In the compact panel, Esc goes back to the list.
                 if this.narrow && this.narrow_chat && this.mode == Mode::Chat && !this.quick_open && !this.stage {
                     this.narrow_chat = false;
@@ -1461,6 +1843,10 @@ impl Render for Joma {
                 this.stage = !this.stage;
                 cx.notify();
             }))
+            .on_action(cx.listener(|this, _: &ToggleFullscreen, window, cx| this.toggle_fullscreen(window, cx)))
+            .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.zoom_by(1.25, cx)))
+            .on_action(cx.listener(|this, _: &ZoomOut, _, cx| this.zoom_by(1. / 1.25, cx)))
+            .on_action(cx.listener(|this, _: &ZoomFit, _, cx| this.zoom(crate::stage::Zoom::Fit, cx)))
             .on_action(cx.listener(|this, _: &ToggleQuick, _, cx| {
                 this.quick_open = !this.quick_open;
                 cx.notify();
@@ -1475,10 +1861,19 @@ impl Render for Joma {
             .on_action(cx.listener(|this, _: &Quick8, _, cx| this.send_quick(7, cx)))
             .on_action(cx.listener(|this, _: &Quick9, _, cx| this.send_quick(8, cx)))
             .on_mouse_down(MouseButton::Left, |_, _, _| {})
-            .child(self.top_bar(&t, cx))
-            .children(self.setup_banner(&t, cx))
+            .relative()
+            .when(!self.fullscreen, |d| d.child(self.top_bar(&t, cx)).children(self.setup_banner(&t, cx)))
             .child(body)
-            .child(self.status_line(&t))
+            .when(!self.fullscreen, |d| d.child(self.status_line(&t)))
+            .children(picker)
+    }
+}
+
+/// "screen DP-1 · 5120×1440" or "window firefox — the title".
+fn source_label(source: &joma_desk::share::Source, screen: &joma_desk::share::Screen) -> String {
+    match source {
+        joma_desk::share::Source::Screen { output } => format!("screen {output} · {}×{}", screen.width, screen.height),
+        joma_desk::share::Source::Window { class, title, .. } => format!("window {class} — {title}"),
     }
 }
 

@@ -1,5 +1,5 @@
 //! Share the focused output and view it in the same process, without Jami: checks the
-//! capture → encode → decode path. `loopback [seconds] [out.ppm]`.
+//! capture → encode → decode path. `[JOMA_SOURCE=screen:X|window:0x…] loopback [seconds] [out.ppm]`.
 use std::time::{Duration, Instant};
 
 fn main() -> anyhow::Result<()> {
@@ -7,7 +7,8 @@ fn main() -> anyhow::Result<()> {
     let secs: u64 = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(5);
     let out = std::env::args().nth(2);
     let token = joma_desk::signal::token();
-    let share = joma_desk::share::Share::start(token.clone(), |e| println!("share: {e:?}"))?;
+    let source = joma_desk::share::Source::parse(&std::env::var("JOMA_SOURCE").unwrap_or_else(|_| "focused".into()))?;
+    let share = joma_desk::share::Share::start(token.clone(), source, |e| println!("share: {e:?}"))?;
     println!("sharing {} {}x{} on port {}", share.screen.name, share.screen.width, share.screen.height, share.port);
     let viewer = joma_desk::view::Viewer::start(share.port, token, || {})?;
     let t = Instant::now();

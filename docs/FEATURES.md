@@ -118,7 +118,8 @@ by itself when the Jami app quits.
 
 ## Calls
 Audio or video calls (Ctrl+Shift+C / V), answer (Ctrl+Shift+A), hang up (Ctrl+Shift+E),
-mute, camera. Remote video in the call panel; F11 fills the window.
+mute, camera. Remote video in the call panel; Ctrl+Shift+Enter gives it the whole
+window, F11 the whole screen (as for a shared desktop, below).
 
 ## Desktop share
 Without a call: the screen button in a conversation's header or `joma share <to>`. The other Joma asks its user ("… wants to show you their
@@ -128,11 +129,29 @@ peer has no Joma, Joma calls them with the microphone off and shares through Jam
 In a call: Ctrl+Shift+S. With a Joma peer: gliff's pipeline, sharp text, the pointer
 drawn on the viewer. Otherwise: Jami's screen share through the portal.
 
+**What to share.** With a Joma peer, Joma first shows every screen and window with a
+thumbnail; pick one. A window is sent alone, even when other windows cover it or it is
+on another workspace. In a call, "Jami's share" goes through the portal instead.
+`joma share <to> --source screen:<output>|window:<address>|focused` skips the question
+(addresses as `hyprctl clients` prints them).
+
+**What you share.** While sharing, a strip under the call (or the share's panel) shows
+what goes out, as a live picture refreshed about once a second, with its name; "change"
+picks another screen or window without interrupting the viewer.
+
+**Watching.** The shared screen fills the stage, fitted; below it: **fit** (all of it),
+**fill** (fills the stage, the rest by panning: for an ultrawide, the full height),
+**1:1** (one pixel per screen pixel, the sharpest), zoom out/in, **follow** (when zoomed,
+the view follows the sharer's pointer) and **full screen**. The mouse wheel or Ctrl with
+the touchpad zooms where the pointer is; the touchpad, Shift+wheel or dragging pans
+(and stops following); a double click, F11 or the button fills the screen, Esc comes
+back. Ctrl+= / Ctrl+- / Ctrl+0 zoom in, out and back to fit.
+
 ## Quick Messages
 Ctrl+. and Alt+1…9 in the window or the panel; `joma send` and `joma send-quick`.
 
 ## Command line
-`joma chat <to> [n]` (JSON), `joma call <to> [--video]`, `joma share <to>`, `joma watch <to>`,
+`joma chat <to> [n]` (JSON), `joma call <to> [--video]`, `joma share <to> [--source …]`, `joma watch <to>`,
 `joma send-file <to> [path]`, `joma open <to>`, `joma block <to>`, `joma unblock <to>`, `joma link`, `joma link-device <code>`, `joma accounts`, `joma account <name>`, `joma quit`, `joma probe [--bench]` (the
 GPUs the desktop share can use).
 
@@ -141,6 +160,11 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
+- 0.4.0-rc.6 (2026-10-30): desktop share: choose a screen or a single window (with
+  thumbnails), change it while sharing, a live preview of what you share; the viewer
+  zooms (fit, fill, 1:1, wheel), pans, follows the pointer and goes full screen (F11,
+  double click). F11 is now full screen; the stage alone in the window moved to
+  Ctrl+Shift+Enter.
 - 0.4.0-rc.5 (2026-10-30): several accounts on one machine: switch (Contacts → other
   accounts, `joma account <name>`), create or link another, remove one.
 - 0.4.0-rc.4 (2026-10-30): your devices (Contacts → you): link a new device with a code

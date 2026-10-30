@@ -27,8 +27,13 @@ pub enum Request {
     /// Call a conversation.
     Call { to: String, video: bool },
     /// Call a conversation and share the desktop once it answers (or share in the call
-    /// already running).
-    ShareScreen { to: String },
+    /// already running). `source` (`screen:<output>`, `window:<address>`, `focused`)
+    /// skips the picker.
+    ShareScreen {
+        to: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
+    },
     /// Send a file; without a path Joma asks for one.
     SendFile { to: String, path: Option<String> },
     /// Raise the window on a conversation.
@@ -147,7 +152,7 @@ mod tests {
         assert_eq!(r, Reply::Done);
         let r = Request::SendFile { to: "bob".into(), path: None };
         assert_eq!(serde_json::to_string(&r).unwrap(), r#"{"cmd":"send-file","to":"bob","path":null}"#);
-        let r = Request::ShareScreen { to: "bob".into() };
+        let r = Request::ShareScreen { to: "bob".into(), source: None };
         assert_eq!(serde_json::to_string(&r).unwrap(), r#"{"cmd":"share-screen","to":"bob"}"#);
     }
 }

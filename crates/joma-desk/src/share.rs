@@ -1,4 +1,5 @@
-//! The sharing side: capture the focused Hyprland output and stream it to one viewer.
+//! The sharing side: capture a Hyprland output or one window and stream it to one viewer.
+//! The user picks the [`Source`]; it can change while the viewer watches.
 //!
 //! This is gliff's server pipeline used as libraries: `hypr-capture` fills GBM dmabufs from
 //! `ext-image-copy-capture`, `gliff-vk` splits each frame into two 4:2:0 planes on the GPU
@@ -17,7 +18,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use gliff_proto::{ChromaMode, ClientMsg, Codec, OutputInfo, ServerMsg, SessionInfo, VideoPipeline, PROTOCOL_VERSION};
 use gliff_transport::Framed;
 use gliff_vk::{DmabufPlane, Gpu};
-use hypr_capture::{CaptureConfig, CaptureEvent, CapturedFrame, Capturer};
+use hypr_capture::{CaptureConfig, CaptureEvent, CapturedFrame, Capturer, Toplevel};
+use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, watch};
@@ -37,13 +39,92 @@ pub enum ShareEvent {
     Error(String),
 }
 
-/// The output being shared.
+/// The output or window being shared.
 #[derive(Debug, Clone)]
 pub struct Screen {
+    /// The output's name, or the window's title.
     pub name: String,
+    /// Logical pixels for a window (its size in Hyprland), else the mode.
     pub width: u32,
     pub height: u32,
     pub scale: f32,
+}
+
+/// What to share: a whole output, or one window.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum Source {
+    Screen { output: String },
+    /// `address` as `hyprctl clients` prints it, `id` its `stableId` (the Wayland
+    /// toplevel identifier); `monitor` is the output it is on.
+    Window { address: String, id: String, class: String, title: String, monitor: String },
+}
+
+/// A source offered to the user, with what to show for it.
+#[derive(Debug, Clone)]
+pub struct SourceInfo {
+    pub source: Source,
+    pub screen: Screen,
+    /// The output name, or the window's class.
+    pub label: String,
+    /// The window's title, or the monitor's description.
+    pub detail: String,
+    /// The focused monitor, or the focused window.
+    pub focused: bool,
+}
+
+impl Source {
+    /// Parse `screen:<output>`, `window:<address>` or `focused` (the CLI form).
+    pub fn parse(s: &str) -> Result<Source> {
+        if s == "focused" {
+            return Ok(Source::Screen { output: focused_screen()?.name });
+        }
+        if let Some(o) = s.strip_prefix("screen:") {
+            return Ok(Source::Screen { output: o.to_owned() });
+        }
+        if let Some(a) = s.strip_prefix("window:") {
+            let a = a.trim_start_matches("0x");
+            return sources()?
+                .into_iter()
+                .map(|i| i.source)
+                .find(|src| matches!(src, Source::Window { address, .. } if address.trim_start_matches("0x") == a))
+                .context("no such window");
+        }
+        bail!("a source is screen:<output>, window:<address> or focused")
+    }
+
+    /// The short form [`Source::parse`] reads.
+    pub fn key(&self) -> String {
+        match self {
+            Source::Screen { output } => format!("screen:{output}"),
+            Source::Window { address, .. } => format!("window:{address}"),
+        }
+    }
+
+    /// What it looks like now: the output's mode, or the window's size and title.
+    pub fn screen(&self) -> Result<Screen> {
+        sources()?
+            .into_iter()
+            .find(|i| match (&i.source, self) {
+                (Source::Screen { output: a }, Source::Screen { output: b }) => a == b,
+                (Source::Window { address: a, .. }, Source::Window { address: b, .. }) => a == b,
+                _ => false,
+            })
+            .map(|i| i.screen)
+            .context("that screen or window is gone")
+    }
+
+    /// The capture for this source.
+    pub(crate) fn capture_config(&self) -> CaptureConfig {
+        match self {
+            Source::Screen { output } => CaptureConfig::new(output.clone()),
+            Source::Window { id, class, title, monitor, .. } => {
+                let mut cc = CaptureConfig::new(monitor.clone());
+                cc.toplevel = Some(Toplevel { identifier: id.clone(), app_id: class.clone(), title: title.clone() });
+                cc
+            }
+        }
+    }
 }
 
 /// True when this session can stream its desktop the Joma way (Hyprland is running).
@@ -60,29 +141,102 @@ pub fn focused_screen() -> Result<Screen> {
     Ok(Screen { name: m.name.clone(), width: m.width, height: m.height, scale: m.scale })
 }
 
+/// One window as `hyprctl -j clients` lists it.
+#[derive(Deserialize)]
+struct Client {
+    address: String,
+    #[serde(default)]
+    mapped: bool,
+    #[serde(default)]
+    hidden: bool,
+    #[serde(default)]
+    size: [i32; 2],
+    #[serde(default)]
+    monitor: i64,
+    #[serde(default)]
+    class: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    pid: i64,
+    #[serde(default, rename = "focusHistoryID")]
+    focus_history: i64,
+    /// The `ext-foreign-toplevel-list` identifier of this window.
+    #[serde(default, rename = "stableId")]
+    stable_id: String,
+}
+
+/// Every enabled output, then the windows (most recently focused first), Joma's own left
+/// out.
+pub fn sources() -> Result<Vec<SourceInfo>> {
+    let inst = hypr_ipc::Instance::discover(None).context("no Hyprland session")?;
+    let mons: Vec<_> = inst.monitors()?.into_iter().filter(|m| !m.disabled).collect();
+    let mut out: Vec<SourceInfo> = mons
+        .iter()
+        .map(|m| SourceInfo {
+            source: Source::Screen { output: m.name.clone() },
+            screen: Screen { name: m.name.clone(), width: m.width, height: m.height, scale: m.scale },
+            label: m.name.clone(),
+            detail: m.description.clone(),
+            focused: m.focused,
+        })
+        .collect();
+    let mut clients: Vec<Client> = inst.request_json("clients").unwrap_or_default();
+    clients.retain(|c| c.mapped && !c.hidden && c.size[0] > 0 && c.size[1] > 0 && c.pid != std::process::id() as i64);
+    clients.sort_by_key(|c| c.focus_history);
+    for c in clients {
+        let Some(m) = mons.iter().find(|m| m.id == c.monitor) else { continue };
+        let scale = m.scale;
+        out.push(SourceInfo {
+            source: Source::Window { address: c.address.clone(), id: c.stable_id.clone(), class: c.class.clone(), title: c.title.clone(), monitor: m.name.clone() },
+            screen: Screen {
+                name: if c.title.is_empty() { c.class.clone() } else { c.title.clone() },
+                width: c.size[0] as u32,
+                height: c.size[1] as u32,
+                scale,
+            },
+            label: if c.class.is_empty() { "window".into() } else { c.class.clone() },
+            detail: c.title.clone(),
+            focused: c.focus_history == 0,
+        });
+    }
+    Ok(out)
+}
+
 /// A running share endpoint. Dropping it stops the stream.
 pub struct Share {
     pub port: u16,
     pub token: String,
+    pub source: Source,
     pub screen: Screen,
+    switch: watch::Sender<Source>,
     stop: watch::Sender<bool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Share {
     /// Listen on loopback for the viewer. `events` is called from the share thread.
-    pub fn start(token: String, events: impl Fn(ShareEvent) + Send + 'static) -> Result<Share> {
-        let screen = focused_screen()?;
+    pub fn start(token: String, source: Source, events: impl Fn(ShareEvent) + Send + 'static) -> Result<Share> {
+        let screen = source.screen()?;
         let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
         listener.set_nonblocking(true)?;
         let port = listener.local_addr()?.port();
         let (stop, stop_rx) = watch::channel(false);
+        let (switch, switch_rx) = watch::channel(source.clone());
         let (tok, scr) = (token.clone(), screen.clone());
         let thread = std::thread::Builder::new().name("joma-share".into()).spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
-            rt.block_on(accept_loop(listener, tok, scr, stop_rx, events));
+            rt.block_on(accept_loop(listener, tok, scr, switch_rx, stop_rx, events));
         })?;
-        Ok(Share { port, token, screen, stop, thread: Some(thread) })
+        Ok(Share { port, token, source, screen, switch, stop, thread: Some(thread) })
+    }
+
+    /// Share another output or window; a watching viewer follows without reconnecting.
+    pub fn set_source(&mut self, source: Source) -> Result<()> {
+        self.screen = source.screen()?;
+        self.source = source.clone();
+        self.switch.send_replace(source);
+        Ok(())
     }
 }
 
@@ -99,6 +253,7 @@ async fn accept_loop(
     listener: std::net::TcpListener,
     token: String,
     screen: Screen,
+    mut source: watch::Receiver<Source>,
     mut stop: watch::Receiver<bool>,
     events: impl Fn(ShareEvent),
 ) {
@@ -111,7 +266,7 @@ async fn accept_loop(
             conn = listener.accept() => {
                 let Ok((sock, _)) = conn else { continue };
                 // One viewer at a time: a 1:1 call has one peer.
-                let r = serve(sock, &token, &screen, &mut stop, &events).await;
+                let r = serve(sock, &token, &screen, &mut source, &mut stop, &events).await;
                 match r {
                     Ok(()) => events(ShareEvent::ViewerLeft),
                     Err(e) => {
@@ -126,6 +281,25 @@ async fn accept_loop(
             _ = stop.changed() => return,
         }
     }
+}
+
+/// A capture of `source`, sending its events to `tx`.
+fn start_capture(source: &Source, dmabufs: bool, tx: mpsc::UnboundedSender<CaptureEvent>) -> Result<Capturer> {
+    let mut cc = source.capture_config();
+    // Capture buffers live on the compositor's GPU; another encoder reads them as pixels.
+    cc.render_node = crate::gpu::compositor_node();
+    cc.cursor = true;
+    cc.buffers = 3;
+    if !dmabufs {
+        cc.prefer_linear = true;
+        cc.shm_fallback = true;
+    }
+    Ok(Capturer::start(
+        cc,
+        Box::new(move |ev| {
+            let _ = tx.send(ev);
+        }),
+    )?)
 }
 
 fn now_ms() -> u64 {
@@ -179,6 +353,11 @@ impl Video {
 
     /// The stream size for a frame of `extent`: the extent, scaled down to fit the encoder.
     fn stream_for(&self, extent: (u32, u32)) -> Result<(u32, u32)> {
+        // Odd windows are cropped to even sides (H.264's 4:2:0), as `read_bgra` does.
+        let extent = (extent.0 & !1, extent.1 & !1);
+        if extent.0 == 0 || extent.1 == 0 {
+            bail!("nothing to share: the window has no size");
+        }
         let (mw, mh) = self.max_size();
         if extent.0 <= mw && extent.1 <= mh {
             return Ok(extent);
@@ -257,6 +436,7 @@ async fn serve(
     mut sock: TcpStream,
     token: &str,
     screen: &Screen,
+    source: &mut watch::Receiver<Source>,
     stop: &mut watch::Receiver<bool>,
     events: &impl Fn(ShareEvent),
 ) -> Result<()> {
@@ -300,21 +480,8 @@ async fn serve(
     events(ShareEvent::ViewerConnected { pipeline: video.pipeline().label() });
 
     let (cap_tx, mut cap_rx) = mpsc::unbounded_channel::<CaptureEvent>();
-    let mut cc = CaptureConfig::new(screen.name.clone());
-    // Capture buffers live on the compositor's GPU; another encoder reads them as pixels.
-    cc.render_node = crate::gpu::compositor_node();
-    cc.cursor = true;
-    cc.buffers = 3;
-    if !dmabufs {
-        cc.prefer_linear = true;
-        cc.shm_fallback = true;
-    }
-    let capturer = Capturer::start(
-        cc,
-        Box::new(move |ev| {
-            let _ = cap_tx.send(ev);
-        }),
-    )?;
+    let current = source.borrow_and_update().clone();
+    let mut capturer = start_capture(&current, dmabufs, cap_tx.clone())?;
 
     // A writer task owns the socket, so a slow write never stalls reading acks.
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Out>();
@@ -344,7 +511,7 @@ async fn serve(
     )?;
     send(ServerMsg::Ping { t: now_ms() }, vec![])?;
 
-    let pixels = screen.width as u64 * screen.height as u64;
+    let mut pixels = screen.width as u64 * screen.height as u64;
     let mut link = LinkEstimator::new();
     let mut ctl = RateController::new(pixels, if can_dual { 2 } else { 1 }, MAX_FPS, None);
     let mut ladder = Ladder::new(0);
@@ -359,6 +526,8 @@ async fn serve(
     // A still screen may never complete the first capture; gliff's rescue is a fresh
     // full-damage capture after 700 ms.
     let mut rescued = false;
+    let mut switched = started;
+    let mut frame_id_at_switch = 0u64;
     capturer.request_frame()?;
 
     let result: Result<()> = loop {
@@ -411,13 +580,33 @@ async fn serve(
                 }
             },
             _ = tokio::time::sleep_until(due.into()), if pending.is_some() => {},
-            _ = tokio::time::sleep_until((started + Duration::from_millis(700)).into()), if frame_id == 0 && !rescued => {
+            _ = tokio::time::sleep_until((switched + Duration::from_millis(700)).into()), if frame_id == frame_id_at_switch && !rescued => {
                 rescued = true;
                 capturer.recapture()?;
             }
             _ = stop.changed() => {
                 let _ = send(ServerMsg::error(gliff_proto::ERROR_SETUP, "the share was stopped"), vec![]);
                 break Ok(());
+            }
+            changed = source.changed() => {
+                if changed.is_err() {
+                    continue;
+                }
+                // Another screen or window: a fresh capture; the encoder follows its size.
+                let next = source.borrow_and_update().clone();
+                pending = None;
+                drop(std::mem::replace(&mut capturer, match start_capture(&next, dmabufs, cap_tx.clone()) {
+                    Ok(c) => c,
+                    Err(e) => break Err(e),
+                }));
+                // Events still queued belong to the old capture.
+                while cap_rx.try_recv().is_ok() {}
+                tracing::info!(source = %next.key(), "share source changed");
+                force_key = true;
+                frame_id_at_switch = frame_id;
+                rescued = false;
+                switched = Instant::now();
+                capturer.request_frame()?;
             }
         }
 
@@ -434,6 +623,11 @@ async fn serve(
         let stream = video.stream_for(frame.extent())?;
         let dual = want_dual && video.gpu.is_some();
         if video.enc.is_none() || video.stream != stream || video.dual != dual {
+            if video.stream != stream && video.enc.is_some() {
+                // Another source or a resized window: the rate follows the new area.
+                pixels = stream.0 as u64 * stream.1 as u64;
+                ctl.reconfigure(pixels, if dual { 2 } else { 1 }, MAX_FPS);
+            }
             video.rebuild(stream, dual, ctl.stream_bitrate(), fps, ctl.vbv_ms(fps))?;
             let extent = frame.extent();
             let effective = screen.scale * stream.0 as f32 / extent.0.max(1) as f32;
