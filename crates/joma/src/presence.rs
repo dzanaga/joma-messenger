@@ -40,6 +40,9 @@ pub struct Wire {
     pub state: State,
     /// Unix seconds when sent.
     pub ts: u64,
+    /// The sending device, on messages between our own devices.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub dev: String,
 }
 
 impl Wire {
@@ -109,7 +112,7 @@ impl Presence {
         if state == State::Hidden && !changed {
             return Vec::new();
         }
-        let wire = Wire { state, ts: now() };
+        let wire = Wire { state, ts: now(), dev: String::new() };
         let mut out = Vec::new();
         for c in contacts {
             let stale = self.sent.get(c).is_none_or(|t| at.duration_since(*t) >= REFRESH);
@@ -237,9 +240,9 @@ mod tests {
 
     #[test]
     fn wire_round_trips() {
-        let w = Wire { state: State::Away { since: 5 }, ts: 9 };
+        let w = Wire { state: State::Away { since: 5 }, ts: 9, dev: String::new() };
         assert_eq!(Wire::decode(&w.encode()), Some(w));
-        assert_eq!(Wire::decode(r#"{"state":"active","ts":1}"#), Some(Wire { state: State::Active, ts: 1 }));
+        assert_eq!(Wire::decode(r#"{"state":"active","ts":1}"#), Some(Wire { state: State::Active, ts: 1, dev: String::new() }));
     }
 
     #[test]
@@ -269,16 +272,16 @@ mod tests {
     fn received_states_expire_and_hidden_forgets() {
         let mut p = Presence::default();
         let t = Instant::now();
-        assert!(p.received("a", Wire { state: State::Active, ts: now() }, t));
-        assert!(!p.received("a", Wire { state: State::Active, ts: now() }, t));
+        assert!(p.received("a", Wire { state: State::Active, ts: now(), dev: String::new() }, t));
+        assert!(!p.received("a", Wire { state: State::Active, ts: now(), dev: String::new() }, t));
         assert_eq!(p.state_of("a"), Some(State::Active));
         // Late messages are ignored.
-        assert!(!p.received("b", Wire { state: State::Active, ts: now() - 3600 }, t));
+        assert!(!p.received("b", Wire { state: State::Active, ts: now() - 3600, dev: String::new() }, t));
         assert!(p.expire(t + EXPIRE));
         assert_eq!(p.state_of("a"), None);
         assert!(p.seen.contains_key("a"));
-        p.received("a", Wire { state: State::Active, ts: now() }, t);
-        p.received("a", Wire { state: State::Hidden, ts: now() }, t);
+        p.received("a", Wire { state: State::Active, ts: now(), dev: String::new() }, t);
+        p.received("a", Wire { state: State::Hidden, ts: now(), dev: String::new() }, t);
         assert_eq!(p.state_of("a"), None);
     }
 }

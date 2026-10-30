@@ -27,3 +27,4 @@ serde.workspace = true
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 ksni = { version = "0.3.7", features = ["blocking"] }
+qrcode = { version = "0.14", default-features = false }

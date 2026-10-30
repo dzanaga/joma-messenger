@@ -37,6 +37,11 @@ pub enum Request {
     Watch { to: String },
     /// Block a contact (Jami's ban), or unblock them.
     Block { to: String, block: bool },
+    /// On a Joma without an account: start joining one from another device; the answer is
+    /// the code to enter there.
+    Link,
+    /// Send this account to the new device showing `token` (confirmed without asking).
+    LinkDevice { token: String },
     /// Quit Joma (closing its window only hides it).
     Quit,
 }
@@ -97,6 +102,8 @@ pub enum Reply {
     Done,
     Quick(QuickState),
     Chat(ChatState),
+    /// Text to print.
+    Text { text: String },
     Error { message: String },
 }
 

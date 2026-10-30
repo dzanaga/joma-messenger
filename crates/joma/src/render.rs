@@ -40,6 +40,10 @@ pub const G_COMMENT: &str = "\u{f075}";
 pub const G_BAN: &str = "\u{f05e}";
 pub const G_USER_TIMES: &str = "\u{f235}";
 pub const G_GRIP: &str = "\u{f142}";
+pub const G_LAPTOP: &str = "\u{f109}";
+pub const G_LINK: &str = "\u{f0c1}";
+pub const G_PENCIL: &str = "\u{f040}";
+pub const G_COPY: &str = "\u{f0c5}";
 
 /// Local "HH:MM" and a day key for separators.
 pub fn local_time(ts: i64) -> (String, i64, String) {
@@ -118,6 +122,25 @@ impl Render for DragPreview {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div().px(px(10.)).py(px(4.)).bg(self.bg).border_1().border_color(self.border).text_color(self.fg).child(self.title.clone())
     }
+}
+
+/// A QR code drawn with squares (dark on light, as scanners expect).
+fn qr(text: &str) -> AnyElement {
+    let Ok(code) = qrcode::QrCode::new(text.as_bytes()) else {
+        return div().into_any_element();
+    };
+    let w = code.width();
+    let colors = code.to_colors();
+    let cell = px(4.);
+    let mut grid = div().flex().flex_col().p(px(16.)).bg(gpui::white());
+    for row in colors.chunks(w) {
+        let mut r = div().flex();
+        for c in row {
+            r = r.child(div().size(cell).when(*c == qrcode::Color::Dark, |d| d.bg(gpui::black())));
+        }
+        grid = grid.child(r);
+    }
+    grid.into_any_element()
 }
 
 /// A sidebar row that can be dragged and dropped on another of its list.
@@ -493,6 +516,8 @@ impl Joma {
                         .child(div().text_color(t.muted).text_size(px(t.size - 2.)).pb(px(3.)).child(match self.mode {
                             Mode::Add => "add a contact",
                             Mode::Username => "choose your username (contacts find you by it)",
+                            Mode::LinkDevice => "link a device: on the new one choose \"link to an account\"",
+                            Mode::DeviceName => "rename this device",
                             _ => "filter",
                         }))
                         .child(self.input.clone()),
@@ -502,11 +527,133 @@ impl Joma {
             .into_any_element()
     }
 
+    /// Onboarding by joining an account from another device: the code, as text and QR.
+    fn link_card(&self, card: gpui::Div, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
+        let Some(l) = &self.linking else { return card };
+        let card = card.child(div().text_color(t.accent).font_weight(FontWeight::BOLD).child("Link this device to your account"));
+        if !l.error.is_empty() {
+            return card
+                .child(div().text_color(t.red).child(l.error.clone()))
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(8.))
+                        .child(button("link-retry", G_UNDO, "try again", t, true).on_click(cx.listener(|this, _, _, cx| {
+                            this.linking = None;
+                            this.start_link(cx);
+                        })))
+                        .child(button("link-back", G_BACK, "back", t, false).on_click(cx.listener(|this, _, _, cx| this.cancel_link(cx)))),
+                );
+        }
+        let token = l.token.clone();
+        card.child(div().child(
+            "On your other device: Joma → contacts → you → link a device, and paste this code; or in the Jami app: Link device, and scan it.",
+        ))
+        .when(!token.is_empty(), |d| {
+            let copy = token.clone();
+            d.child(div().flex().justify_center().child(qr(&token)))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(div().flex_1().min_w(px(0.)).text_color(t.bright).text_size(px(t.size - 1.5)).truncate().child(token))
+                        .child(button("link-copy", G_COPY, "copy", t, false).on_click(cx.listener(move |this, _, _, cx| {
+                            cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.clone()));
+                            this.show_flash("code copied", cx);
+                        }))),
+                )
+        })
+        .when(l.password_scheme.is_some(), |d| d.child(self.input.clone()))
+        .child(div().text_color(t.muted).child(l.status.clone()))
+        .child(div().flex().child(button("link-cancel", G_TIMES, "cancel", t, false).on_click(cx.listener(|this, _, _, cx| this.cancel_link(cx)))))
+    }
+
+    /// "You": this device and the account's others, and linking a new one.
+    fn devices_group(&self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
+        let mut group = div().flex().flex_col();
+        let mut ids: Vec<(String, String)> = self.model.devices.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        ids.sort_by_key(|(id, _)| *id != self.model.device);
+        for (id, name) in ids {
+            let this = id == self.model.device;
+            let dot = self.device_dot(&id);
+            let armed = self.is_armed(&format!("revoke:{id}"));
+            let i = id.clone();
+            let label = if name.is_empty() { format!("{}…", &id[..id.len().min(8)]) } else { name };
+            group = group.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .px(px(10.))
+                    .py(px(4.))
+                    .child(div().flex_none().text_color(t.muted).child(G_LAPTOP))
+                    .child(div().flex_none().size(px(7.)).rounded_full().when(dot != Dot::None, |d| {
+                        d.bg(if dot == Dot::Active { t.green } else { t.green.opacity(0.3) })
+                    }))
+                    .child(div().flex_1().min_w(px(0.)).truncate().text_color(if this { t.bright } else { t.text }).child(label))
+                    .when(this, |d| {
+                        d.child(div().text_color(t.muted).text_size(px(t.size - 2.)).child("this device")).child(
+                            button(SharedString::from(format!("dev-rename-{id}")), G_PENCIL, "", t, false)
+                                .px(px(6.))
+                                .py(px(1.))
+                                .on_click(cx.listener(|this, _, window, cx| this.set_mode(Mode::DeviceName, window, cx))),
+                        )
+                    })
+                    .when(!this, |d| {
+                        d.child(
+                            button(SharedString::from(format!("dev-revoke-{id}")), G_BAN, if armed { "revoke?" } else { "" }, t, armed)
+                                .px(px(6.))
+                                .py(px(1.))
+                                .text_color(if armed { t.red } else { t.muted })
+                                .on_click(cx.listener(move |this, _, _, cx| this.revoke_device(&i, cx))),
+                        )
+                    }),
+            );
+        }
+        let op = self.device_op.clone();
+        group.child(match op {
+            Some(d) if d.state == joma_jami::AUTH_AUTHENTICATING => div()
+                .flex()
+                .flex_col()
+                .gap(px(4.))
+                .mx(px(10.))
+                .my(px(4.))
+                .p(px(6.))
+                .border_1()
+                .border_color(t.yellow)
+                .child(div().text_color(t.bright).child(format!("A device at {} asks for your account.", if d.peer.is_empty() { "?" } else { &d.peer })))
+                .child(div().text_color(t.muted).text_size(px(t.size - 2.)).child("Send it only if it is yours: it gets your account and history."))
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(6.))
+                        .child(button("dev-yes", G_CHECK, "send", t, true).on_click(cx.listener(|this, _, _, cx| this.answer_device(true, cx))))
+                        .child(button("dev-no", G_TIMES, "cancel", t, false).on_click(cx.listener(|this, _, _, cx| this.answer_device(false, cx)))),
+                ),
+            Some(d) => div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .px(px(10.))
+                .py(px(4.))
+                .child(div().text_color(t.muted).child(if d.state == joma_jami::AUTH_IN_PROGRESS { "sending the account…" } else { "connecting to the new device…" }))
+                .child(button("dev-stop", G_TIMES, "", t, false).on_click(cx.listener(|this, _, _, cx| this.answer_device(false, cx)))),
+            None => div().px(px(10.)).py(px(4.)).child(
+                button("dev-link", G_LINK, "link a device", t, self.mode == Mode::LinkDevice)
+                    .on_click(cx.listener(|this, _, window, cx| this.set_mode(Mode::LinkDevice, window, cx))),
+            ),
+        })
+    }
+
     /// The Contacts tab: requests waiting for you, contacts (starred first, draggable) with
     /// their quick buttons, and the blocked ones at the bottom.
     fn contacts_list(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let mut list = div().id("contacts").flex().flex_col().flex_1().overflow_y_scroll();
         let small = |label: &str| div().px(px(10.)).pt(px(8.)).pb(px(2.)).text_size(px(t.size - 2.5)).text_color(t.muted).child(label.to_uppercase());
+        if self.mode != Mode::Search {
+            list = list.child(small("you")).child(self.devices_group(t, cx));
+        }
         let requests: Vec<Conversation> = self.model.ordered().into_iter().filter(|c| c.request).cloned().collect();
         if !requests.is_empty() {
             list = list.child(small("requests"));
@@ -1091,6 +1238,8 @@ impl Joma {
                 Mode::Add => "enter: add · esc: cancel",
                 Mode::Search => "enter: open first · esc: cancel",
                 Mode::Username => "enter: register · esc: cancel",
+                Mode::LinkDevice => "enter: link · esc: cancel",
+                Mode::DeviceName => "enter: rename · esc: cancel",
                 Mode::Removed => "removed contacts · esc: back",
                 Mode::Chat if self.narrow && self.narrow_chat => "esc: back · ctrl+.: quick",
                 Mode::Chat if self.narrow => "ctrl+n: add · ctrl+k: find · ctrl+shift+k: contacts",
@@ -1120,6 +1269,7 @@ impl Joma {
                 .child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child("Jami is open"))
                 .child(div().child("Joma uses the same accounts and history as the Jami app, and only one of them can run at a time. Jami keeps running in the tray after its window is closed: quit it from its tray icon (or run `pkill -x jami`). Joma comes back by itself once it quits."))
                 .child(button("retry", G_CHECK, "retry", t, true).on_click(cx.listener(|this, _, _, cx| this.boot(cx)))),
+            Gate::Onboarding if self.linking.is_some() => self.link_card(card, t, cx),
             Gate::Onboarding => card
                 .child(div().text_color(t.accent).font_weight(FontWeight::BOLD).child("Welcome to Joma"))
                 .child(div().child("Joma is a Jami client for Omarchy. Create a Jami account to start: it lives on this machine, no server and no phone number."))
@@ -1128,7 +1278,18 @@ impl Joma {
                     "Enter: next, a username".to_owned()
                 } else {
                     format!("Enter creates the account. A username has {USERNAME_RULE}; without one, contacts see your 40-digit ID until they get your profile.")
-                })),
+                }))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .pt(px(6.))
+                        .border_t_1()
+                        .border_color(t.border)
+                        .child(div().flex_1().text_color(t.muted).child("Already on Jami on another device?"))
+                        .child(button("link-start", G_LINK, "link to your account", t, false).on_click(cx.listener(|this, _, _, cx| this.start_link(cx)))),
+                ),
             Gate::Failed(e) => card.child(div().text_color(t.red).child(format!("The Jami daemon failed to start: {e}"))),
             Gate::Ready => card,
         };

@@ -246,6 +246,10 @@ pub struct Model {
     pub conversations: HashMap<String, Conversation>,
     /// Contacts by bare URI.
     pub contacts: HashMap<String, Contact>,
+    /// The account's devices: id to name.
+    pub devices: std::collections::BTreeMap<String, String>,
+    /// This device's id.
+    pub device: String,
     /// Names and registered names of peers, by bare URI.
     pub names: HashMap<String, String>,
     pub calls: HashMap<String, Call>,

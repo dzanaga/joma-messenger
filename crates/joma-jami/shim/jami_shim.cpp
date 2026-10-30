@@ -219,6 +219,11 @@ registerHandlers()
     FORWARD(ConfigurationSignal::ComposingStatusChanged);
     FORWARD(ConfigurationSignal::AccountMessageStatusChanged);
     FORWARD(ConfigurationSignal::IncomingAccountMessage);
+    // Devices of the account
+    FORWARD(ConfigurationSignal::KnownDevicesChanged);
+    FORWARD(ConfigurationSignal::DeviceAuthStateChanged);
+    FORWARD(ConfigurationSignal::AddDeviceStateChanged);
+    FORWARD(ConfigurationSignal::DeviceRevocationEnded);
     // Conversations
     FORWARD(ConversationSignal::SwarmLoaded);
     FORWARD(ConversationSignal::SwarmMessageReceived);
@@ -345,6 +350,8 @@ dispatch(const std::string& m, const Json::Value& a)
         return toJson(getVolatileAccountDetails(str(a, 0)));
     if (m == "getAccountTemplate")
         return toJson(getAccountTemplate(str(a, 0)));
+    if (m == "removeAccount")
+        return removeAccount(str(a, 0)), Json::Value();
     if (m == "addAccount")
         return addAccount(smap(a, 0));
     if (m == "setAccountDetails")
@@ -359,6 +366,19 @@ dispatch(const std::string& m, const Json::Value& a)
         return lookupName(str(a, 0), str(a, 1), str(a, 2));
     if (m == "lookupAddress")
         return lookupAddress(str(a, 0), str(a, 1), str(a, 2));
+    // Devices
+    if (m == "getKnownRingDevices")
+        return toJson(getKnownRingDevices(str(a, 0)));
+    if (m == "addDevice")
+        return addDevice(str(a, 0), str(a, 1));
+    if (m == "confirmAddDevice")
+        return confirmAddDevice(str(a, 0), (uint32_t) num(a, 1));
+    if (m == "cancelAddDevice")
+        return cancelAddDevice(str(a, 0), (uint32_t) num(a, 1));
+    if (m == "provideAccountAuthentication")
+        return provideAccountAuthentication(str(a, 0), str(a, 1), str(a, 2));
+    if (m == "revokeDevice")
+        return revokeDevice(str(a, 0), str(a, 1), str(a, 2), str(a, 3));
     // Contacts
     if (m == "getContacts")
         return toJson(getContacts(str(a, 0)));

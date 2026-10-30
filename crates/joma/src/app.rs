@@ -90,6 +90,35 @@ pub enum Mode {
     Username,
     /// The list shows the removed conversations, to restore or delete.
     Removed,
+    /// The input takes the code a new device shows, to link it to this account.
+    LinkDevice,
+    /// The input renames this device.
+    DeviceName,
+}
+
+/// This machine joining an account that lives on another device.
+#[derive(Clone, Default)]
+pub struct Linking {
+    /// The new, still empty account.
+    pub account: String,
+    /// The `jami-auth://` code to enter on the other device.
+    pub token: String,
+    /// What the daemon said last.
+    pub status: String,
+    /// The other device sent the account, and it has a password: type it.
+    pub password_scheme: Option<String>,
+    pub error: String,
+}
+
+/// Sending this account to a new device.
+#[derive(Clone)]
+pub struct DeviceOp {
+    pub op: u32,
+    /// Started from the command line: confirm without asking.
+    pub auto: bool,
+    pub state: i64,
+    /// The new device's network address, once it connected.
+    pub peer: String,
 }
 
 /// What the sidebar lists.
@@ -198,6 +227,14 @@ pub struct Joma {
     pub narrow_chat: bool,
     /// What the setup banner offers, as found at start and after each step.
     pub setup: SetupState,
+    /// Joining an account from another device, during onboarding.
+    pub linking: Option<Linking>,
+    /// Sending the account to a new device.
+    pub device_op: Option<DeviceOp>,
+    /// Our other devices' Joma presence, by device id.
+    pub my_devices: HashMap<String, crate::presence::Peer>,
+    /// When we last told our other devices, and what.
+    self_told: Option<(State, Instant)>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -405,6 +442,10 @@ impl Joma {
             narrow: false,
             narrow_chat: false,
             setup: SetupState::read(),
+            linking: None,
+            device_op: None,
+            my_devices: HashMap::new(),
+            self_told: None,
         };
         j.configure_inputs(cx);
         j.boot(cx);
@@ -496,6 +537,7 @@ impl Joma {
             account,
             ..Default::default()
         };
+        self.refresh_identity();
         self.load_profiles();
         self.subscribed.clear();
         self.load_contacts();
@@ -513,6 +555,28 @@ impl Joma {
             self.select(id, cx);
         }
         self.configure_inputs(cx);
+    }
+
+    /// Fill what an account learns late (a linked device gets its archive after opening):
+    /// our URI, this device's id, our name (from the profile when the config has none),
+    /// and the account's devices.
+    fn refresh_identity(&mut self) {
+        let acc = self.model.account.clone();
+        let details = joma_jami::account_details(&acc).unwrap_or_default();
+        if self.model.me.is_empty() {
+            self.model.me = details.get("Account.username").map(|u| bare_uri(u).to_owned()).unwrap_or_default();
+        }
+        let volatile = joma_jami::volatile_details(&acc).unwrap_or_default();
+        if let Some(d) = volatile.get("Account.deviceID").filter(|d| !d.is_empty()) {
+            self.model.device = d.clone();
+        }
+        if self.model.my_name.is_empty() {
+            let vcf = self.account_dir().map(|d| d.join("profile.vcf"));
+            if let Some(name) = vcf.and_then(|p| std::fs::read_to_string(p).ok()).and_then(|v| crate::model::vcard_name(&v)) {
+                self.model.my_name = name;
+            }
+        }
+        self.model.devices = joma_jami::known_devices(&acc).unwrap_or_default().into_iter().collect();
     }
 
     /// The daemon's folder for this account.
@@ -590,11 +654,16 @@ impl Joma {
         let chat = self.gate == Gate::Ready && self.selected.as_ref().is_some_and(|s| !self.model.conversations.get(s).is_some_and(|c| c.request));
         self.composer.update(cx, |c, _| c.configure(key, theme.clone(), chat));
         let (key, placeholder) = match (self.gate.clone(), self.mode) {
+            (Gate::Onboarding, _) if self.linking.as_ref().is_some_and(|l| l.password_scheme.is_some()) => {
+                ("link-password", "The account's password, then Enter")
+            }
             (Gate::Onboarding, _) if self.onboard_name.is_none() => ("onboarding", "Your name (shown to your contacts)"),
             (Gate::Onboarding, _) => ("onboarding-user", "A username, so contacts can find you (Enter alone skips)"),
             (_, Mode::Username) => ("username", "Your username, then Enter"),
             (_, Mode::Add) => ("add", "Jami username or 40-digit ID, then Enter"),
             (_, Mode::Search) => ("search", "Filter conversations"),
+            (_, Mode::LinkDevice) => ("link", "The jami-auth:// code the new device shows, then Enter"),
+            (_, Mode::DeviceName) => ("device-name", "A name for this device, then Enter"),
             _ => ("idle", ""),
         };
         self.input.update(cx, |c, _| {
@@ -744,6 +813,11 @@ impl Joma {
     }
 
     fn on_event(&mut self, ev: Event, window: &mut Window, cx: &mut Context<Self>) {
+        if self.gate == Gate::Onboarding && self.linking.is_some() {
+            self.on_link_event(ev, cx);
+            cx.notify();
+            return;
+        }
         if self.gate == Gate::Onboarding {
             if let Event::AccountsChanged = ev {
                 if let Some(a) = joma_jami::accounts().unwrap_or_default().first() {
@@ -777,6 +851,19 @@ impl Joma {
             Event::AccountMessage { account, from, payloads } if *account == acc => {
                 if let Some(wire) = payloads.get(crate::presence::MIME).and_then(|p| Wire::decode(p)) {
                     let peer = bare_uri(from).to_owned();
+                    if peer == self.model.me {
+                        // One of our other devices.
+                        if !wire.dev.is_empty() && wire.dev != self.model.device {
+                            let fresh = !self.my_devices.contains_key(&wire.dev);
+                            self.my_devices.insert(wire.dev.clone(), crate::presence::Peer { state: wire.state, received: Instant::now() });
+                            if fresh {
+                                self.self_told = None;
+                                self.tell_presence();
+                            }
+                        }
+                        cx.notify();
+                        return;
+                    }
                     if self.presence.received(&peer, wire, Instant::now()) {
                         self.tell_presence();
                     }
@@ -790,6 +877,24 @@ impl Joma {
                     self.after(after, cx);
                     cx.notify();
                 }
+                return;
+            }
+            Event::KnownDevices { account, devices } if *account == acc => {
+                self.model.devices = devices.clone().into_iter().collect();
+                if self.model.device.is_empty() {
+                    self.refresh_identity();
+                }
+                cx.notify();
+                return;
+            }
+            Event::AddDevice { account, op, state, detail } if *account == acc => {
+                self.on_add_device(*op, *state, detail, cx);
+                return;
+            }
+            Event::DeviceRevoked { account, device, status } if *account == acc => {
+                let name = self.model.devices.get(device).cloned().unwrap_or_else(|| device.chars().take(8).collect());
+                self.show_flash(if *status == 0 { format!("{name} revoked") } else { format!("could not revoke {name} ({status})") }, cx);
+                self.model.devices = joma_jami::known_devices(&acc).unwrap_or_default().into_iter().collect();
                 return;
             }
             Event::PeerServices { request, peer, services, .. } => {
@@ -888,9 +993,8 @@ impl Joma {
             if *account == acc && state == "REGISTERED" {
                 // A new account has no URI until it is generated: until then our own
                 // URI counted as a peer.
-                if self.model.me.is_empty() {
-                    let details = joma_jami::account_details(&acc).unwrap_or_default();
-                    self.model.me = details.get("Account.username").map(|u| bare_uri(u).to_owned()).unwrap_or_default();
+                if self.model.me.is_empty() || self.model.device.is_empty() {
+                    self.refresh_identity();
                     for id in self.model.conversations.keys().cloned().collect::<Vec<_>>() {
                         self.reload_conversation(&id, false);
                     }
@@ -1103,6 +1207,18 @@ impl Joma {
         for (to, wire) in due {
             self.send_presence(&to, &wire);
         }
+        // Our other devices always hear the real state (invisible is for contacts).
+        if self.model.devices.len() > 1 {
+            let state = self.presence.mine(false);
+            let now = Instant::now();
+            let due = self.self_told.is_none_or(|(s, t)| s != state || now.duration_since(t) >= crate::presence::REFRESH);
+            if due {
+                self.self_told = Some((state, now));
+                let wire = Wire { state, ts: joma_desk::signal::now(), dev: self.model.device.clone() };
+                self.send_presence(&self.model.me.clone(), &wire);
+            }
+        }
+        self.my_devices.retain(|_, p| p.received.elapsed() < crate::presence::EXPIRE);
     }
 
     fn send_presence(&self, to: &str, wire: &Wire) {
@@ -1116,7 +1232,7 @@ impl Joma {
         if self.quick.invisible || self.model.registration != "REGISTERED" {
             return;
         }
-        let wire = Wire { state: State::Hidden, ts: joma_desk::signal::now() };
+        let wire = Wire { state: State::Hidden, ts: joma_desk::signal::now(), dev: String::new() };
         for to in self.presence_contacts() {
             if self.model.online.contains(&to) {
                 self.send_presence(&to, &wire);
@@ -1531,6 +1647,150 @@ impl Joma {
         self.show_flash(format!("{name} removed · add them again with + if needed"), cx);
     }
 
+    // ---- Devices -----------------------------------------------------------------
+
+    /// Onboarding: join an account from another device instead of creating one.
+    pub fn start_link(&mut self, cx: &mut Context<Self>) {
+        match joma_jami::link_account() {
+            Ok(account) => {
+                self.linking = Some(Linking { account, status: "preparing a code…".into(), ..Default::default() });
+                self.input.update(cx, |c, cx| c.clear(cx));
+            }
+            Err(e) => self.show_flash(format!("could not start linking: {e}"), cx),
+        }
+        cx.notify();
+    }
+
+    /// Give up joining: the empty account goes.
+    pub fn cancel_link(&mut self, cx: &mut Context<Self>) {
+        if let Some(l) = self.linking.take() {
+            let _ = joma_jami::remove_account(&l.account);
+        }
+        self.configure_inputs(cx);
+        cx.notify();
+    }
+
+    fn on_link_event(&mut self, ev: Event, cx: &mut Context<Self>) {
+        let Some(l) = self.linking.as_mut() else { return };
+        let Event::DeviceAuth { account, state, detail } = ev else { return };
+        if account != l.account {
+            return;
+        }
+        let error = detail.get("error").cloned().unwrap_or_default();
+        match state {
+            joma_jami::AUTH_TOKEN => {
+                l.token = detail.get("token").cloned().unwrap_or_default();
+                l.status = "waiting for your other device".into();
+            }
+            joma_jami::AUTH_CONNECTING => l.status = "your other device is connecting…".into(),
+            joma_jami::AUTH_AUTHENTICATING => {
+                let scheme = detail.get("auth_scheme").cloned().unwrap_or_default();
+                if detail.get("auth_error").is_some_and(|e| !e.is_empty()) {
+                    l.status = "wrong password, try again".into();
+                }
+                if scheme.is_empty() {
+                    let acc = l.account.clone();
+                    l.status = "receiving the account…".into();
+                    let _ = joma_jami::provide_authentication(&acc, "", "");
+                } else {
+                    l.password_scheme = Some(scheme);
+                    if l.status.is_empty() || !l.status.starts_with("wrong") {
+                        l.status = "the account has a password: type it".into();
+                    }
+                    self.configure_inputs(cx);
+                }
+            }
+            joma_jami::AUTH_IN_PROGRESS => l.status = "receiving the account…".into(),
+            joma_jami::AUTH_DONE if error.is_empty() => {
+                let acc = l.account.clone();
+                self.linking = None;
+                self.open_account(acc, cx);
+                self.show_flash("this device is linked to your account", cx);
+            }
+            joma_jami::AUTH_DONE => {
+                let _ = joma_jami::remove_account(&l.account);
+                l.error = match error.as_str() {
+                    "timeout" => "the code expired".into(),
+                    "canceled" => "the other device canceled".into(),
+                    "auth_error" => "the password was wrong".into(),
+                    "network" => "the devices could not connect".into(),
+                    e => format!("linking failed ({e})"),
+                };
+                l.token.clear();
+            }
+            _ => {}
+        }
+    }
+
+    /// Our side of linking a new device: the code it shows starts it.
+    fn link_device(&mut self, token: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if !token.trim().starts_with("jami-auth://") {
+            self.show_flash("the code starts with jami-auth://", cx);
+            return;
+        }
+        match joma_jami::add_device(&self.model.account, token) {
+            Ok(op) => {
+                self.device_op = Some(DeviceOp { op, auto: false, state: 0, peer: String::new() });
+                self.set_mode(Mode::Chat, window, cx);
+                self.show_flash("connecting to the new device…", cx);
+            }
+            Err(e) => self.show_flash(format!("could not link: {e}"), cx),
+        }
+    }
+
+    fn on_add_device(&mut self, op: u32, state: i64, detail: &joma_jami::Details, cx: &mut Context<Self>) {
+        let Some(d) = self.device_op.as_mut().filter(|d| d.op == op) else { return };
+        d.state = state;
+        if let Some(p) = detail.get("peer_address") {
+            d.peer = p.clone();
+        }
+        if state == joma_jami::AUTH_AUTHENTICATING && d.auto {
+            let _ = joma_jami::confirm_add_device(&self.model.account, op);
+        }
+        if state == joma_jami::AUTH_DONE {
+            self.device_op = None;
+            let error = detail.get("error").cloned().unwrap_or_default();
+            self.show_flash(if error.is_empty() { "the new device is linked".to_owned() } else { format!("linking failed ({error})") }, cx);
+            self.model.devices = joma_jami::known_devices(&self.model.account).unwrap_or_default().into_iter().collect();
+        }
+        cx.notify();
+    }
+
+    /// The new device connected: send it the account (or not).
+    pub fn answer_device(&mut self, yes: bool, cx: &mut Context<Self>) {
+        let Some(d) = self.device_op.clone() else { return };
+        let acc = self.model.account.clone();
+        if yes {
+            let _ = joma_jami::confirm_add_device(&acc, d.op);
+        } else {
+            let _ = joma_jami::cancel_add_device(&acc, d.op);
+            self.device_op = None;
+        }
+        cx.notify();
+    }
+
+    pub fn revoke_device(&mut self, id: &str, cx: &mut Context<Self>) {
+        let name = self.model.devices.get(id).cloned().unwrap_or_default();
+        if !self.armed(&format!("revoke:{id}"), &format!("click again to revoke {name}: it loses the account"), cx) {
+            return;
+        }
+        if let Err(e) = joma_jami::revoke_device(&self.model.account, id) {
+            self.show_flash(format!("could not revoke: {e}"), cx);
+        }
+    }
+
+    /// Our other devices: how present they are on Joma.
+    pub fn device_dot(&self, id: &str) -> Dot {
+        if id == self.model.device {
+            return Dot::Active;
+        }
+        match self.my_devices.get(id).map(|p| p.state) {
+            Some(State::Active) => Dot::Active,
+            Some(State::Away { .. }) => Dot::Reachable,
+            _ => Dot::None,
+        }
+    }
+
     pub fn set_mode(&mut self, mode: Mode, window: &mut Window, cx: &mut Context<Self>) {
         self.mode = mode;
         self.input.update(cx, |c, cx| c.clear(cx));
@@ -1546,6 +1806,16 @@ impl Joma {
 
     fn submit_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.input.read(cx).text().trim().to_owned();
+        if let Some(l) = self.linking.clone() {
+            if let Some(scheme) = l.password_scheme {
+                let _ = joma_jami::provide_authentication(&l.account, &text, &scheme);
+                self.input.update(cx, |c, cx| c.clear(cx));
+                if let Some(l) = self.linking.as_mut() {
+                    l.status = "checking…".into();
+                }
+            }
+            return;
+        }
         if self.gate == Gate::Onboarding {
             // Two steps: the name contacts see, then an optional username.
             let Some(name) = self.onboard_name.clone() else {
@@ -1600,6 +1870,20 @@ impl Joma {
                 },
                 None => self.show_flash(format!("a username has {USERNAME_RULE}"), cx),
             },
+            Mode::LinkDevice => self.link_device(&text, window, cx),
+            Mode::DeviceName => {
+                if text.is_empty() {
+                    return;
+                }
+                match joma_jami::set_device_name(&self.model.account, &text) {
+                    Ok(()) => {
+                        let id = self.model.device.clone();
+                        self.model.devices.insert(id, text);
+                        self.set_mode(Mode::Chat, window, cx);
+                    }
+                    Err(e) => self.show_flash(format!("could not rename: {e}"), cx),
+                }
+            }
             Mode::Chat | Mode::Removed => {}
         }
     }
@@ -1940,6 +2224,34 @@ impl Joma {
                 },
                 Err(e) => e,
             },
+            Request::Link => {
+                if self.gate != Gate::Onboarding {
+                    return Reply::Error { message: "this Joma already has an account".into() };
+                }
+                if self.linking.as_ref().is_none_or(|l| !l.error.is_empty()) {
+                    self.linking = None;
+                    self.start_link(cx);
+                }
+                match &self.linking {
+                    Some(l) if !l.token.is_empty() => Reply::Text {
+                        text: format!("{}\n\nOn your other device: joma link-device <this code>, or Joma → contacts → you → link a device.", l.token),
+                    },
+                    _ => Reply::Error { message: "preparing the code: run `joma link` again in a few seconds".into() },
+                }
+            }
+            Request::LinkDevice { token } => {
+                if self.gate != Gate::Ready {
+                    return Reply::Error { message: "Joma is not connected to Jami yet".into() };
+                }
+                match joma_jami::add_device(&self.model.account, &token) {
+                    Ok(op) => {
+                        self.device_op = Some(DeviceOp { op, auto: true, state: 0, peer: String::new() });
+                        cx.notify();
+                        Reply::Done
+                    }
+                    Err(e) => Reply::Error { message: format!("could not link: {e}") },
+                }
+            }
             Request::Quit => {
                 self.leave();
                 cx.defer(|cx| cx.quit());

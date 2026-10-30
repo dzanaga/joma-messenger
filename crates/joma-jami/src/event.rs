@@ -48,6 +48,13 @@ pub enum Event {
     /// A file transfer moved on (`code` is libjami's `DataTransferEventCode`).
     Transfer { account: String, conversation: String, interaction: String, file: String, code: i64 },
     ConversationError { account: String, conversation: String, code: i64, what: String },
+    /// The account's devices changed: device id to name.
+    KnownDevices { account: String, devices: Details },
+    /// Linking this device to an account moved on (`state`: [`crate::AUTH_TOKEN`]…).
+    DeviceAuth { account: String, state: i64, detail: Details },
+    /// Sending the account to a new device moved on.
+    AddDevice { account: String, op: u32, state: i64, detail: Details },
+    DeviceRevoked { account: String, device: String, status: i64 },
     Other { signal: String, args: Vec<Value> },
 }
 
@@ -74,6 +81,12 @@ impl Event {
         let a = v.get("a").and_then(Value::as_array).unwrap_or(&empty);
         match signal {
             "AccountsChanged" => Event::AccountsChanged,
+            "KnownDevicesChanged" => Event::KnownDevices { account: s(a, 0), devices: de(a, 1) },
+            "DeviceAuthStateChanged" => Event::DeviceAuth { account: s(a, 0), state: n(a, 1), detail: de(a, 2) },
+            "AddDeviceStateChanged" => {
+                Event::AddDevice { account: s(a, 0), op: n(a, 1) as u32, state: n(a, 2), detail: de(a, 3) }
+            }
+            "DeviceRevocationEnded" => Event::DeviceRevoked { account: s(a, 0), device: s(a, 1), status: n(a, 2) },
             "RegistrationStateChanged" => Event::Registration { account: s(a, 0), state: s(a, 1) },
             "AccountDetailsChanged" | "VolatileDetailsChanged" => Event::AccountDetails { account: s(a, 0) },
             "ContactAdded" => Event::ContactAdded { account: s(a, 0), uri: s(a, 1), confirmed: b(a, 2) },
@@ -171,6 +184,20 @@ impl Event {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn parses_device_linking() {
+        let v = json!({"s": "DeviceAuthStateChanged", "a": ["acc", 1, {"token": "jami-auth://x/1"}]});
+        let Event::DeviceAuth { state, detail, .. } = Event::parse(&v) else { panic!() };
+        assert_eq!(state, crate::AUTH_TOKEN);
+        assert_eq!(detail["token"], "jami-auth://x/1");
+        let v = json!({"s": "AddDeviceStateChanged", "a": ["acc", 7, 3, {"peer_address": "1.2.3.4:5"}]});
+        let Event::AddDevice { op, state, detail, .. } = Event::parse(&v) else { panic!() };
+        assert_eq!((op, state, detail["peer_address"].as_str()), (7, crate::AUTH_AUTHENTICATING, "1.2.3.4:5"));
+        let v = json!({"s": "KnownDevicesChanged", "a": ["acc", {"d1": "zoma"}]});
+        let Event::KnownDevices { devices, .. } = Event::parse(&v) else { panic!() };
+        assert_eq!(devices["d1"], "zoma");
+    }
 
     #[test]
     fn parses_swarm_message() {

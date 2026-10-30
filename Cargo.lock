@@ -3025,7 +3025,7 @@ dependencies = [
 
 [[package]]
 name = "joma"
-version = "0.4.0-rc.3"
+version = "0.4.0-rc.4"
 dependencies = [
  "anyhow",
  "futures",
@@ -3037,6 +3037,7 @@ dependencies = [
  "joma-theme",
  "ksni",
  "libc",
+ "qrcode",
  "serde",
  "serde_json",
  "smallvec",
@@ -3048,7 +3049,7 @@ dependencies = [
 
 [[package]]
 name = "joma-desk"
-version = "0.4.0-rc.3"
+version = "0.4.0-rc.4"
 dependencies = [
  "anyhow",
  "ashpd 0.11.1",
@@ -3070,7 +3071,7 @@ dependencies = [
 
 [[package]]
 name = "joma-jami"
-version = "0.4.0-rc.3"
+version = "0.4.0-rc.4"
 dependencies = [
  "anyhow",
  "cc",
@@ -3081,7 +3082,7 @@ dependencies = [
 
 [[package]]
 name = "joma-quick"
-version = "0.4.0-rc.3"
+version = "0.4.0-rc.4"
 dependencies = [
  "anyhow",
  "serde",
@@ -3091,7 +3092,7 @@ dependencies = [
 
 [[package]]
 name = "joma-theme"
-version = "0.4.0-rc.3"
+version = "0.4.0-rc.4"
 
 [[package]]
 name = "js-sys"
@@ -4322,6 +4323,12 @@ checksum = "7f6d64c71eb498fe9eae14ce4ec935c555749aef511cca85b5568910d6e48001"
 dependencies = [
  "bytemuck",
 ]
+
+[[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
 
 [[package]]
 name = "quick-error"

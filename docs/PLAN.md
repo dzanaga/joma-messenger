@@ -29,7 +29,7 @@ Design notes live in `docs/design/`. Decisions are in `docs/DECISIONS.md`.
 | **J5** | Remote control (gliff input), clipboard, multi-output picker, file transfer UI, group calls | files: send and receive done (verified between test profiles); the rest planned, remote control and clipboard next |
 | **J6** | Living in the bar: a tray icon (StatusNotifierItem) with a status dot instead of a shell plugin; the compact panel under the bar (a floating window), pop-out to the full window and back; Super+Alt+M; start at login (systemd user unit) and in the tray; the setup banner | built (0.4.0-rc.1): `docs/design/05-tray-and-panel.md`; tray, panel, hidden start verified in the nest |
 | **J7** | Settings and management: settings view (`config.toml`), contacts page (nicknames, block, requests), clear / delete chats, profile, devices (link, revoke), backup | contacts tab, block, stars, drag order and deleting chats without the contact built in 0.4.0-rc.3; the rest proposed |
-| **D1** | Your devices: the delivery test with two linked devices; the "you" group and devices page; link (jami-auth token, QR), rename, revoke | in progress (D-18) |
+| **D1** | Your devices: the delivery test with two linked devices; the "you" group and devices page; link (jami-auth token, QR), rename, revoke | built in 0.4.0-rc.4; delivery through a second device tested (D-18) |
 | **D2** | Sending to your devices: files, images, clipboard; to all (Notes to self) or one (a Joma message naming it) | planned |
 | **D3** | What contacts see per device: the sum by default, per-device for chosen contacts, invisible devices | planned |
 | **D4** | Screen between your devices, then remote control (portal RemoteDesktop) | planned |

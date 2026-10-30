@@ -37,6 +37,23 @@ without a chat:
 
 Saved in `~/.config/joma/quick.toml` (`starred`, `contact_order`).
 
+## Your devices
+One Jami account can live on several devices (Joma or the Jami app); each has every
+conversation. A message you send reaches your other devices first, and a contact who
+was offline gets it from whichever of your devices is online, even if the one you wrote
+on is off (tested: sender off, the second device delivered within seconds).
+- **Contacts → you:** your devices, "this device" first. A dot shows which ones run Joma
+  now (active or away; they tell each other, also when you are invisible to contacts).
+  The pencil renames this device; ⊘ revokes another (click twice): it loses the account.
+- **Link a device:**
+  1. on the new machine, Joma's welcome screen: **link to your account** shows a code and
+     its QR (or `joma link` prints it);
+  2. on a device that has the account: **Contacts → you → link a device** and paste the
+     code (or `joma link-device <code>`; the Jami app scans the QR);
+  3. Joma asks whether to send the account to the device at that address; the command
+     line sends it without asking. An account with a password asks for it on the new
+     device.
+
 ## Removing chats
 The bin in a conversation's header takes it off the lists (window, bar, notifications);
 it stays in Jami, and its messages keep arriving quietly. The bin next to + in the chats
@@ -108,7 +125,7 @@ Ctrl+. and Alt+1…9 in the window or the panel; `joma send` and `joma send-quic
 
 ## Command line
 `joma chat <to> [n]` (JSON), `joma call <to> [--video]`, `joma share <to>`, `joma watch <to>`,
-`joma send-file <to> [path]`, `joma open <to>`, `joma block <to>`, `joma unblock <to>`, `joma quit`, `joma probe [--bench]` (the
+`joma send-file <to> [path]`, `joma open <to>`, `joma block <to>`, `joma unblock <to>`, `joma link`, `joma link-device <code>`, `joma quit`, `joma probe [--bench]` (the
 GPUs the desktop share can use).
 
 ## Install
@@ -116,6 +133,10 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
+- 0.4.0-rc.4 (2026-10-30): your devices (Contacts → you): link a new device with a code
+  or QR (`joma link`, `joma link-device`), rename, revoke; your devices see each other's
+  presence. Joma runs in `~/.cache/joma` (Jami leaves link files in the working
+  directory); `joma send-file` takes relative paths.
 - 0.4.0-rc.3 (2026-10-29): the contacts tab (quick buttons, star, drag to reorder,
   block and unblock, remove); starred chats stay on top in the order you drag them to;
   deleting a chat's history no longer deletes the contact; `joma block`, `joma unblock`.

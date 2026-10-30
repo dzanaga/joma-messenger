@@ -186,6 +186,68 @@ pub fn create_account(display_name: &str) -> Result<String> {
     typed("addAccount", json!([details]))
 }
 
+/// Join an existing account from another device: the account starts empty and the
+/// daemon announces a `jami-auth://` token ([`Event::DeviceAuth`], state
+/// [`AUTH_TOKEN`]); the other device enters it with [`add_device`].
+pub fn link_account() -> Result<String> {
+    let mut details: Details = typed("getAccountTemplate", json!(["RING"]))?;
+    details.insert("Account.type".into(), "RING".into());
+    details.insert("Account.archiveURL".into(), "jami-auth".into());
+    typed("addAccount", json!([details]))
+}
+
+/// Remove an account from this machine (a link that failed).
+pub fn remove_account(account: &str) -> Result<()> {
+    call("removeAccount", json!([account])).map(drop)
+}
+
+// ---- Devices -----------------------------------------------------------------
+// The device-linking states of `DeviceAuthStateChanged` and `AddDeviceStateChanged`.
+pub const AUTH_TOKEN: i64 = 1;
+pub const AUTH_CONNECTING: i64 = 2;
+pub const AUTH_AUTHENTICATING: i64 = 3;
+pub const AUTH_IN_PROGRESS: i64 = 4;
+pub const AUTH_DONE: i64 = 5;
+
+/// The account's devices: device id to name.
+pub fn known_devices(account: &str) -> Result<Details> {
+    typed("getKnownRingDevices", json!([account]))
+}
+
+/// Start sending the account to a new device that shows `token`. Returns the operation
+/// id that [`Event::AddDevice`] reports on.
+pub fn add_device(account: &str, token: &str) -> Result<u32> {
+    let id: i64 = typed("addDevice", json!([account, token.trim()]))?;
+    u32::try_from(id).map_err(|_| anyhow::anyhow!("the token was not accepted ({id})"))
+}
+
+/// The new device connected (state [`AUTH_AUTHENTICATING`]): go on and send it.
+pub fn confirm_add_device(account: &str, op: u32) -> Result<bool> {
+    typed("confirmAddDevice", json!([account, op]))
+}
+
+pub fn cancel_add_device(account: &str, op: u32) -> Result<bool> {
+    typed("cancelAddDevice", json!([account, op]))
+}
+
+/// On the new device, once the old one confirmed: the account password, or empty for
+/// an account without one (`scheme` as the daemon asked: "" or "password").
+pub fn provide_authentication(account: &str, password: &str, scheme: &str) -> Result<bool> {
+    typed("provideAccountAuthentication", json!([account, password, scheme]))
+}
+
+/// Revoke a device of the account (an account without password: empty scheme and password).
+pub fn revoke_device(account: &str, device: &str) -> Result<bool> {
+    typed("revokeDevice", json!([account, device, "", ""]))
+}
+
+/// Rename this device.
+pub fn set_device_name(account: &str, name: &str) -> Result<()> {
+    let mut d = Details::new();
+    d.insert("Account.deviceName".into(), name.into());
+    call("setAccountDetails", json!([account, d])).map(drop)
+}
+
 /// Set the profile peers receive (the vCard's name; no avatar change). The daemon sends
 /// it to contacts.
 pub fn update_profile(account: &str, display_name: &str) -> Result<()> {

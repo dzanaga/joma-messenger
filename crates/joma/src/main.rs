@@ -37,6 +37,9 @@ const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); -
        joma send-file <to> [path]
                                  send a file (without a path, Joma asks for one)
        joma open <to>            show a conversation in Joma
+       joma link                 on a new Joma: join your account from another device;
+                                 prints the code to give that device
+       joma link-device <code>   send your account to the new device showing <code>
        joma block <to>           block a contact: no messages, calls or requests from them
        joma unblock <to>         unblock a contact
        joma quit                 quit Joma (closing the window keeps it running)
@@ -66,9 +69,15 @@ fn cli(args: &[String]) -> Option<i32> {
         Some("chat") if args.len() >= 2 => Request::Chat { to: args[1].clone(), limit: args.get(2).and_then(|n| n.parse().ok()).unwrap_or(20) },
         Some("call") if args.len() >= 2 => Request::Call { to: args[1].clone(), video: args[2..].iter().any(|a| a == "--video") },
         Some("share") if args.len() == 2 => Request::ShareScreen { to: args[1].clone() },
-        Some("send-file") if args.len() >= 2 => Request::SendFile { to: args[1].clone(), path: args.get(2).cloned() },
+        Some("send-file") if args.len() >= 2 => Request::SendFile {
+            to: args[1].clone(),
+            // The running Joma has its own working directory.
+            path: args.get(2).map(|p| std::fs::canonicalize(p).map_or_else(|_| p.clone(), |c| c.to_string_lossy().into_owned())),
+        },
         Some("watch") if args.len() == 2 => Request::Watch { to: args[1].clone() },
         Some("open") if args.len() == 2 => Request::Open { to: args[1].clone() },
+        Some("link") if args.len() == 1 => Request::Link,
+        Some("link-device") if args.len() == 2 => Request::LinkDevice { token: args[1].clone() },
         Some(b @ ("block" | "unblock")) if args.len() == 2 => Request::Block { to: args[1].clone(), block: b == "block" },
         Some("send") if args.len() >= 3 => Request::Send { to: args[1].clone(), text: args[2..].join(" ") },
         Some("send-quick") if args.len() == 3 => match args[2].parse::<usize>() {
@@ -91,6 +100,10 @@ fn cli(args: &[String]) -> Option<i32> {
         }
         Ok(Reply::Chat(chat)) => {
             println!("{}", serde_json::to_string(&chat).unwrap_or_default());
+            Some(0)
+        }
+        Ok(Reply::Text { text }) => {
+            println!("{text}");
             Some(0)
         }
         Ok(Reply::Error { message }) => {
@@ -189,6 +202,17 @@ fn main() {
             setup::exe().display()
         );
         std::process::exit(1);
+    }
+    // Jami writes some files of a device link into the current directory: keep them in
+    // Joma's cache instead of wherever Joma was started.
+    if let Some(cache) = std::env::var_os("XDG_CACHE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))
+    {
+        let dir = cache.join("joma");
+        if std::fs::create_dir_all(&dir).is_ok() {
+            let _ = std::env::set_current_dir(dir);
+        }
     }
     setup::refresh();
     let hidden = hidden && hypr::start_hidden();
