@@ -7,6 +7,14 @@ you by it. Without one, "choose a username" in the top bar registers it later. J
 writes the profile contacts receive (accounts made by Joma 0.2 and earlier had none, so
 contacts saw a 40-digit ID; it is added the next time the account comes online).
 
+One machine can hold several accounts, each its own identity with its own contacts and
+history. Contacts → you shows the open one; "other account" creates or links another
+(back returns), and "other accounts" lists the rest: a click opens one (`joma accounts`,
+`joma account <name>`). Joma reopens the last one at start. The others stay connected,
+but only the open one is shown and notifies. The bin next to your name removes the
+account from this machine: two clicks when your other devices keep it, else typing
+`delete`, since an account no other device has is lost for good.
+
 ## Presence
 Jami only knows whether a contact has a device on the network (phones with push and a
 Jami app in the background always do), so Joma users tell each other more:
@@ -125,7 +133,7 @@ Ctrl+. and Alt+1…9 in the window or the panel; `joma send` and `joma send-quic
 
 ## Command line
 `joma chat <to> [n]` (JSON), `joma call <to> [--video]`, `joma share <to>`, `joma watch <to>`,
-`joma send-file <to> [path]`, `joma open <to>`, `joma block <to>`, `joma unblock <to>`, `joma link`, `joma link-device <code>`, `joma quit`, `joma probe [--bench]` (the
+`joma send-file <to> [path]`, `joma open <to>`, `joma block <to>`, `joma unblock <to>`, `joma link`, `joma link-device <code>`, `joma accounts`, `joma account <name>`, `joma quit`, `joma probe [--bench]` (the
 GPUs the desktop share can use).
 
 ## Install
@@ -133,6 +141,8 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
+- 0.4.0-rc.5 (2026-10-30): several accounts on one machine: switch (Contacts → other
+  accounts, `joma account <name>`), create or link another, remove one.
 - 0.4.0-rc.4 (2026-10-30): your devices (Contacts → you): link a new device with a code
   or QR (`joma link`, `joma link-device`), rename, revoke; your devices see each other's
   presence. Joma runs in `~/.cache/joma` (Jami leaves link files in the working

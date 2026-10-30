@@ -42,6 +42,10 @@ pub enum Request {
     Link,
     /// Send this account to the new device showing `token` (confirmed without asking).
     LinkDevice { token: String },
+    /// This machine's accounts, the open one marked.
+    Accounts,
+    /// Open another account (by name, username or id).
+    UseAccount { to: String },
     /// Quit Joma (closing its window only hides it).
     Quit,
 }

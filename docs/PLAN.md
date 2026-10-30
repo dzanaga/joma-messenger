@@ -34,5 +34,5 @@ Design notes live in `docs/design/`. Decisions are in `docs/DECISIONS.md`.
 | **D3** | What contacts see per device: the sum by default, per-device for chosen contacts, invisible devices | planned |
 | **D4** | Screen between your devices, then remote control (portal RemoteDesktop) | planned |
 | **D5** | Agents through ACP: an agent account per machine, marked as yours | planned |
-| **J8** | Multiple accounts: switcher, all connected, add / import / link / remove, combined bar status | proposed (same discussion) |
+| **J8** | Multiple accounts: switcher, all connected, add / import / link / remove, combined bar status | switch, add, link, remove built in 0.4.0-rc.5; notifications from all accounts, import, combined status proposed |
 | **J9** | Packaging: public repository, pre-releases installable with mise (`github:dzanaga/joma-messenger`); later GitHub Actions builds, AUR `joma-messenger-bin` (updates with `omarchy update`), the Omarchy repository | mise pre-releases from 0.4.0-rc.1; the rest proposed |

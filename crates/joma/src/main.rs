@@ -40,7 +40,9 @@ const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); -
        joma link                 on a new Joma: join your account from another device;
                                  prints the code to give that device
        joma link-device <code>   send your account to the new device showing <code>
-       joma block <to>           block a contact: no messages, calls or requests from them
+       joma accounts             this machine's accounts (* the open one)
+       joma account <name>       open another account (a name, username or ID)
+       joma block <to>         block a contact: no messages, calls or requests from them
        joma unblock <to>         unblock a contact
        joma quit                 quit Joma (closing the window keeps it running)
        joma probe [--bench [--display-gpu]]
@@ -77,6 +79,8 @@ fn cli(args: &[String]) -> Option<i32> {
         Some("watch") if args.len() == 2 => Request::Watch { to: args[1].clone() },
         Some("open") if args.len() == 2 => Request::Open { to: args[1].clone() },
         Some("link") if args.len() == 1 => Request::Link,
+        Some("accounts") if args.len() == 1 => Request::Accounts,
+        Some("account") if args.len() == 2 => Request::UseAccount { to: args[1].clone() },
         Some("link-device") if args.len() == 2 => Request::LinkDevice { token: args[1].clone() },
         Some(b @ ("block" | "unblock")) if args.len() == 2 => Request::Block { to: args[1].clone(), block: b == "block" },
         Some("send") if args.len() >= 3 => Request::Send { to: args[1].clone(), text: args[2..].join(" ") },

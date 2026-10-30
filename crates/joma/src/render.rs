@@ -44,6 +44,8 @@ pub const G_LAPTOP: &str = "\u{f109}";
 pub const G_LINK: &str = "\u{f0c1}";
 pub const G_PENCIL: &str = "\u{f040}";
 pub const G_COPY: &str = "\u{f0c5}";
+pub const G_USER_PLUS: &str = "\u{f234}";
+pub const G_EXCHANGE: &str = "\u{f0ec}";
 
 /// Local "HH:MM" and a day key for separators.
 pub fn local_time(ts: i64) -> (String, i64, String) {
@@ -518,6 +520,7 @@ impl Joma {
                             Mode::Username => "choose your username (contacts find you by it)",
                             Mode::LinkDevice => "link a device: on the new one choose \"link to an account\"",
                             Mode::DeviceName => "rename this device",
+                            Mode::RemoveAccount => "remove this account: only this device has it, so it is lost for good",
                             _ => "filter",
                         }))
                         .child(self.input.clone()),
@@ -571,7 +574,25 @@ impl Joma {
 
     /// "You": this device and the account's others, and linking a new one.
     fn devices_group(&self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
-        let mut group = div().flex().flex_col();
+        let armed = self.is_armed("remove-account");
+        let who = if self.model.username.is_empty() { self.model.me.chars().take(8).collect::<String>() + "…" } else { self.model.username.clone() };
+        let mut group = div().flex().flex_col().child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .px(px(10.))
+                .py(px(4.))
+                .child(div().flex_none().text_color(t.bright).font_weight(FontWeight::BOLD).child(self.model.my_name.clone()))
+                .child(div().flex_1().min_w(px(0.)).truncate().text_color(t.muted).text_size(px(t.size - 2.)).child(who))
+                .child(
+                    button("account-remove", G_TRASH, if armed || self.mode == Mode::RemoveAccount { "remove?" } else { "" }, t, armed)
+                        .px(px(6.))
+                        .py(px(1.))
+                        .text_color(if armed || self.mode == Mode::RemoveAccount { t.red } else { t.muted })
+                        .on_click(cx.listener(|this, _, window, cx| this.remove_account(window, cx))),
+                ),
+        );
         let mut ids: Vec<(String, String)> = self.model.devices.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         ids.sort_by_key(|(id, _)| *id != self.model.device);
         for (id, name) in ids {
@@ -639,11 +660,41 @@ impl Joma {
                 .py(px(4.))
                 .child(div().text_color(t.muted).child(if d.state == joma_jami::AUTH_IN_PROGRESS { "sending the account…" } else { "connecting to the new device…" }))
                 .child(button("dev-stop", G_TIMES, "", t, false).on_click(cx.listener(|this, _, _, cx| this.answer_device(false, cx)))),
-            None => div().px(px(10.)).py(px(4.)).child(
-                button("dev-link", G_LINK, "link a device", t, self.mode == Mode::LinkDevice)
-                    .on_click(cx.listener(|this, _, window, cx| this.set_mode(Mode::LinkDevice, window, cx))),
-            ),
+            None => div()
+                .flex()
+                .flex_wrap()
+                .gap(px(6.))
+                .px(px(10.))
+                .py(px(4.))
+                .child(
+                    button("dev-link", G_LINK, "link a device", t, self.mode == Mode::LinkDevice)
+                        .on_click(cx.listener(|this, _, window, cx| this.set_mode(Mode::LinkDevice, window, cx))),
+                )
+                .child(button("account-new", G_USER_PLUS, "other account", t, false).on_click(cx.listener(|this, _, window, cx| this.new_account(window, cx)))),
         })
+    }
+
+    /// The machine's other accounts: a click opens one.
+    fn accounts_group(&self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
+        let mut group = div().flex().flex_col();
+        for (id, name) in self.accounts.iter().filter(|(id, _)| *id != self.model.account) {
+            let i = id.clone();
+            group = group.child(
+                div()
+                    .id(SharedString::from(format!("account-{id}")))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .px(px(10.))
+                    .py(px(4.))
+                    .cursor_pointer()
+                    .hover(|d| d.bg(t.border.opacity(0.4)))
+                    .child(div().flex_none().text_color(t.muted).child(G_EXCHANGE))
+                    .child(div().flex_1().min_w(px(0.)).truncate().child(name.clone()))
+                    .on_click(cx.listener(move |this, _, window, cx| this.switch_account(&i, window, cx))),
+            );
+        }
+        group
     }
 
     /// The Contacts tab: requests waiting for you, contacts (starred first, draggable) with
@@ -653,6 +704,9 @@ impl Joma {
         let small = |label: &str| div().px(px(10.)).pt(px(8.)).pb(px(2.)).text_size(px(t.size - 2.5)).text_color(t.muted).child(label.to_uppercase());
         if self.mode != Mode::Search {
             list = list.child(small("you")).child(self.devices_group(t, cx));
+            if self.accounts.len() > 1 {
+                list = list.child(small("other accounts")).child(self.accounts_group(t, cx));
+            }
         }
         let requests: Vec<Conversation> = self.model.ordered().into_iter().filter(|c| c.request).cloned().collect();
         if !requests.is_empty() {
@@ -1240,6 +1294,7 @@ impl Joma {
                 Mode::Username => "enter: register · esc: cancel",
                 Mode::LinkDevice => "enter: link · esc: cancel",
                 Mode::DeviceName => "enter: rename · esc: cancel",
+                Mode::RemoveAccount => "delete + enter: remove the account for good · esc: keep it",
                 Mode::Removed => "removed contacts · esc: back",
                 Mode::Chat if self.narrow && self.narrow_chat => "esc: back · ctrl+.: quick",
                 Mode::Chat if self.narrow => "ctrl+n: add · ctrl+k: find · ctrl+shift+k: contacts",
@@ -1270,9 +1325,27 @@ impl Joma {
                 .child(div().child("Joma uses the same accounts and history as the Jami app, and only one of them can run at a time. Jami keeps running in the tray after its window is closed: quit it from its tray icon (or run `pkill -x jami`). Joma comes back by itself once it quits."))
                 .child(button("retry", G_CHECK, "retry", t, true).on_click(cx.listener(|this, _, _, cx| this.boot(cx)))),
             Gate::Onboarding if self.linking.is_some() => self.link_card(card, t, cx),
+            Gate::Onboarding if self.adding_account.is_some() => card
+                .child(div().text_color(t.accent).font_weight(FontWeight::BOLD).child("Another account"))
+                .child(div().child("A second Jami identity on this machine, with its own contacts and history. Switch between them in Contacts."))
+                .child(self.onboarding_body(t, cx))
+                .child(div().flex().child(button("account-back", G_BACK, "back", t, false).on_click(cx.listener(|this, _, window, cx| this.cancel_new_account(window, cx))))),
             Gate::Onboarding => card
                 .child(div().text_color(t.accent).font_weight(FontWeight::BOLD).child("Welcome to Joma"))
                 .child(div().child("Joma is a Jami client for Omarchy. Create a Jami account to start: it lives on this machine, no server and no phone number."))
+                .child(self.onboarding_body(t, cx)),
+            Gate::Failed(e) => card.child(div().text_color(t.red).child(format!("The Jami daemon failed to start: {e}"))),
+            Gate::Ready => card,
+        };
+        div().flex().flex_1().items_center().justify_center().child(card).into_any_element()
+    }
+
+    /// The name and username steps, and joining from another device.
+    fn onboarding_body(&self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(12.))
                 .child(self.input.clone())
                 .child(div().text_color(t.muted).text_size(px(t.size - 2.)).child(if self.onboard_name.is_none() {
                     "Enter: next, a username".to_owned()
@@ -1289,11 +1362,7 @@ impl Joma {
                         .border_color(t.border)
                         .child(div().flex_1().text_color(t.muted).child("Already on Jami on another device?"))
                         .child(button("link-start", G_LINK, "link to your account", t, false).on_click(cx.listener(|this, _, _, cx| this.start_link(cx)))),
-                ),
-            Gate::Failed(e) => card.child(div().text_color(t.red).child(format!("The Jami daemon failed to start: {e}"))),
-            Gate::Ready => card,
-        };
-        div().flex().flex_1().items_center().justify_center().child(card).into_any_element()
+                )
     }
 }
 

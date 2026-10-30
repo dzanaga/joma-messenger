@@ -38,6 +38,8 @@ pub struct QuickConfig {
     pub invisible: bool,
     /// The setup banner was closed.
     pub setup_dismissed: bool,
+    /// The account Joma opens (Jami's account id); empty or gone: the first one.
+    pub account: String,
 }
 
 impl Default for QuickConfig {
@@ -60,6 +62,7 @@ impl Default for QuickConfig {
             removed: Vec::new(),
             invisible: false,
             setup_dismissed: false,
+            account: String::new(),
         }
     }
 }

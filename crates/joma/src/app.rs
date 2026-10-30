@@ -94,6 +94,8 @@ pub enum Mode {
     LinkDevice,
     /// The input renames this device.
     DeviceName,
+    /// The input asks for "delete" before removing an account no other device has.
+    RemoveAccount,
 }
 
 /// This machine joining an account that lives on another device.
@@ -235,6 +237,11 @@ pub struct Joma {
     pub my_devices: HashMap<String, crate::presence::Peer>,
     /// When we last told our other devices, and what.
     self_told: Option<(State, Instant)>,
+    /// This machine's accounts: id and the name to show.
+    pub accounts: Vec<(String, String)>,
+    /// Creating or linking another account: the one to go back to, and the accounts
+    /// there were (the new one is the one not among them).
+    pub adding_account: Option<(String, Vec<String>)>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -446,6 +453,8 @@ impl Joma {
             device_op: None,
             my_devices: HashMap::new(),
             self_told: None,
+            accounts: Vec::new(),
+            adding_account: None,
         };
         j.configure_inputs(cx);
         j.boot(cx);
@@ -510,7 +519,7 @@ impl Joma {
             }
         }
         let accounts = joma_jami::accounts().unwrap_or_default();
-        match accounts.first() {
+        match accounts.iter().find(|a| **a == self.quick.account).or(accounts.first()) {
             Some(a) => self.open_account(a.clone(), cx),
             None => {
                 self.gate = Gate::Onboarding;
@@ -522,6 +531,11 @@ impl Joma {
 
     fn open_account(&mut self, account: String, cx: &mut Context<Self>) {
         self.gate = Gate::Ready;
+        self.adding_account = None;
+        if self.quick.account != account {
+            self.quick.account = account.clone();
+            self.save_quick(cx);
+        }
         let details = joma_jami::account_details(&account).unwrap_or_default();
         let volatile = joma_jami::volatile_details(&account).unwrap_or_default();
         self.model = Model {
@@ -554,6 +568,7 @@ impl Joma {
         if let Some(id) = self.selected.clone() {
             self.select(id, cx);
         }
+        self.load_accounts();
         self.configure_inputs(cx);
     }
 
@@ -664,6 +679,7 @@ impl Joma {
             (_, Mode::Search) => ("search", "Filter conversations"),
             (_, Mode::LinkDevice) => ("link", "The jami-auth:// code the new device shows, then Enter"),
             (_, Mode::DeviceName) => ("device-name", "A name for this device, then Enter"),
+            (_, Mode::RemoveAccount) => ("remove-account", "Type delete, then Enter"),
             _ => ("idle", ""),
         };
         self.input.update(cx, |c, _| {
@@ -820,12 +836,16 @@ impl Joma {
         }
         if self.gate == Gate::Onboarding {
             if let Event::AccountsChanged = ev {
-                if let Some(a) = joma_jami::accounts().unwrap_or_default().first() {
-                    self.open_account(a.clone(), cx);
+                let had = self.adding_account.as_ref().map(|(_, had)| had.clone()).unwrap_or_default();
+                if let Some(a) = joma_jami::accounts().unwrap_or_default().into_iter().find(|a| !had.contains(a)) {
+                    self.open_account(a, cx);
                 }
             }
             cx.notify();
             return;
+        }
+        if let Event::AccountsChanged = ev {
+            self.load_accounts();
         }
         let acc = self.model.account.clone();
         match &ev {
@@ -1779,6 +1799,129 @@ impl Joma {
         }
     }
 
+    // ---- Accounts ----------------------------------------------------------------
+
+    /// This machine's accounts with the name each shows.
+    pub fn load_accounts(&mut self) {
+        self.accounts = joma_jami::accounts()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|id| {
+                let details = joma_jami::account_details(&id).unwrap_or_default();
+                let volatile = joma_jami::volatile_details(&id).unwrap_or_default();
+                let name = [details.get("Account.displayName"), volatile.get("Account.registeredName"), details.get("Account.username")]
+                    .into_iter()
+                    .flatten()
+                    .find(|n| !n.is_empty())
+                    .map(|n| bare_uri(n).to_owned())
+                    .unwrap_or_else(|| id.clone());
+                (id, name)
+            })
+            .collect();
+    }
+
+    /// Leave the open account for another: what was on screen goes, the daemon keeps
+    /// both connected.
+    fn close_account(&mut self) -> bool {
+        if !self.model.calls.is_empty() {
+            return false;
+        }
+        self.leave();
+        self.my_devices.clear();
+        self.device_op = None;
+        self.self_told = None;
+        self.frames.clear();
+        self.desk_frame = None;
+        self.pointer = None;
+        self.selected = None;
+        self.confirm_delete = None;
+        true
+    }
+
+    pub fn switch_account(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if id == self.model.account {
+            return;
+        }
+        if !self.close_account() {
+            self.show_flash("hang up first", cx);
+            return;
+        }
+        self.set_mode(Mode::Chat, window, cx);
+        self.open_account(id.to_owned(), cx);
+        let name = self.accounts.iter().find(|(a, _)| a == id).map(|(_, n)| n.clone()).unwrap_or_default();
+        self.show_flash(format!("now on {name}"), cx);
+    }
+
+    /// The welcome screen, to create or link another account; Back returns here.
+    pub fn new_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.close_account() {
+            self.show_flash("hang up first", cx);
+            return;
+        }
+        self.set_mode(Mode::Chat, window, cx);
+        let had = joma_jami::accounts().unwrap_or_default();
+        self.adding_account = Some((self.model.account.clone(), had));
+        self.model = Model::default();
+        self.onboard_name = None;
+        self.gate = Gate::Onboarding;
+        self.input.update(cx, |c, cx| c.clear(cx));
+        self.configure_inputs(cx);
+        window.focus(&self.input.focus_handle(cx));
+        cx.notify();
+    }
+
+    /// Back from the welcome screen to the account that was open.
+    pub fn cancel_new_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((back, _)) = self.adding_account.take() else { return };
+        self.cancel_link(cx);
+        self.onboard_name = None;
+        self.open_account(back, cx);
+        window.focus(&self.composer.focus_handle(cx));
+    }
+
+    /// Remove the open account from this machine. Kept by other devices: two clicks.
+    /// Only here: it is gone for good, so the input asks for "delete".
+    pub fn remove_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.model.devices.len() > 1 {
+            if self.armed("remove-account", "click again to remove this account from this machine (your other devices keep it)", cx) {
+                self.remove_account_now(window, cx);
+            }
+            return;
+        }
+        self.set_mode(Mode::RemoveAccount, window, cx);
+        self.show_flash("this account is only on this device: removing it loses it for good", cx);
+    }
+
+    fn remove_account_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let acc = self.model.account.clone();
+        if !self.close_account() {
+            self.show_flash("hang up first", cx);
+            return;
+        }
+        if let Err(e) = joma_jami::remove_account(&acc) {
+            self.show_flash(format!("could not remove the account: {e}"), cx);
+            return;
+        }
+        self.quick.account.clear();
+        self.save_quick(cx);
+        self.model = Model::default();
+        match joma_jami::accounts().unwrap_or_default().into_iter().find(|a| *a != acc) {
+            Some(a) => {
+                self.open_account(a, cx);
+                self.show_flash("account removed from this machine", cx);
+            }
+            None => {
+                self.accounts.clear();
+                self.onboard_name = None;
+                self.gate = Gate::Onboarding;
+                self.configure_inputs(cx);
+                window.focus(&self.input.focus_handle(cx));
+                self.show_flash("account removed: create or link one", cx);
+            }
+        }
+        cx.notify();
+    }
+
     /// Our other devices: how present they are on Joma.
     pub fn device_dot(&self, id: &str) -> Dot {
         if id == self.model.device {
@@ -1883,6 +2026,14 @@ impl Joma {
                     }
                     Err(e) => self.show_flash(format!("could not rename: {e}"), cx),
                 }
+            }
+            Mode::RemoveAccount => {
+                if text != "delete" {
+                    self.show_flash("type delete to remove the account, or Esc", cx);
+                    return;
+                }
+                self.set_mode(Mode::Chat, window, cx);
+                self.remove_account_now(window, cx);
             }
             Mode::Chat | Mode::Removed => {}
         }
@@ -2250,6 +2401,31 @@ impl Joma {
                         Reply::Done
                     }
                     Err(e) => Reply::Error { message: format!("could not link: {e}") },
+                }
+            }
+            Request::Accounts => {
+                self.load_accounts();
+                let text = self
+                    .accounts
+                    .iter()
+                    .map(|(id, name)| format!("{} {name}  {id}", if *id == self.model.account { "*" } else { " " }))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Reply::Text { text }
+            }
+            Request::UseAccount { to } => {
+                self.load_accounts();
+                let low = to.to_lowercase();
+                let found = self.accounts.iter().find(|(id, name)| *id == to || name.to_lowercase() == low).map(|(id, _)| id.clone());
+                match found {
+                    Some(_) if self.gate != Gate::Ready => Reply::Error { message: "Joma is not on an account now".into() },
+                    Some(id) if id == self.model.account => Reply::Done,
+                    Some(_) if !self.model.calls.is_empty() => Reply::Error { message: "hang up first".into() },
+                    Some(id) => {
+                        self.switch_account(&id, window, cx);
+                        Reply::Done
+                    }
+                    None => Reply::Error { message: format!("no account {to}: see joma accounts") },
                 }
             }
             Request::Quit => {
