@@ -168,9 +168,9 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
-- unreleased: paste or drop pictures and files (they wait above the composer); pictures
+- 0.4.1 (2026-10-31): paste or drop pictures and files (they wait above the composer); pictures
   show in the conversation; the conversation stays at its end while pictures load.
-- unreleased: share an area of a screen (area… draws it with slurp); the bar under the
+  Share an area of a screen (area… draws it with slurp); the bar under the
   stage resizes it against the chat; a stage that takes the window hides the contact
   list too.
 - 0.4.0-rc.6 (2026-10-30): desktop share: choose a screen or a single window (with
