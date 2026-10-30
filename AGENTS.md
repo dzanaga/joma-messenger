@@ -37,3 +37,4 @@
   there. If the volume is missing, the drive is unplugged: say so.
 - Commit after every change once tests pass (`cargo test --workspace`).
 - Docs and code in English.
+- **TODO.md** (local hotfix list, not committed): before starting any task, check it for unticked `- [ ]` items and ask the user whether to fix those first (if the user asked for the TODOs, start there directly). Only checkbox items are tasks; other lines are the user's notes, leave them alone. When an item is fixed and committed, tick it (`- [x]`) and append the commit hash. The user removes an item once verified.
