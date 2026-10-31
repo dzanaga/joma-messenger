@@ -51,6 +51,8 @@ pub enum Request {
     Accounts,
     /// Open another account (by name, username or id).
     UseAccount { to: String },
+    /// Set the profile picture from a file (cropped square), or remove it (`None`).
+    Avatar { path: Option<String> },
     /// Quit Joma (closing its window only hides it).
     Quit,
 }

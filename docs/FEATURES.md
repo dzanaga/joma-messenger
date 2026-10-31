@@ -15,6 +15,13 @@ but only the open one is shown and notifies. The bin next to your name removes t
 account from this machine: two clicks when your other devices keep it, else typing
 `delete`, since an account no other device has is lost for good.
 
+## Your picture
+Contacts → you → your picture (or the pencil): choose a picture (cropped square) or
+**draw pixels**: a 16×16 grid with pen, eraser, fill and mirror, colours from a grid of
+hues and greys (shift+click a colour: the background), a live preview; "use it" sets
+it. Contacts receive it with your profile and see it in their lists, headers and
+messages; `joma avatar <file>|--remove`. Pictures of contacts show wherever they appear.
+
 ## Presence
 Jami only knows whether a contact has a device on the network (phones with push and a
 Jami app in the background always do), so Joma users tell each other more:
@@ -168,6 +175,9 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
+- 0.4.2 (2026-10-31): profile pictures (choose a file, or draw one in pixels), shown
+  for everyone in lists, headers and messages; a cleaner look: centred icons, one
+  button height, list rows with avatar, time and unread badge, grouped header actions.
 - 0.4.1 (2026-10-31): paste or drop pictures and files (they wait above the composer); pictures
   show in the conversation; the conversation stays at its end while pictures load.
   Share an area of a screen (area… draws it with slurp); the bar under the

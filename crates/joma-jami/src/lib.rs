@@ -254,6 +254,15 @@ pub fn update_profile(account: &str, display_name: &str) -> Result<()> {
     call("updateProfile", json!([account, display_name, "", "", "", 0])).map(drop)
 }
 
+/// Set (a PNG file) or remove (`None`) the picture in the profile peers receive; the
+/// name is kept as `display_name`.
+pub fn set_avatar(account: &str, display_name: &str, png: Option<&str>) -> Result<()> {
+    match png {
+        Some(path) => call("updateProfile", json!([account, display_name, path, "PNG", "", 0])).map(drop),
+        None => call("updateProfile", json!([account, display_name, "", "", "", 2])).map(drop),
+    }
+}
+
 /// Register `name` on the name server for this account; the answer arrives as
 /// [`Event::NameRegistered`].
 ///

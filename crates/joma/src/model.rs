@@ -252,6 +252,8 @@ pub struct Model {
     pub device: String,
     /// Names and registered names of peers, by bare URI.
     pub names: HashMap<String, String>,
+    /// Profile pictures by bare URI (ours too), as cached files.
+    pub avatars: HashMap<String, std::path::PathBuf>,
     pub calls: HashMap<String, Call>,
     /// Pending `loadConversation` requests.
     pub loading: HashMap<u32, String>,
@@ -511,11 +513,18 @@ impl Model {
                 }
             }
             Event::ProfileReceived { account, from, vcard } if *account == self.account => {
-                if let Some(n) = vcard_name(&vcard_text(vcard)) {
+                let text = vcard_text(vcard);
+                if let Some(n) = vcard_name(&text) {
                     self.names.insert(bare_uri(from).to_owned(), n);
                     self.retitle();
                     ch.any = true;
                 }
+                // A profile without a picture takes the old one away.
+                match crate::avatar::from_vcard(bare_uri(from), &text) {
+                    Some(p) => self.avatars.insert(bare_uri(from).to_owned(), p),
+                    None => self.avatars.remove(bare_uri(from)),
+                };
+                ch.any = true;
             }
             Event::IncomingCall { account, call, from, media } if *account == self.account => {
                 let video = media.iter().any(|m| m.get("MEDIA_TYPE").map(String::as_str) == Some(joma_jami::VIDEO));

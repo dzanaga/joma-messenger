@@ -91,6 +91,25 @@ pub enum PickFor {
     Switch(String),
 }
 
+/// What a click on the pixel grid does.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PaintTool {
+    Pen,
+    Eraser,
+    Fill,
+}
+
+/// The profile editor: the picture, and the pixel-art drawing when one is open.
+pub struct ProfileEdit {
+    pub drawing: Option<crate::avatar::PixelArt>,
+    pub color: u32,
+    pub tool: PaintTool,
+    pub mirror: bool,
+    /// Where the grid was painted last, for the pointer's cell.
+    pub grid: Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels>>>,
+    pub painting: bool,
+}
+
 /// The source picker: the screens and windows to share, with thumbnails as they come.
 pub struct Picker {
     pub target: PickFor,
@@ -240,6 +259,8 @@ pub struct Joma {
     pub stage_view: Rc<RefCell<crate::stage::StageView>>,
     /// Choosing what to share.
     pub picker: Option<Picker>,
+    /// Editing our picture.
+    pub profile_edit: Option<ProfileEdit>,
     picker_gen: u64,
     /// The sharer's preview of each running Joma share, by session key.
     pub previews: HashMap<String, Frame>,
@@ -489,6 +510,7 @@ impl Joma {
             fullscreen_seen: false,
             stage_view: Rc::new(RefCell::new(crate::stage::StageView::default())),
             picker: None,
+            profile_edit: None,
             picker_gen: 0,
             previews: HashMap::new(),
             flash: None,
@@ -647,11 +669,14 @@ impl Joma {
         if let Some(d) = volatile.get("Account.deviceID").filter(|d| !d.is_empty()) {
             self.model.device = d.clone();
         }
+        let vcf = self.account_dir().map(|d| d.join("profile.vcf")).and_then(|p| std::fs::read_to_string(p).ok());
         if self.model.my_name.is_empty() {
-            let vcf = self.account_dir().map(|d| d.join("profile.vcf"));
-            if let Some(name) = vcf.and_then(|p| std::fs::read_to_string(p).ok()).and_then(|v| crate::model::vcard_name(&v)) {
+            if let Some(name) = vcf.as_deref().and_then(crate::model::vcard_name) {
                 self.model.my_name = name;
             }
+        }
+        if let Some(p) = vcf.as_deref().and_then(|v| crate::avatar::from_vcard(&self.model.me, v)) {
+            self.model.avatars.insert(self.model.me.clone(), p);
         }
         self.model.devices = joma_jami::known_devices(&acc).unwrap_or_default().into_iter().collect();
     }
@@ -681,9 +706,13 @@ impl Joma {
         for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
             let path = entry.path();
             let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
-            let Some(uri) = base64_decode(stem).and_then(|b| String::from_utf8(b).ok()) else { continue };
-            if let Some(name) = std::fs::read_to_string(&path).ok().and_then(|v| crate::model::vcard_name(&v)) {
+            let Some(uri) = crate::avatar::base64_decode(stem).and_then(|b| String::from_utf8(b).ok()) else { continue };
+            let Ok(v) = std::fs::read_to_string(&path) else { continue };
+            if let Some(name) = crate::model::vcard_name(&v) {
                 self.model.names.insert(bare_uri(&uri).to_owned(), name);
+            }
+            if let Some(p) = crate::avatar::from_vcard(bare_uri(&uri), &v) {
+                self.model.avatars.insert(bare_uri(&uri).to_owned(), p);
             }
         }
     }
@@ -1514,6 +1543,118 @@ impl Joma {
             .unwrap_or_default();
         let name = self.model.name_of(&peer);
         self.open_picker(PickFor::Switch(key.to_owned()), name, cx);
+    }
+
+    // ---- Our picture --------------------------------------------------------------
+
+    pub fn open_profile(&mut self, cx: &mut Context<Self>) {
+        self.profile_edit = Some(ProfileEdit {
+            drawing: None,
+            color: 0x7aa2f7,
+            tool: PaintTool::Pen,
+            mirror: false,
+            grid: Rc::new(std::cell::Cell::new(gpui::Bounds::default())),
+            painting: false,
+        });
+        cx.notify();
+    }
+
+    /// Start drawing: the last drawing of this account, else an empty grid.
+    pub fn start_drawing(&mut self, cx: &mut Context<Self>) {
+        let art = crate::avatar::PixelArt::load(&self.model.account).unwrap_or_default();
+        if let Some(p) = self.profile_edit.as_mut() {
+            p.drawing = Some(art);
+        }
+        cx.notify();
+    }
+
+    /// Paint the cell under `at` (window coordinates) with the current tool.
+    pub fn paint_at(&mut self, at: gpui::Point<gpui::Pixels>, cx: &mut Context<Self>) {
+        let Some(p) = self.profile_edit.as_mut() else { return };
+        let b = p.grid.get();
+        let cell = f32::from(b.size.width) / crate::avatar::GRID as f32;
+        if cell <= 0. {
+            return;
+        }
+        let x = (f32::from(at.x - b.origin.x) / cell).floor();
+        let y = (f32::from(at.y - b.origin.y) / cell).floor();
+        let n = crate::avatar::GRID as f32;
+        if x < 0. || y < 0. || x >= n || y >= n {
+            return;
+        }
+        let (x, y) = (x as usize, y as usize);
+        let (tool, color, mirror) = (p.tool, p.color, p.mirror);
+        let Some(art) = p.drawing.as_mut() else { return };
+        match tool {
+            PaintTool::Pen => art.set(x, y, Some(color), mirror),
+            PaintTool::Eraser => art.set(x, y, None, mirror),
+            PaintTool::Fill => art.fill(x, y, Some(color)),
+        }
+        cx.notify();
+    }
+
+    /// Make the drawing our picture.
+    pub fn save_drawing(&mut self, cx: &mut Context<Self>) {
+        let Some(art) = self.profile_edit.as_ref().and_then(|p| p.drawing.clone()) else { return };
+        art.save(&self.model.account);
+        self.set_avatar_png(&art.png(8), cx);
+        if let Some(p) = self.profile_edit.as_mut() {
+            p.drawing = None;
+        }
+    }
+
+    /// Choose a picture file (the desktop's file chooser), cropped square.
+    pub fn choose_picture(&mut self, cx: &mut Context<Self>) {
+        if own_profile() && std::env::var_os("JOMA_PORTAL").is_none() {
+            self.show_flash("file chooser skipped in a test profile (joma avatar <file> sets one)", cx);
+            return;
+        }
+        let paths = cx.prompt_for_paths(gpui::PathPromptOptions { files: true, directories: false, multiple: false, prompt: Some("Use".into()) });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else { return };
+            let _ = this.update(cx, |j, cx| {
+                if let Some(p) = paths.first() {
+                    j.set_avatar_file(p, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    pub fn set_avatar_file(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        match crate::avatar::square_png(path, 256) {
+            Ok(png) => self.set_avatar_png(&png, cx),
+            Err(e) => self.show_flash(format!("not a picture: {e}"), cx),
+        }
+    }
+
+    fn set_avatar_png(&mut self, png: &[u8], cx: &mut Context<Self>) {
+        let Some(path) = crate::avatar::own_path(&self.model.account) else { return };
+        let written = path.parent().map(std::fs::create_dir_all).transpose().and_then(|_| std::fs::write(&path, png));
+        if let Err(e) = written {
+            return self.show_flash(format!("cannot keep the picture: {e}"), cx);
+        }
+        match joma_jami::set_avatar(&self.model.account, &self.model.my_name, Some(&path.to_string_lossy())) {
+            Ok(()) => {
+                if let Some(p) = crate::avatar::cache(&self.model.me, png) {
+                    self.model.avatars.insert(self.model.me.clone(), p);
+                }
+                self.show_flash("picture set; contacts get it with your profile", cx);
+            }
+            Err(e) => self.show_flash(format!("could not set the picture: {e}"), cx),
+        }
+        cx.notify();
+    }
+
+    pub fn remove_avatar(&mut self, cx: &mut Context<Self>) {
+        match joma_jami::set_avatar(&self.model.account, &self.model.my_name, None) {
+            Ok(()) => {
+                self.model.avatars.remove(&self.model.me);
+                self.show_flash("picture removed", cx);
+            }
+            Err(e) => self.show_flash(format!("could not remove the picture: {e}"), cx),
+        }
+        cx.notify();
     }
 
     // ---- The stage --------------------------------------------------------------
@@ -2655,6 +2796,16 @@ impl Joma {
                 }
                 Reply::Done
             }
+            Request::Avatar { path } => {
+                if self.gate != Gate::Ready {
+                    return Reply::Error { message: "Joma is not connected to Jami yet".into() };
+                }
+                match path {
+                    Some(p) => self.set_avatar_file(std::path::Path::new(&p), cx),
+                    None => self.remove_avatar(cx),
+                }
+                Reply::Done
+            }
             Request::Watch { to } => match self.target(&to) {
                 Ok(conv) => match self.model.conversations.get(&conv).and_then(|c| c.peers.first()).cloned() {
                     Some(peer) => {
@@ -2927,35 +3078,6 @@ pub fn camera_source() -> String {
     }
 }
 
-/// Standard base64 (the daemon names profile files by the base64 of the peer URI).
-fn base64_decode(s: &str) -> Option<Vec<u8>> {
-    let val = |c: u8| -> Option<u32> {
-        Some(match c {
-            b'A'..=b'Z' => c - b'A',
-            b'a'..=b'z' => c - b'a' + 26,
-            b'0'..=b'9' => c - b'0' + 52,
-            b'+' | b'-' => 62,
-            b'/' | b'_' => 63,
-            _ => return None,
-        } as u32)
-    };
-    let bytes: Vec<u8> = s.bytes().filter(|&c| c != b'=').collect();
-    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
-    for chunk in bytes.chunks(4) {
-        let mut n = 0u32;
-        for (i, &c) in chunk.iter().enumerate() {
-            n |= val(c)? << (18 - 6 * i);
-        }
-        out.push((n >> 16) as u8);
-        if chunk.len() > 2 {
-            out.push((n >> 8) as u8);
-        }
-        if chunk.len() > 3 {
-            out.push(n as u8);
-        }
-    }
-    Some(out)
-}
 
 #[cfg(test)]
 mod tests {
@@ -2963,8 +3085,8 @@ mod tests {
 
     #[test]
     fn decodes_profile_names() {
-        assert_eq!(base64_decode("aGVsbG8=").unwrap(), b"hello");
-        assert_eq!(base64_decode("YWJjZA").unwrap(), b"abcd");
+        assert_eq!(crate::avatar::base64_decode("aGVsbG8=").unwrap(), b"hello");
+        assert_eq!(crate::avatar::base64_decode("YWJjZA").unwrap(), b"abcd");
     }
 
     #[test]

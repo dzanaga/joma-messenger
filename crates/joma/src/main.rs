@@ -9,6 +9,7 @@
 //! identity); without it Joma uses Jami's own data, shared with the Qt client.
 
 mod app;
+mod avatar;
 mod composer;
 mod desk;
 mod hypr;
@@ -40,6 +41,8 @@ const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); -
        joma send-file <to> [path]
                                  send a file (without a path, Joma asks for one)
        joma open <to>            show a conversation in Joma
+       joma avatar <file>|--remove
+                                 set your profile picture (cropped square), or remove it
        joma link                 on a new Joma: join your account from another device;
                                  prints the code to give that device
        joma link-device <code>   send your account to the new device showing <code>
@@ -84,6 +87,9 @@ fn cli(args: &[String]) -> Option<i32> {
         Some("watch") if args.len() == 2 => Request::Watch { to: args[1].clone() },
         Some("open") if args.len() == 2 => Request::Open { to: args[1].clone() },
         Some("link") if args.len() == 1 => Request::Link,
+        Some("avatar") if args.len() == 2 => Request::Avatar {
+            path: (args[1] != "--remove").then(|| std::fs::canonicalize(&args[1]).map_or_else(|_| args[1].clone(), |c| c.to_string_lossy().into_owned())),
+        },
         Some("accounts") if args.len() == 1 => Request::Accounts,
         Some("account") if args.len() == 2 => Request::UseAccount { to: args[1].clone() },
         Some("link-device") if args.len() == 2 => Request::LinkDevice { token: args[1].clone() },

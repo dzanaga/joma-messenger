@@ -48,6 +48,10 @@ pub const G_USER_PLUS: &str = "\u{f234}";
 pub const G_EXCHANGE: &str = "\u{f0ec}";
 pub const G_WINDOW: &str = "\u{f2d0}";
 pub const G_CROP: &str = "\u{f125}";
+pub const G_IMAGE: &str = "\u{f03e}";
+pub const G_ERASER: &str = "\u{f12d}";
+pub const G_FILL: &str = "\u{f1fc}";
+pub const G_MIRROR: &str = "\u{f0db}";
 pub const G_CROSSHAIRS: &str = "\u{f05b}";
 pub const G_ZOOM_IN: &str = "\u{f00e}";
 pub const G_ZOOM_OUT: &str = "\u{f010}";
@@ -99,22 +103,78 @@ pub fn fit(outer: Bounds<Pixels>, w: f32, h: f32) -> Bounds<Pixels> {
     )
 }
 
-fn button(id: impl Into<SharedString>, glyph: &str, label: &str, t: &Theme, on: bool) -> gpui::Stateful<gpui::Div> {
+/// A Nerd Font glyph in a cell of its own: glyphs differ in width, so each sits centred
+/// in a square of the line's height.
+fn glyph(g: &str, t: &Theme) -> gpui::Div {
+    div().flex_none().w(px(t.size + 4.)).h(px(t.size + 4.)).flex().items_center().justify_center().child(g.to_owned())
+}
+
+/// A flat, square button: a glyph, a label, or both; `on` marks it active. Icon-only
+/// buttons are square, all share one height.
+fn button(id: impl Into<SharedString>, glyph_str: &str, label: &str, t: &Theme, on: bool) -> gpui::Stateful<gpui::Div> {
     let id: SharedString = id.into();
+    let icon_only = label.is_empty();
     div()
         .id(id)
         .flex()
+        .flex_none()
         .items_center()
-        .gap(px(6.))
-        .px(px(8.))
-        .py(px(3.))
+        .justify_center()
+        .gap(px(4.))
+        .h(px(t.size + 13.))
+        .when(icon_only, |d| d.w(px(t.size + 13.)))
+        .when(!icon_only, |d| d.pl(px(if glyph_str.is_empty() { 9. } else { 5. })).pr(px(9.)))
         .border_1()
         .border_color(if on { t.accent } else { t.border })
+        .when(on, |d| d.bg(t.accent_bg))
         .text_color(if on { t.accent } else { t.text })
         .cursor_pointer()
-        .hover(|d| d.bg(t.raised).text_color(t.bright))
-        .child(glyph.to_owned())
-        .when(!label.is_empty(), |d| d.child(label.to_owned()))
+        .hover(|d| d.bg(t.raised).text_color(t.bright).border_color(t.muted))
+        .when(!glyph_str.is_empty(), |d| d.child(glyph(glyph_str, t)))
+        .when(!icon_only, |d| d.child(div().whitespace_nowrap().child(label.to_owned())))
+}
+
+/// A person's picture, or their initial on their colour; a presence dot in the corner.
+pub fn avatar(t: &Theme, picture: Option<std::path::PathBuf>, key: &str, name: &str, side: f32, dot: Option<Hsla>) -> AnyElement {
+    let initial = name.chars().find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "?".into());
+    let color = author_color(t, key);
+    div()
+        .relative()
+        .flex_none()
+        .size(px(side))
+        .child(match picture {
+            Some(p) => div().size(px(side)).rounded(px(3.)).overflow_hidden().child(gpui::img(p).size(px(side)).object_fit(ObjectFit::Cover)).into_any_element(),
+            None => div()
+                .size(px(side))
+                .rounded(px(3.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(color.opacity(0.22))
+                .border_1()
+                .border_color(color.opacity(0.5))
+                .text_color(color)
+                .text_size(px((side * 0.48).max(9.)))
+                .font_weight(FontWeight::BOLD)
+                .child(initial)
+                .into_any_element(),
+        })
+        .when_some(dot, |d, c| {
+            let ds = (side * 0.3).clamp(7., 11.);
+            d.child(div().absolute().right(px(-2.)).bottom(px(-2.)).size(px(ds)).rounded_full().bg(c).border_2().border_color(t.panel))
+        })
+        .into_any_element()
+}
+
+/// A short time for lists: "14:05" today, "yesterday", else "Thu 29".
+fn short_when(ts: i64) -> String {
+    let (hm, day, label) = local_time(ts);
+    let (_, today, _) = local_time(joma_desk::signal::now() as i64);
+    match today - day {
+        0 => hm,
+        1 => "yesterday".into(),
+        _ => label.split(' ').take(2).collect::<Vec<_>>().join(" "),
+    }
 }
 
 /// What follows the pointer while a sidebar row is dragged.
@@ -418,37 +478,74 @@ impl Joma {
                         this.select(id.clone(), cx);
                         this.narrow_chat = true;
                     }))
-                    .child(
+                    .child({
+                        let peer = (c.peers.len() == 1).then(|| c.peers[0].clone());
+                        let key = peer.clone().unwrap_or_else(|| c.id.clone());
+                        let picture = peer.as_ref().and_then(|p| self.model.avatars.get(crate::model::bare_uri(p)).cloned());
+                        let dot_color = match dot {
+                            Dot::Active => Some(t.green),
+                            Dot::Reachable => Some(t.green.opacity(0.35)),
+                            Dot::None => None,
+                        };
+                        let stamp = c.last().map(|m| short_when(m.ts)).unwrap_or_default();
                         div()
                             .flex()
                             .items_center()
-                            .justify_between()
-                            .gap(px(6.))
+                            .gap(px(10.))
+                            .child(avatar(t, picture, &key, &c.title, 32., dot_color))
                             .child(
                                 div()
                                     .flex()
-                                    .items_center()
-                                    .gap(px(6.))
-                                    .overflow_hidden()
-                                    .when(dot != Dot::None, |d| {
-                                        d.child(div().flex_none().size(px(7.)).rounded_full().bg(if dot == Dot::Active { t.green } else { t.green.opacity(0.3) }))
-                                    })
-                                    .when(fav, |d| d.child(div().text_color(t.yellow).child(G_STAR)))
-                                    .when(has_call, |d| d.child(div().text_color(t.green).child(G_PHONE)))
+                                    .flex_col()
+                                    .flex_1()
+                                    .min_w(px(0.))
+                                    .gap(px(1.))
                                     .child(
                                         div()
-                                            .text_color(if c.unread > 0 || selected { t.bright } else { t.text })
-                                            .when(c.unread > 0, |d| d.font_weight(FontWeight::BOLD))
-                                            .truncate()
-                                            .child(c.title.clone()),
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(5.))
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w(px(0.))
+                                                    .truncate()
+                                                    .text_color(if c.unread > 0 || selected { t.bright } else { t.text })
+                                                    .when(c.unread > 0, |d| d.font_weight(FontWeight::BOLD))
+                                                    .child(c.title.clone()),
+                                            )
+                                            .when(fav, |d| d.child(div().flex_none().text_size(px(t.size - 2.)).text_color(t.yellow).child(G_STAR)))
+                                            .when(has_call, |d| d.child(div().flex_none().text_size(px(t.size - 2.)).text_color(t.green).child(G_PHONE)))
+                                            .child(div().flex_none().text_size(px(t.size - 2.5)).text_color(if c.unread > 0 { t.accent } else { t.muted }).child(stamp)),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(6.))
+                                            .child(div().flex_1().min_w(px(0.)).truncate().text_color(t.muted).text_size(px(t.size - 1.5)).child(last))
+                                            .when(c.request, |d| d.child(div().flex_none().text_size(px(t.size - 2.)).text_color(t.yellow).child("request")))
+                                            .when(c.unread > 0, |d| {
+                                                d.child(
+                                                    div()
+                                                        .flex_none()
+                                                        .min_w(px(18.))
+                                                        .h(px(16.))
+                                                        .px(px(4.))
+                                                        .rounded(px(8.))
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .bg(t.accent)
+                                                        .text_color(t.bar)
+                                                        .text_size(px(t.size - 2.5))
+                                                        .font_weight(FontWeight::BOLD)
+                                                        .child(c.unread.to_string()),
+                                                )
+                                            }),
                                     ),
                             )
-                            .when(c.request, |d| d.child(div().text_color(t.yellow).child("request")))
-                            .when(c.unread > 0, |d| {
-                                d.child(div().px(px(5.)).bg(t.accent).text_color(t.bar).child(c.unread.to_string()))
-                            }),
-                    )
-                    .child(div().text_color(t.muted).text_size(px(t.size - 1.5)).truncate().child(last))
+                    })
                     .when(self.mode == Mode::Removed, |d| {
                         let (a, b) = (c.id.clone(), c.id.clone());
                         let armed = self.confirm_delete.as_ref().is_some_and(|(k, at)| *k == c.id && at.elapsed().as_secs() < 5);
@@ -615,12 +712,26 @@ impl Joma {
                 .gap(px(6.))
                 .px(px(10.))
                 .py(px(4.))
-                .child(div().flex_none().text_color(t.bright).font_weight(FontWeight::BOLD).child(self.model.my_name.clone()))
-                .child(div().flex_1().min_w(px(0.)).truncate().text_color(t.muted).text_size(px(t.size - 2.)).child(who))
+                .child(
+                    div()
+                        .id("my-avatar")
+                        .cursor_pointer()
+                        .hover(|d| d.opacity(0.8))
+                        .child(avatar(t, self.model.avatars.get(&self.model.me).cloned(), &self.model.me, &self.model.my_name, 36., None))
+                        .on_click(cx.listener(|this, _, _, cx| this.open_profile(cx))),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .child(div().truncate().text_color(t.bright).font_weight(FontWeight::BOLD).child(self.model.my_name.clone()))
+                        .child(div().truncate().text_color(t.muted).text_size(px(t.size - 2.)).child(who)),
+                )
+                .child(button("edit-profile", G_PENCIL, "", t, false).on_click(cx.listener(|this, _, _, cx| this.open_profile(cx))))
                 .child(
                     button("account-remove", G_TRASH, if armed || self.mode == Mode::RemoveAccount { "remove?" } else { "" }, t, armed)
-                        .px(px(6.))
-                        .py(px(1.))
                         .text_color(if armed || self.mode == Mode::RemoveAccount { t.red } else { t.muted })
                         .on_click(cx.listener(|this, _, window, cx| this.remove_account(window, cx))),
                 ),
@@ -648,16 +759,12 @@ impl Joma {
                     .when(this, |d| {
                         d.child(div().text_color(t.muted).text_size(px(t.size - 2.)).child("this device")).child(
                             button(SharedString::from(format!("dev-rename-{id}")), G_PENCIL, "", t, false)
-                                .px(px(6.))
-                                .py(px(1.))
                                 .on_click(cx.listener(|this, _, window, cx| this.set_mode(Mode::DeviceName, window, cx))),
                         )
                     })
                     .when(!this, |d| {
                         d.child(
                             button(SharedString::from(format!("dev-revoke-{id}")), G_BAN, if armed { "revoke?" } else { "" }, t, armed)
-                                .px(px(6.))
-                                .py(px(1.))
                                 .text_color(if armed { t.red } else { t.muted })
                                 .on_click(cx.listener(move |this, _, _, cx| this.revoke_device(&i, cx))),
                         )
@@ -782,8 +889,6 @@ impl Joma {
             let quick = |id: &str, glyph: &str, what: Quick| {
                 let u = uri.clone();
                 button(SharedString::from(format!("{id}-{uri}")), glyph, "", t, false)
-                    .px(px(6.))
-                    .py(px(1.))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         cx.stop_propagation();
                         this.quick_action(&u, what, window, cx);
@@ -811,9 +916,18 @@ impl Joma {
                         .items_center()
                         .gap(px(6.))
                         .child(div().flex_none().text_color(t.muted).text_size(px(t.size - 2.)).child(G_GRIP))
-                        .child(div().flex_none().size(px(7.)).rounded_full().when(dot != Dot::None, |d| {
-                            d.bg(if dot == Dot::Active { t.green } else { t.green.opacity(0.3) })
-                        }))
+                        .child(avatar(
+                            t,
+                            self.model.avatars.get(crate::model::bare_uri(&uri)).cloned(),
+                            crate::model::bare_uri(&uri),
+                            &name,
+                            26.,
+                            match dot {
+                                Dot::Active => Some(t.green),
+                                Dot::Reachable => Some(t.green.opacity(0.35)),
+                                Dot::None => None,
+                            },
+                        ))
                         .child(div().flex_1().min_w(px(0.)).text_color(if selected { t.bright } else { t.text }).truncate().child(name.clone()))
                         .when(waiting, |d| d.child(div().text_color(t.yellow).text_size(px(t.size - 2.)).child("waiting")))
                         .child(
@@ -846,8 +960,6 @@ impl Joma {
                         .child(div().flex_1())
                         .child(
                             button(SharedString::from(format!("cq-block-{uri}")), G_BAN, if block_armed { "block?" } else { "" }, t, block_armed)
-                                .px(px(6.))
-                                .py(px(1.))
                                 .text_color(if block_armed { t.red } else { t.muted })
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     cx.stop_propagation();
@@ -856,8 +968,6 @@ impl Joma {
                         )
                         .child(
                             button(SharedString::from(format!("cq-remove-{uri}")), G_USER_TIMES, if remove_armed { "remove?" } else { "" }, t, remove_armed)
-                                .px(px(6.))
-                                .py(px(1.))
                                 .text_color(if remove_armed { t.red } else { t.muted })
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     cx.stop_propagation();
@@ -1136,7 +1246,7 @@ impl Joma {
             let v = self.stage_view.borrow();
             (v.zoom, v.percent(), v.follow, v.zoomed())
         };
-        let small = |id: &'static str, glyph: &str, label: &str, on: bool| button(id, glyph, label, t, on).px(px(6.)).py(px(1.));
+        let small = |id: &'static str, glyph: &str, label: &str, on: bool| button(id, glyph, label, t, on);
         div()
             .flex()
             .flex_wrap()
@@ -1329,6 +1439,257 @@ impl Joma {
                 )
                 .into_any_element(),
         )
+    }
+
+    /// Our picture: choose one, draw one in pixels, or remove it.
+    fn profile_overlay(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let p = self.profile_edit.as_ref()?;
+        let me = self.model.me.clone();
+        let current = self.model.avatars.get(&me).cloned();
+        let body: AnyElement = match &p.drawing {
+            None => div()
+                .flex()
+                .items_center()
+                .gap(px(18.))
+                .p(px(16.))
+                .child(avatar(t, current.clone(), &me, &self.model.my_name, 112., None))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.))
+                        .child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child(self.model.my_name.clone()))
+                        .child(div().text_size(px(t.size - 2.)).text_color(t.muted).child("Contacts see it next to your name."))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_wrap()
+                                .gap(px(6.))
+                                .child(button("pf-pick", G_IMAGE, "picture…", t, false).on_click(cx.listener(|this, _, _, cx| this.choose_picture(cx))))
+                                .child(button("pf-draw", G_PENCIL, "draw pixels", t, false).on_click(cx.listener(|this, _, _, cx| this.start_drawing(cx))))
+                                .when(current.is_some(), |d| {
+                                    d.child(button("pf-remove", G_TRASH, "remove", t, false).text_color(t.red).on_click(cx.listener(|this, _, _, cx| this.remove_avatar(cx))))
+                                }),
+                        ),
+                )
+                .into_any_element(),
+            Some(art) => self.pixel_editor(t, p, art.clone(), cx),
+        };
+        Some(
+            div()
+                .id("profile-overlay")
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(gpui::black().opacity(0.55))
+                .occlude()
+                .child(
+                    div()
+                        .id("profile-box")
+                        .flex()
+                        .flex_col()
+                        .m(px(16.))
+                        .bg(t.bg)
+                        .border_1()
+                        .border_color(t.accent)
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .gap(px(8.))
+                                .px(px(12.))
+                                .py(px(8.))
+                                .border_b_1()
+                                .border_color(t.border)
+                                .child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child(if p.drawing.is_some() { "Draw your picture" } else { "Your picture" }))
+                                .child(button("pf-close", G_TIMES, "", t, false).on_click(cx.listener(|this, _, _, cx| {
+                                    this.profile_edit = None;
+                                    cx.notify();
+                                }))),
+                        )
+                        .child(body),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// A 16×16 grid to paint on, the colour grid, the tools and a live preview.
+    fn pixel_editor(&self, t: &Theme, p: &ProfileEdit, art: crate::avatar::PixelArt, cx: &mut Context<Self>) -> AnyElement {
+        use crate::avatar::GRID;
+        let cell = 18.;
+        let side = cell * GRID as f32;
+        let bounds = p.grid.clone();
+        let line = t.border.opacity(0.35);
+        let art2 = art.clone();
+        let grid = canvas(
+            |_, _, _| {},
+            move |b, _, window, _| {
+                bounds.set(b);
+                let c = f32::from(b.size.width) / GRID as f32;
+                for y in 0..GRID {
+                    for x in 0..GRID {
+                        let rgb = art2.get(x, y).unwrap_or(art2.background);
+                        let r = Bounds::new(point(b.origin.x + px(x as f32 * c), b.origin.y + px(y as f32 * c)), size(px(c), px(c)));
+                        window.paint_quad(gpui::fill(r, gpui::rgb(rgb)));
+                    }
+                }
+                for i in 0..=GRID {
+                    let o = px(i as f32 * c);
+                    window.paint_quad(gpui::fill(Bounds::new(point(b.origin.x + o, b.origin.y), size(px(1.), b.size.height)), line));
+                    window.paint_quad(gpui::fill(Bounds::new(point(b.origin.x, b.origin.y + o), size(b.size.width, px(1.))), line));
+                }
+            },
+        )
+        .size(px(side));
+        let grid = div()
+            .id("pixel-grid")
+            .size(px(side))
+            .cursor_crosshair()
+            .child(grid)
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, _, cx| {
+                if let Some(p) = this.profile_edit.as_mut() {
+                    p.painting = p.tool != PaintTool::Fill;
+                }
+                this.paint_at(e.position, cx);
+            }))
+            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
+                let painting = this.profile_edit.as_ref().is_some_and(|p| p.painting);
+                if painting && e.pressed_button == Some(MouseButton::Left) {
+                    this.paint_at(e.position, cx);
+                } else if painting {
+                    if let Some(p) = this.profile_edit.as_mut() {
+                        p.painting = false;
+                    }
+                }
+            }))
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, _| {
+                if let Some(p) = this.profile_edit.as_mut() {
+                    p.painting = false;
+                }
+            }));
+        let mut swatches = Vec::new();
+        for (r, row) in crate::avatar::palette().into_iter().enumerate() {
+            let mut line = div().flex();
+            for (i, c) in row.into_iter().enumerate() {
+                line = line.child(
+                    div()
+                        .id(SharedString::from(format!("sw-{r}-{i}")))
+                        .size(px(20.))
+                        .bg(gpui::rgb(c))
+                        .border_1()
+                        .border_color(if c == p.color { t.bright } else { gpui::black().opacity(0.25) })
+                        .cursor_pointer()
+                        .hover(|d| d.border_color(gpui::white()))
+                        .on_click(cx.listener(move |this, e: &gpui::ClickEvent, _, cx| {
+                            if let Some(p) = this.profile_edit.as_mut() {
+                                // Shift picks the background behind empty cells.
+                                if e.modifiers().shift {
+                                    if let Some(a) = p.drawing.as_mut() {
+                                        a.background = c;
+                                    }
+                                } else {
+                                    p.color = c;
+                                    if p.tool == PaintTool::Eraser {
+                                        p.tool = PaintTool::Pen;
+                                    }
+                                }
+                            }
+                            cx.notify();
+                        })),
+                );
+            }
+            swatches.push(line);
+        }
+        fn tool(t: &Theme, p: &ProfileEdit, cx: &mut Context<Joma>, id: &'static str, g: &str, label: &str, which: PaintTool) -> gpui::Stateful<gpui::Div> {
+            button(id, g, label, t, p.tool == which).on_click(cx.listener(move |this, _, _, cx| {
+                if let Some(p) = this.profile_edit.as_mut() {
+                    p.tool = which;
+                }
+                cx.notify();
+            }))
+        }
+        let preview = div()
+            .size(px(64.))
+            .rounded(px(3.))
+            .overflow_hidden()
+            .child({
+                let a = art.clone();
+                canvas(
+                    |_, _, _| {},
+                    move |b, _, window, _| {
+                        let c = f32::from(b.size.width) / GRID as f32;
+                        for y in 0..GRID {
+                            for x in 0..GRID {
+                                let r = Bounds::new(point(b.origin.x + px(x as f32 * c), b.origin.y + px(y as f32 * c)), size(px(c + 0.5), px(c + 0.5)));
+                                window.paint_quad(gpui::fill(r, gpui::rgb(a.get(x, y).unwrap_or(a.background))));
+                            }
+                        }
+                    },
+                )
+                .size_full()
+            });
+        div()
+            .flex()
+            .gap(px(16.))
+            .p(px(16.))
+            .child(grid)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(10.))
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(4.))
+                            .child(tool(t, p, cx, "pt-pen", G_PENCIL, "pen", PaintTool::Pen))
+                            .child(tool(t, p, cx, "pt-erase", G_ERASER, "eraser", PaintTool::Eraser))
+                            .child(tool(t, p, cx, "pt-fill", G_FILL, "fill", PaintTool::Fill)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(4.))
+                            .child(button("pt-mirror", G_MIRROR, "mirror", t, p.mirror).on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(p) = this.profile_edit.as_mut() {
+                                    p.mirror = !p.mirror;
+                                }
+                                cx.notify();
+                            })))
+                            .child(button("pt-clear", G_TRASH, "clear", t, false).on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(a) = this.profile_edit.as_mut().and_then(|p| p.drawing.as_mut()) {
+                                    a.cells.iter_mut().for_each(|c| *c = None);
+                                }
+                                cx.notify();
+                            }))),
+                    )
+                    .child(div().flex().items_center().gap(px(8.)).child(div().size(px(22.)).bg(gpui::rgb(p.color)).border_1().border_color(t.bright)).child(div().text_size(px(t.size - 2.)).text_color(t.muted).child(format!("#{:06x} · shift+click: background", p.color))))
+                    .child(div().flex().flex_col().children(swatches))
+                    .child(
+                        div()
+                            .flex()
+                            .items_end()
+                            .justify_between()
+                            .gap(px(10.))
+                            .child(preview)
+                            .child(
+                                div()
+                                    .flex()
+                                    .gap(px(6.))
+                                    .child(button("pt-cancel", G_BACK, "back", t, false).on_click(cx.listener(|this, _, _, cx| {
+                                        if let Some(p) = this.profile_edit.as_mut() {
+                                            p.drawing = None;
+                                        }
+                                        cx.notify();
+                                    })))
+                                    .child(button("pt-save", G_CHECK, "use it", t, true).on_click(cx.listener(|this, _, _, cx| this.save_drawing(cx)))),
+                            ),
+                    ),
+            )
+            .into_any_element()
     }
 
     /// Choosing what to share: every screen and window, with a thumbnail.
@@ -1550,7 +1911,20 @@ impl Joma {
             let row = div().flex().gap(px(10.)).py(px(1.)).child(div().flex_none().w(px(42.)).text_color(t.muted).child(hm));
             list = list.child(match m.kind {
                 MsgKind::Text => row
-                    .child(div().flex_none().w(px(96.)).truncate().text_color(color).child(if repeat { String::new() } else { who }))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_none()
+                            .items_center()
+                            .gap(px(6.))
+                            .w(px(118.))
+                            .when(!repeat, |d| {
+                                let key = crate::model::bare_uri(&m.author).to_owned();
+                                let picture = self.model.avatars.get(&key).cloned();
+                                let initial_of = if me { self.model.my_name.clone() } else { who.clone() };
+                                d.child(avatar(t, picture, &key, &initial_of, 18., None)).child(div().flex_1().min_w(px(0.)).truncate().text_color(color).child(who))
+                            }),
+                    )
                     .child(div().flex_1().min_w(px(0.)).text_color(if me { t.text } else { t.bright }).child(m.text.clone())),
                 MsgKind::Event => match m.file.clone() {
                     // A file: click to open it, or to download one too big to come by itself.
@@ -1579,14 +1953,17 @@ impl Joma {
                                 .child(format!("{who} · {}{hint}", m.text))
                                 // A picture shows itself once it is here.
                                 .when_some(saved.filter(|p| is_picture(p)), |d, path| {
+                                    // Sized from the file's header, so the list does not jump
+                                    // when the picture loads.
+                                    let (w, h) = picture_box(&path, 360., 260.);
                                     d.child(
                                         div()
                                             .mt(px(4.))
-                                            .max_w(px(360.))
-                                            .max_h(px(260.))
+                                            .w(px(w + 2.))
+                                            .h(px(h + 2.))
                                             .border_1()
                                             .border_color(t.border)
-                                            .child(gpui::img(path).max_w(px(358.)).max_h(px(258.)).object_fit(ObjectFit::Contain)),
+                                            .child(gpui::img(path).w(px(w)).h(px(h)).object_fit(ObjectFit::Contain)),
                                     )
                                 }),
                         )
@@ -1644,6 +2021,12 @@ impl Joma {
                     cx.notify();
                 })))
             })
+            .child({
+                let peer = (conv.peers.len() == 1).then(|| crate::model::bare_uri(&conv.peers[0]).to_owned());
+                let picture = peer.as_ref().and_then(|p| self.model.avatars.get(p).cloned());
+                let key = peer.unwrap_or_else(|| conv.id.clone());
+                div().mr(px(10.)).child(avatar(t, picture, &key, &conv.title, 34., None))
+            })
             .child(
                 div()
                     .flex()
@@ -1663,12 +2046,13 @@ impl Joma {
             .child(
                 div()
                     .flex()
-                    .gap(px(6.))
+                    .items_center().gap(px(4.))
                     .child(button("fav", if fav { G_STAR } else { G_STAR_O }, "", t, fav).on_click(cx.listener(|this, _, _, cx| this.toggle_favorite(cx))))
                     .when(!conv.request && !self.is_removed(&conv.id), |d| {
                         let id = conv.id.clone();
                         d.child(button("remove", G_TRASH, "", t, false).on_click(cx.listener(move |this, _, _, cx| this.remove_from_list(&id, cx))))
                     })
+                    .child(div().w(px(1.)).h(px(18.)).mx(px(2.)).bg(t.border))
                     .child(button("quick", G_BOLT, if self.narrow { "" } else { "quick" }, t, self.quick_open).on_click(cx.listener(|this, _, _, cx| {
                         this.quick_open = !this.quick_open;
                         cx.notify();
@@ -1678,7 +2062,7 @@ impl Joma {
                         d.child(button("send-file", G_CLIP, "", t, false).on_click(cx.listener(move |this, _, _, cx| this.pick_and_send(id.clone(), cx))))
                     })
                     .when(!has_call && !conv.request, |d| {
-                        d.child(button("share-d", G_DESKTOP, "", t, false).on_click(cx.listener(|this, _, _, cx| {
+                        d.child(div().w(px(1.)).h(px(18.)).mx(px(2.)).bg(t.border)).child(button("share-d", G_DESKTOP, "", t, false).on_click(cx.listener(|this, _, _, cx| {
                             if let Some(conv) = this.selected.clone() {
                                 if let Reply::Error { message } = this.share_direct(&conv, cx) {
                                     this.show_flash(message, cx);
@@ -1864,6 +2248,7 @@ impl Render for Joma {
         self.narrow = window.viewport_size().width < px(700.);
         let full = if self.fullscreen { self.fullscreen_stage(&t, cx) } else { None };
         let picker = self.picker_overlay(&t, cx);
+        let profile = self.profile_overlay(&t, cx);
         let body = if let Some(full) = full {
             full
         } else if self.gate == Gate::Ready && self.narrow {
@@ -1907,7 +2292,12 @@ impl Render for Joma {
             .on_action(cx.listener(|this, _: &NewConversation, window, cx| this.set_mode(Mode::Add, window, cx)))
             .on_action(cx.listener(|this, _: &Search, window, cx| this.set_mode(Mode::Search, window, cx)))
             .on_action(cx.listener(|this, _: &Cancel, window, cx| {
-                // Esc closes the picker, then leaves full screen.
+                // Esc closes the picker or the profile, then leaves full screen.
+                if this.profile_edit.is_some() {
+                    this.profile_edit = None;
+                    cx.notify();
+                    return;
+                }
                 if this.picker.is_some() {
                     this.close_picker(window, cx);
                     return;
@@ -1991,7 +2381,21 @@ impl Render for Joma {
             .child(body)
             .when(!self.fullscreen, |d| d.child(self.status_line(&t)))
             .children(picker)
+            .children(profile)
     }
+}
+
+/// The size a picture shows at in the conversation: its own, shrunk to fit `max`. The
+/// dimensions come from the file's header (read once per file).
+fn picture_box(path: &std::path::Path, max_w: f32, max_h: f32) -> (f32, f32) {
+    thread_local! {
+        static SIZES: std::cell::RefCell<std::collections::HashMap<std::path::PathBuf, (u32, u32)>> = Default::default();
+    }
+    let (w, h) = SIZES.with(|m| {
+        *m.borrow_mut().entry(path.to_path_buf()).or_insert_with(|| image::image_dimensions(path).unwrap_or((360, 260)))
+    });
+    let k = (max_w / w.max(1) as f32).min(max_h / h.max(1) as f32).min(1.);
+    ((w as f32 * k).max(8.), (h as f32 * k).max(8.))
 }
 
 /// A file Joma shows as a picture.
