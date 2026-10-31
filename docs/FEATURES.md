@@ -209,8 +209,12 @@ Ctrl+. and Alt+1…9 in the window or the panel; `joma send` and `joma send-quic
 GPUs the desktop share can use).
 
 ## Install
-`scripts/install.sh [host]` builds a release and installs `~/.local/bin/joma`, the icon
-and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
+Releases: `mise use -g github:dzanaga/joma-messenger@<v>` (needs the `jami-daemon`
+package). Joma points its launcher and login unit at mise's shim, so a new version is
+what starts next. `scripts/install.sh [host]` builds a release and installs
+`~/.local/bin/joma` instead (for development or another machine over SSH); it refuses
+when mise has Joma here, since the two would compete and the launcher would start
+whichever ran last.
 
 ## Log
 - 0.5.0 (2026-10-31): watching together (mpv on both sides, kept in step);

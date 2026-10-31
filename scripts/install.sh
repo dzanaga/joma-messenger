@@ -11,6 +11,15 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+
+# A copy here shadows the one mise installs: the launcher and the login unit would keep
+# starting this one, whatever version mise has.
+if [[ -z ${1:-} || ${1:-} == --no-build ]] && [[ -e ${XDG_DATA_HOME:-$HOME/.local/share}/mise/shims/joma ]]; then
+  echo "joma is installed with mise; this would install a second copy in ~/.local/bin that" >&2
+  echo "the launcher would start instead. Use mise (mise use -g github:dzanaga/joma-messenger@<v>)," >&2
+  echo "or remove the mise one first (mise uninstall github:dzanaga/joma-messenger)." >&2
+  exit 1
+fi
 build=1
 if [[ ${1:-} == --no-build ]]; then build=0; shift; fi
 host="${1:-}"
