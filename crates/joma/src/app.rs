@@ -60,6 +60,12 @@ actions!(
         ZoomIn,
         ZoomOut,
         ZoomFit,
+        TabChats,
+        TabCalls,
+        TabContacts,
+        TabDevices,
+        TabAccounts,
+        TabAgents,
         AcceptRequest,
         DeclineRequest,
     ]
@@ -173,11 +179,37 @@ pub struct DeviceOp {
     pub peer: String,
 }
 
-/// What the sidebar lists.
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// What the sidebar lists (the rail on the left picks it).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tab {
     Chats,
+    /// Running calls and shares, and their history.
+    Calls,
     Contacts,
+    /// This account's devices, and linking another.
+    Devices,
+    /// The accounts on this machine: open one, add one, remove one.
+    Accounts,
+    /// Agent accounts (a placeholder for now).
+    Agents,
+}
+
+/// A desktop share that took place, for the Calls tab (kept per account).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct ShareLog {
+    pub ts: i64,
+    pub peer: String,
+    /// true: we shared; false: we watched.
+    pub shared: bool,
+    pub secs: u64,
+}
+
+pub fn share_log_path(account: &str) -> Option<std::path::PathBuf> {
+    Some(joma_quick::config_path()?.parent()?.join(format!("shares-{account}.json")))
+}
+
+pub fn load_share_log(account: &str) -> Vec<ShareLog> {
+    share_log_path(account).and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
 }
 
 /// A row being dragged in the sidebar: a conversation id or a contact URI.
@@ -261,6 +293,10 @@ pub struct Joma {
     pub picker: Option<Picker>,
     /// Editing our picture.
     pub profile_edit: Option<ProfileEdit>,
+    /// Shares that took place (Calls tab), newest last.
+    pub share_log: Vec<ShareLog>,
+    /// Shares running now: session key → (started, unix time, we share).
+    running_shares: HashMap<String, (Instant, i64, bool)>,
     picker_gen: u64,
     /// The sharer's preview of each running Joma share, by session key.
     pub previews: HashMap<String, Frame>,
@@ -511,6 +547,8 @@ impl Joma {
             stage_view: Rc::new(RefCell::new(crate::stage::StageView::default())),
             picker: None,
             profile_edit: None,
+            share_log: Vec::new(),
+            running_shares: HashMap::new(),
             picker_gen: 0,
             previews: HashMap::new(),
             flash: None,
@@ -637,6 +675,8 @@ impl Joma {
         };
         self.refresh_identity();
         self.load_profiles();
+        self.share_log = load_share_log(&self.model.account);
+        self.running_shares.clear();
         self.subscribed.clear();
         self.load_contacts();
         for id in joma_jami::conversations(&self.model.account).unwrap_or_default() {
@@ -846,6 +886,7 @@ impl Joma {
         if self.presence.expire(Instant::now()) {
             cx.notify();
         }
+        self.track_shares();
         let acc = self.model.account.clone();
         for after in self.desk.tick(&acc) {
             self.after(after, cx);
@@ -1118,6 +1159,19 @@ impl Joma {
             // a profile (created by Joma 0.2 and earlier) gets one, so contacts see its
             // name instead of its ID.
             if *account == acc && state == "REGISTERED" {
+                // A linked account knows its username only from the name server: ask
+                // for it before offering to choose one.
+                if self.model.username.is_empty() && self.pending_username.is_none() {
+                    let me = self.model.me.clone();
+                    let vol = joma_jami::volatile_details(&acc).unwrap_or_default();
+                    match vol.get("Account.registeredName").filter(|n| !n.is_empty()) {
+                        Some(n) => self.model.username = n.clone(),
+                        None if !me.is_empty() => {
+                            let _ = joma_jami::lookup_address(&acc, &me);
+                        }
+                        None => {}
+                    }
+                }
                 // A new account has no URI until it is generated: until then our own
                 // URI counted as a peer.
                 if self.model.me.is_empty() || self.model.device.is_empty() {
@@ -1154,6 +1208,16 @@ impl Joma {
                     _ => format!("could not register “{name}” (name server error {state})"),
                 };
                 self.show_flash(text, cx);
+            }
+        }
+        if let Event::NameFound { account, state, address, name, .. } = &ev {
+            // Our own name, asked for when the account came without it (a linked one).
+            if *account == acc && *state == 0 && bare_uri(address) == self.model.me && self.model.username.is_empty() && !name.is_empty() {
+                self.model.username = name.clone();
+                if self.model.my_name.is_empty() {
+                    self.model.my_name = name.clone();
+                }
+                cx.notify();
             }
         }
         if let Event::NameFound { query, state, address, .. } = &ev {
@@ -1543,6 +1607,49 @@ impl Joma {
             .unwrap_or_default();
         let name = self.model.name_of(&peer);
         self.open_picker(PickFor::Switch(key.to_owned()), name, cx);
+    }
+
+    /// Note shares as they start and end, for the Calls tab.
+    fn track_shares(&mut self) {
+        let mut now: HashMap<String, bool> = HashMap::new();
+        for (k, s) in &self.desk.sessions {
+            if matches!(s.sharing, crate::desk::Sharing::Joma { accepted: true, .. } | crate::desk::Sharing::Portal { .. }) {
+                now.insert(format!("s:{k}"), true);
+            }
+            if self.desk.viewer(k).is_some() {
+                now.insert(format!("v:{k}"), false);
+            }
+        }
+        for (k, shared) in &now {
+            self.running_shares.entry(k.clone()).or_insert((Instant::now(), joma_desk::signal::now() as i64, *shared));
+        }
+        let ended: Vec<String> = self.running_shares.keys().filter(|k| !now.contains_key(*k)).cloned().collect();
+        for k in ended {
+            let Some((t, ts, shared)) = self.running_shares.remove(&k) else { continue };
+            let key = &k[2..];
+            let peer = crate::desk::direct_peer(key)
+                .map(str::to_owned)
+                .or_else(|| self.model.calls.get(key).map(|c| c.peer.clone()))
+                .unwrap_or_default();
+            self.share_log.push(ShareLog { ts, peer, shared, secs: t.elapsed().as_secs() });
+            if self.share_log.len() > 200 {
+                self.share_log.remove(0);
+            }
+            if let Some(p) = share_log_path(&self.model.account) {
+                let _ = std::fs::write(p, serde_json::to_string(&self.share_log).unwrap_or_default());
+            }
+        }
+    }
+
+    pub fn running_shares_empty(&self) -> bool {
+        self.running_shares.is_empty()
+    }
+
+    /// Shares running now: (session key, started, we share).
+    pub fn shares_running(&self) -> Vec<(String, Instant, bool)> {
+        let mut v: Vec<(String, Instant, bool)> = self.running_shares.iter().map(|(k, (t, _, s))| (k[2..].to_owned(), *t, *s)).collect();
+        v.sort_by_key(|(_, t, _)| *t);
+        v
     }
 
     // ---- Our picture --------------------------------------------------------------
@@ -1961,6 +2068,7 @@ impl Joma {
     /// A row dropped on another: see [`joma_quick::drop_on`].
     pub fn drop_row(&mut self, dragged: &Dragged, target: &str, cx: &mut Context<Self>) {
         match dragged.tab {
+            Tab::Calls | Tab::Devices | Tab::Accounts | Tab::Agents => {}
             Tab::Chats => {
                 let was = self.quick.favorites.contains(&dragged.id);
                 joma_quick::drop_on(&mut self.quick.favorites, None, &dragged.id, target);

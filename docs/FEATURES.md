@@ -175,6 +175,11 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
+- unreleased (0.4.3 in progress): a rail of tabs on the left (chats, calls, contacts,
+  devices, accounts, agents; Ctrl+1…6); Calls lists what runs now and past calls and
+  shares; Devices explains linking with the commands to run; Accounts holds the open
+  account, the others, create / log in with another device; Agents is a placeholder.
+  A linked account learns its username from the name server instead of asking for one.
 - 0.4.2 (2026-10-31): profile pictures (choose a file, or draw one in pixels), shown
   for everyone in lists, headers and messages; a cleaner look: centred icons, one
   button height, list rows with avatar, time and unread badge, grouped header actions.

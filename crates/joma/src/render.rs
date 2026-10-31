@@ -52,6 +52,9 @@ pub const G_IMAGE: &str = "\u{f03e}";
 pub const G_ERASER: &str = "\u{f12d}";
 pub const G_FILL: &str = "\u{f1fc}";
 pub const G_MIRROR: &str = "\u{f0db}";
+pub const G_USERS: &str = "\u{f0c0}";
+pub const G_USER_CIRCLE: &str = "\u{f2bd}";
+pub const G_ROBOT: &str = "\u{f06a9}";
 pub const G_CROSSHAIRS: &str = "\u{f05b}";
 pub const G_ZOOM_IN: &str = "\u{f00e}";
 pub const G_ZOOM_OUT: &str = "\u{f010}";
@@ -596,26 +599,26 @@ impl Joma {
                     .items_center()
                     .justify_between()
                     .pr(px(8.))
+                    .h(px(44.))
                     .child(
-                        div()
-                            .flex()
-                            .children([(Tab::Chats, "chats"), (Tab::Contacts, "contacts")].map(|(tab, label)| {
-                                let on = self.tab == tab;
-                                header(label)
-                                    .id(SharedString::from(format!("tab-{label}")))
-                                    .when(on, |d| d.text_color(t.bright))
-                                    .border_b_2()
-                                    .border_color(if on { t.accent } else { gpui::transparent_black() })
-                                    .cursor_pointer()
-                                    .hover(|d| d.text_color(t.bright))
-                                    .on_click(cx.listener(move |this, _, window, cx| this.set_tab(tab, window, cx)))
-                            })),
+                        header(match self.tab {
+                            Tab::Chats => "chats",
+                            Tab::Calls => "calls",
+                            Tab::Contacts => "contacts",
+                            Tab::Devices => "devices",
+                            Tab::Accounts => "accounts",
+                            Tab::Agents => "agents",
+                        })
+                        .pt(px(0.))
+                        .pb(px(0.))
+                        .text_size(px(t.size - 1.))
+                        .text_color(t.bright)
+                        .font_weight(FontWeight::BOLD),
                     )
-                    .child(
+                    .when(matches!(self.tab, Tab::Chats | Tab::Contacts), |d| d.child(
                         div()
                             .flex()
                             .gap(px(4.))
-                            .pt(px(6.))
                             .child(
                                 button("btn-search", G_SEARCH, "", t, self.mode == Mode::Search)
                                     .on_click(cx.listener(|this, _, window, cx| this.set_mode(Mode::Search, window, cx))),
@@ -630,7 +633,7 @@ impl Joma {
                                     this.set_mode(next, window, cx);
                                 })))
                             }),
-                    ),
+                    )),
             )
             .when(self.mode == Mode::Removed, |d| {
                 d.child(div().px(px(10.)).pb(px(6.)).text_color(t.muted).text_size(px(t.size - 2.)).child(if self.quick.removed.is_empty() {
@@ -655,7 +658,14 @@ impl Joma {
                         .child(self.input.clone()),
                 )
             })
-            .child(if self.tab == Tab::Contacts { self.contacts_list(t, cx) } else { list.into_any_element() })
+            .child(match self.tab {
+                Tab::Chats => list.into_any_element(),
+                Tab::Calls => self.calls_list(t, cx),
+                Tab::Contacts => self.contacts_list(t, cx),
+                Tab::Devices => div().id("devices").flex().flex_col().flex_1().overflow_y_scroll().child(self.devices_group(t, cx)).into_any_element(),
+                Tab::Accounts => self.accounts_list(t, cx),
+                Tab::Agents => self.agents_list(t, cx),
+            })
             .into_any_element()
     }
 
@@ -701,11 +711,11 @@ impl Joma {
         .child(div().flex().child(button("link-cancel", G_TIMES, "cancel", t, false).on_click(cx.listener(|this, _, _, cx| this.cancel_link(cx)))))
     }
 
-    /// "You": this device and the account's others, and linking a new one.
-    fn devices_group(&self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
+    /// The open account: picture, name, username, and removing it from this machine.
+    fn account_card(&self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
         let armed = self.is_armed("remove-account");
         let who = if self.model.username.is_empty() { self.model.me.chars().take(8).collect::<String>() + "…" } else { self.model.username.clone() };
-        let mut group = div().flex().flex_col().child(
+        div().flex().flex_col().child(
             div()
                 .flex()
                 .items_center()
@@ -735,7 +745,12 @@ impl Joma {
                         .text_color(if armed || self.mode == Mode::RemoveAccount { t.red } else { t.muted })
                         .on_click(cx.listener(|this, _, window, cx| this.remove_account(window, cx))),
                 ),
-        );
+        )
+    }
+
+    /// This account's devices, and linking a new one.
+    fn devices_group(&self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
+        let mut group = div().flex().flex_col();
         let mut ids: Vec<(String, String)> = self.model.devices.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         ids.sort_by_key(|(id, _)| *id != self.model.device);
         for (id, name) in ids {
@@ -799,18 +814,371 @@ impl Joma {
                 .py(px(4.))
                 .child(div().text_color(t.muted).child(if d.state == joma_jami::AUTH_IN_PROGRESS { "sending the account…" } else { "connecting to the new device…" }))
                 .child(button("dev-stop", G_TIMES, "", t, false).on_click(cx.listener(|this, _, _, cx| this.answer_device(false, cx)))),
-            None => div()
-                .flex()
-                .flex_wrap()
-                .gap(px(6.))
-                .px(px(10.))
-                .py(px(4.))
-                .child(
-                    button("dev-link", G_LINK, "link a device", t, self.mode == Mode::LinkDevice)
-                        .on_click(cx.listener(|this, _, window, cx| this.set_mode(Mode::LinkDevice, window, cx))),
-                )
-                .child(button("account-new", G_USER_PLUS, "other account", t, false).on_click(cx.listener(|this, _, window, cx| this.new_account(window, cx)))),
+            None => self.link_steps(t, cx),
         })
+    }
+
+    /// How to add a device to this account, step by step, with the commands to copy.
+    fn link_steps(&self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
+        let cmd = |id: &'static str, text: &str| {
+            let copy = text.to_owned();
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .child(div().flex_1().min_w(px(0.)).px(px(6.)).py(px(3.)).bg(t.bar).border_1().border_color(t.border).text_color(t.bright).truncate().child(text.to_owned()))
+                .child(button(id, G_COPY, "", t, false).on_click(cx.listener(move |this, _, _, cx| {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.clone()));
+                    this.show_flash("copied", cx);
+                })))
+        };
+        let step = |n: &str, text: &str| {
+            div()
+                .flex()
+                .gap(px(8.))
+                .child(div().flex_none().size(px(18.)).rounded_full().bg(t.accent_bg).text_color(t.accent).text_size(px(t.size - 3.)).flex().items_center().justify_center().child(n.to_owned()))
+                .child(div().flex_1().min_w(px(0.)).text_color(t.text).text_size(px(t.size - 1.)).child(text.to_owned()))
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .mx(px(10.))
+            .my(px(8.))
+            .p(px(10.))
+            .border_1()
+            .border_color(t.border)
+            .bg(t.bg)
+            .child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child("Add a device"))
+            .child(step("1", "On the new device, install Joma and run (or open Joma and choose “link to your account”):"))
+            .child(cmd("cp-link", "joma link"))
+            .child(step("2", "It shows a code starting with jami-auth://. Paste it here, or on this device run:"))
+            .child(cmd("cp-link-dev", "joma link-device jami-auth://…"))
+            .child(step("3", "Confirm here when the new device asks; it receives your account and history."))
+            .child(
+                div().flex().gap(px(6.)).child(
+                    button("dev-link", G_LINK, "paste the code", t, self.mode == Mode::LinkDevice)
+                        .on_click(cx.listener(|this, _, window, cx| this.set_mode(Mode::LinkDevice, window, cx))),
+                ),
+            )
+            .child(div().text_size(px(t.size - 2.)).text_color(t.muted).child("Install on a new machine: mise use -g github:dzanaga/joma-messenger (and sudo pacman -S jami-daemon)."))
+    }
+
+    /// The Calls tab: what runs now (open it or end it), then calls and shares that took
+    /// place, newest first.
+    fn calls_list(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let mut list = div().id("calls").flex().flex_col().flex_1().overflow_y_scroll();
+        let small = |label: &str| div().px(px(10.)).pt(px(10.)).pb(px(4.)).text_size(px(t.size - 2.5)).text_color(t.muted).child(label.to_uppercase());
+        let entry = |id: SharedString, glyph_str: &str, color: Hsla, who: &str, key: &str, what: String, when: String| {
+            div()
+                .id(id)
+                .flex()
+                .items_center()
+                .gap(px(10.))
+                .px(px(10.))
+                .py(px(6.))
+                .child(avatar(t, self.model.avatars.get(crate::model::bare_uri(key)).cloned(), crate::model::bare_uri(key), who, 28., None))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .child(div().truncate().text_color(t.bright).child(who.to_owned()))
+                        .child(div().flex().items_center().gap(px(4.)).text_size(px(t.size - 2.)).text_color(color).child(glyph(glyph_str, t)).child(div().truncate().child(what))),
+                )
+                .child(div().flex_none().text_size(px(t.size - 2.5)).text_color(t.muted).child(when))
+        };
+        // Now.
+        let calls: Vec<crate::model::Call> = self.model.calls.values().cloned().collect();
+        let shares = self.shares_running();
+        let direct_asked: Vec<String> = self.desk.direct_sessions().into_iter().filter(|k| matches!(self.desk.sessions.get(k).map(|s| &s.viewing), Some(crate::desk::Viewing::Asked { .. }))).collect();
+        if !calls.is_empty() || !shares.is_empty() || !direct_asked.is_empty() {
+            list = list.child(small("now"));
+        }
+        for c in calls {
+            let name = self.model.name_of(&c.peer);
+            let elapsed = c.started.map(|s| s.elapsed().as_secs()).map(|s| format!("{:02}:{:02}", s / 60, s % 60)).unwrap_or_default();
+            let (conv, id2) = (c.conversation.clone(), c.id.clone());
+            list = list.child(
+                entry(SharedString::from(format!("call-now-{}", c.id)), G_PHONE, t.green, &name, &c.peer, c.state.label().to_owned(), elapsed)
+                    .bg(t.accent_bg)
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(4.))
+                            .when_some(conv, |d, conv| {
+                                d.child(button(SharedString::from(format!("call-open-{}", c.id)), G_EYE, "", t, false).on_click(cx.listener(move |this, _, window, cx| {
+                                    this.set_tab(Tab::Chats, window, cx);
+                                    this.select(conv.clone(), cx);
+                                })))
+                            })
+                            .child(button(SharedString::from(format!("call-end-{id2}")), G_PHONE, "", t, false).text_color(t.red).on_click(cx.listener(move |this, _, _, cx| this.hang_up(cx)))),
+                    ),
+            );
+        }
+        for (key, started, shared) in shares {
+            let peer = crate::desk::direct_peer(&key).map(str::to_owned).or_else(|| self.model.calls.get(&key).map(|c| c.peer.clone())).unwrap_or_default();
+            let name = self.model.name_of(&peer);
+            let secs = started.elapsed().as_secs();
+            let (k1, k2) = (key.clone(), key.clone());
+            let direct = crate::desk::direct_peer(&key).is_some();
+            list = list.child(
+                entry(
+                    SharedString::from(format!("share-now-{key}-{shared}")),
+                    if shared { G_DESKTOP } else { G_EYE },
+                    t.yellow,
+                    &name,
+                    &peer,
+                    if shared { "you share your screen".into() } else { "you watch their screen".into() },
+                    format!("{:02}:{:02}", secs / 60, secs % 60),
+                )
+                .bg(t.accent_bg)
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(4.))
+                        .when(!shared, |d| {
+                            d.child(button(SharedString::from(format!("share-open-{k1}")), G_EXPAND, "", t, false).on_click(cx.listener(|this, _, window, cx| {
+                                this.set_tab(Tab::Chats, window, cx);
+                                this.stage = true;
+                                cx.notify();
+                            })))
+                        })
+                        .child(button(SharedString::from(format!("share-end-{k2}-{shared}")), G_TIMES, "", t, false).text_color(t.red).on_click(cx.listener(move |this, _, _, cx| {
+                            if direct {
+                                this.stop_direct(&k2, cx);
+                            } else if shared {
+                                this.toggle_share(cx);
+                            } else {
+                                let acc = this.model.account.clone();
+                                this.desk.decline_offer(&acc, &k2);
+                                cx.notify();
+                            }
+                        }))),
+                ),
+            );
+        }
+        for key in direct_asked {
+            let peer = crate::desk::direct_peer(&key).unwrap_or_default().to_owned();
+            let name = self.model.name_of(&peer);
+            let (k1, k2) = (key.clone(), key.clone());
+            list = list.child(
+                entry(SharedString::from(format!("share-ask-{key}")), G_DESKTOP, t.accent, &name, &peer, "wants to show you their screen".into(), String::new())
+                    .bg(t.accent_bg)
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(4.))
+                            .child(button(SharedString::from(format!("ask-watch-{k1}")), G_EYE, "watch", t, true).on_click(cx.listener(move |this, _, _, cx| this.watch_direct(&k1, cx))))
+                            .child(button(SharedString::from(format!("ask-no-{k2}")), G_TIMES, "", t, false).on_click(cx.listener(move |this, _, _, cx| this.stop_direct(&k2, cx)))),
+                    ),
+            );
+        }
+        // History: calls from the conversations, shares from Joma's log.
+        let mut past: Vec<(i64, String, String, bool, bool, String)> = Vec::new();
+        for c in self.model.conversations.values() {
+            let peer = c.peers.first().cloned().unwrap_or_default();
+            for m in c.messages.iter().filter(|m| m.kind == MsgKind::Event && (m.text.starts_with("call") || m.text == "missed call")) {
+                let mine = crate::model::bare_uri(&m.author) == self.model.me;
+                past.push((m.ts, c.id.clone(), peer.clone(), true, mine, m.text.clone()));
+            }
+        }
+        for l in &self.share_log {
+            let what = format!("{} · {}:{:02}", if l.shared { "you shared your screen" } else { "you watched their screen" }, l.secs / 60, l.secs % 60);
+            past.push((l.ts, String::new(), l.peer.clone(), false, l.shared, what));
+        }
+        past.sort_by_key(|p| std::cmp::Reverse(p.0));
+        list = list.child(small("history"));
+        if past.is_empty() {
+            list = list.child(div().px(px(10.)).py(px(6.)).text_color(t.muted).child("no calls or shares yet"));
+        }
+        for (i, (ts, conv, peer, call, mine, text)) in past.into_iter().take(150).enumerate() {
+            let name = self.model.name_of(&peer);
+            let missed = text == "missed call";
+            let (g, color) = if !call {
+                (if mine { G_DESKTOP } else { G_EYE }, t.muted)
+            } else if missed {
+                (G_PHONE, t.red)
+            } else {
+                (G_PHONE, if mine { t.accent } else { t.green })
+            };
+            let label = if call { format!("{} {}", if mine { "outgoing" } else { "incoming" }, text) } else { text };
+            let row = entry(SharedString::from(format!("past-{i}")), g, color, &name, &peer, label, short_when(ts)).cursor_pointer().hover(|d| d.bg(t.raised));
+            list = list.child(if conv.is_empty() {
+                row
+            } else {
+                row.on_click(cx.listener(move |this, _, window, cx| {
+                    this.set_tab(Tab::Chats, window, cx);
+                    this.select(conv.clone(), cx);
+                }))
+            });
+        }
+        list.into_any_element()
+    }
+
+    /// The Accounts tab: the open one, the others on this machine, adding one.
+    fn accounts_list(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let small = |label: &str| div().px(px(10.)).pt(px(10.)).pb(px(4.)).text_size(px(t.size - 2.5)).text_color(t.muted).child(label.to_uppercase());
+        let mut list = div().id("accounts").flex().flex_col().flex_1().overflow_y_scroll().child(small("open")).child(self.account_card(t, cx));
+        if self.model.username.is_empty() {
+            list = list.child(
+                div().flex().px(px(10.)).py(px(4.)).child(
+                    button("acc-username", G_PENCIL, "choose a username", t, false).on_click(cx.listener(|this, _, window, cx| this.set_mode(Mode::Username, window, cx))),
+                ),
+            );
+        }
+        if self.accounts.len() > 1 {
+            list = list.child(small("on this machine")).child(self.accounts_group(t, cx));
+        }
+        list.child(small("add"))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    .px(px(10.))
+                    .py(px(4.))
+                    .child(div().flex().child(button("account-new", G_USER_PLUS, "create a new account", t, false).on_click(cx.listener(|this, _, window, cx| this.new_account(window, cx)))))
+                    .child(div().flex().child(button("account-link", G_LINK, "log in with another device", t, false).on_click(cx.listener(|this, _, window, cx| {
+                        this.new_account(window, cx);
+                        this.start_link(cx);
+                    }))))
+                    .child(div().text_size(px(t.size - 2.)).text_color(t.muted).child("Logging in with another device brings an account you already have (its username and contacts come with it).")),
+            )
+            .child(small("agents"))
+            .child(
+                div().flex().px(px(10.)).py(px(4.)).child(
+                    button("acc-agents", G_ROBOT, "agent accounts…", t, false).on_click(cx.listener(|this, _, window, cx| this.set_tab(Tab::Agents, window, cx))),
+                ),
+            )
+            .into_any_element()
+    }
+
+    /// The Agents tab: a first sketch; nothing runs yet.
+    fn agents_list(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let card = |name: &str, what: &str| {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(10.))
+                .mx(px(10.))
+                .my(px(4.))
+                .p(px(8.))
+                .border_1()
+                .border_color(t.border)
+                .opacity(0.6)
+                .child(div().size(px(32.)).rounded(px(3.)).bg(t.accent_bg).text_color(t.accent).flex().items_center().justify_center().child(G_ROBOT))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .child(div().text_color(t.bright).child(name.to_owned()))
+                        .child(div().text_size(px(t.size - 2.)).text_color(t.muted).child(what.to_owned())),
+                )
+                .child(div().text_size(px(t.size - 2.5)).text_color(t.muted).child("planned"))
+        };
+        div()
+            .id("agents")
+            .flex()
+            .flex_col()
+            .flex_1()
+            .overflow_y_scroll()
+            .child(
+                div()
+                    .px(px(10.))
+                    .py(px(10.))
+                    .text_color(t.muted)
+                    .text_size(px(t.size - 1.))
+                    .child("Agents get a Jami account of their own: you chat with them like with a contact, and Joma runs them through ACP (Claude Code, Codex). Not built yet: see docs/discussions/2026-10-31-agents.qmd."),
+            )
+            .child(card("Claude", "Claude Code through ACP · its own Jami account"))
+            .child(card("Codex", "Codex through ACP · its own Jami account"))
+            .child(div().px(px(10.)).py(px(8.)).flex().child(button("agent-new", G_PLUS, "new agent", t, false).on_click(cx.listener(|this, _, _, cx| {
+                this.show_flash("agents are not built yet: the discussion document says how they could work", cx);
+            }))))
+            .into_any_element()
+    }
+
+    /// The rail: one button per tab, our picture at the bottom.
+    fn rail(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let unread: u32 = self.listed_unread();
+        let live = !self.model.calls.is_empty() || !self.running_shares_empty();
+        let item = |tab: Tab, g: &str, title: &str, badge: Option<String>, dot: bool| {
+            let on = self.tab == tab;
+            div()
+                .id(SharedString::from(format!("rail-{title}")))
+                .relative()
+                .size(px(38.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(4.))
+                .text_size(px(t.size + 3.))
+                .text_color(if on { t.accent } else { t.muted })
+                .when(on, |d| d.bg(t.accent_bg))
+                .cursor_pointer()
+                .hover(|d| d.text_color(t.bright).bg(t.raised))
+                .child(g.to_owned())
+                .when_some(badge, |d, b| {
+                    d.child(
+                        div()
+                            .absolute()
+                            .top(px(2.))
+                            .right(px(1.))
+                            .min_w(px(15.))
+                            .h(px(14.))
+                            .px(px(3.))
+                            .rounded(px(7.))
+                            .bg(t.accent)
+                            .text_color(t.bar)
+                            .text_size(px(t.size - 4.))
+                            .font_weight(FontWeight::BOLD)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(b),
+                    )
+                })
+                .when(dot, |d| d.child(div().absolute().top(px(5.)).right(px(5.)).size(px(8.)).rounded_full().bg(t.green)))
+                .on_click(cx.listener(move |this, _, window, cx| this.set_tab(tab, window, cx)))
+        };
+        div()
+            .flex()
+            .flex_col()
+            .flex_none()
+            .items_center()
+            .justify_between()
+            .w(px(48.))
+            .h_full()
+            .py(px(6.))
+            .bg(t.bar)
+            .border_r_1()
+            .border_color(t.border)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(4.))
+                    .child(item(Tab::Chats, G_COMMENT, "chats", (unread > 0).then(|| unread.min(99).to_string()), false))
+                    .child(item(Tab::Calls, G_PHONE, "calls", None, live))
+                    .child(item(Tab::Contacts, G_USERS, "contacts", None, false))
+                    .child(item(Tab::Devices, G_LAPTOP, "devices", None, self.device_op.is_some()))
+                    .child(item(Tab::Accounts, G_USER_CIRCLE, "accounts", None, false))
+                    .child(item(Tab::Agents, G_ROBOT, "agents", None, false)),
+            )
+            .child(
+                div()
+                    .id("rail-me")
+                    .cursor_pointer()
+                    .hover(|d| d.opacity(0.8))
+                    .child(avatar(t, self.model.avatars.get(&self.model.me).cloned(), &self.model.me, &self.model.my_name, 30., Some(if self.quick.invisible { t.muted } else { t.green })))
+                    .on_click(cx.listener(|this, _, _, cx| this.open_profile(cx))),
+            )
+            .into_any_element()
     }
 
     /// The machine's other accounts: a click opens one.
@@ -841,12 +1209,6 @@ impl Joma {
     fn contacts_list(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let mut list = div().id("contacts").flex().flex_col().flex_1().overflow_y_scroll();
         let small = |label: &str| div().px(px(10.)).pt(px(8.)).pb(px(2.)).text_size(px(t.size - 2.5)).text_color(t.muted).child(label.to_uppercase());
-        if self.mode != Mode::Search {
-            list = list.child(small("you")).child(self.devices_group(t, cx));
-            if self.accounts.len() > 1 {
-                list = list.child(small("other accounts")).child(self.accounts_group(t, cx));
-            }
-        }
         let requests: Vec<Conversation> = self.model.ordered().into_iter().filter(|c| c.request).cloned().collect();
         if !requests.is_empty() {
             list = list.child(small("requests"));
@@ -2150,7 +2512,7 @@ impl Joma {
                 Mode::Removed => "removed contacts · esc: back",
                 Mode::Chat if self.narrow && self.narrow_chat => "esc: back · ctrl+.: quick",
                 Mode::Chat if self.narrow => "ctrl+n: add · ctrl+k: find · ctrl+shift+k: contacts",
-                Mode::Chat => "alt+j/k: chats · ctrl+shift+k: contacts · ctrl+n: add · ctrl+k: find · ctrl+shift+c/v: call · ctrl+.: quick",
+                Mode::Chat => "alt+j/k: chats · ctrl+1…6: tabs · ctrl+n: add · ctrl+k: find · ctrl+shift+c/v: call · ctrl+.: quick",
             }),
         };
         div()
@@ -2258,7 +2620,7 @@ impl Render for Joma {
                 .flex_1()
                 .min_h(px(0.))
                 .when(chat, |d| d.child(self.chat(&t, cx)))
-                .when(!chat, |d| d.child(self.sidebar(&t, cx)))
+                .when(!chat, |d| d.child(self.rail(&t, cx)).child(self.sidebar(&t, cx)))
                 .into_any_element()
         } else if self.gate == Gate::Ready {
             div()
@@ -2266,7 +2628,7 @@ impl Render for Joma {
                 .flex_1()
                 .min_h(px(0.))
                 // A stage that takes the window takes the sidebar's room too.
-                .when(!(self.stage && self.has_stage()), |d| d.child(self.sidebar(&t, cx)))
+                .when(!(self.stage && self.has_stage()), |d| d.child(self.rail(&t, cx)).child(self.sidebar(&t, cx)))
                 .child(self.chat(&t, cx))
                 .into_any_element()
         } else {
@@ -2346,6 +2708,12 @@ impl Render for Joma {
             .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.zoom_by(1.25, cx)))
             .on_action(cx.listener(|this, _: &ZoomOut, _, cx| this.zoom_by(1. / 1.25, cx)))
             .on_action(cx.listener(|this, _: &ZoomFit, _, cx| this.zoom(crate::stage::Zoom::Fit, cx)))
+            .on_action(cx.listener(|this, _: &TabChats, window, cx| this.set_tab(Tab::Chats, window, cx)))
+            .on_action(cx.listener(|this, _: &TabCalls, window, cx| this.set_tab(Tab::Calls, window, cx)))
+            .on_action(cx.listener(|this, _: &TabContacts, window, cx| this.set_tab(Tab::Contacts, window, cx)))
+            .on_action(cx.listener(|this, _: &TabDevices, window, cx| this.set_tab(Tab::Devices, window, cx)))
+            .on_action(cx.listener(|this, _: &TabAccounts, window, cx| this.set_tab(Tab::Accounts, window, cx)))
+            .on_action(cx.listener(|this, _: &TabAgents, window, cx| this.set_tab(Tab::Agents, window, cx)))
             .on_action(cx.listener(|this, _: &ToggleQuick, _, cx| {
                 this.quick_open = !this.quick_open;
                 cx.notify();
