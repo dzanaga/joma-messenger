@@ -1,0 +1,90 @@
+---
+title: "Joma at night: tabs, accounts and agents"
+date: 2026-10-31
+lang: en
+---
+
+# How to read
+
+Under each question there is a `- [ ] A:` line.
+
+- **Tick it without writing anything:** you agree with the proposal.
+- **Tick it and add a detail:** you agree, with that detail.
+- **Leave it unticked and write:** I revise the proposal.
+
+Built tonight (0.4.3) and open to change: the rail of tabs, the Calls, Devices,
+Accounts and Agents tabs, and the fix for the username of a linked account. The Agents
+tab is only a picture of what could come; nothing runs.
+
+# 1. The rail of tabs
+
+Five tabs (plus Agents) did not fit as words over a 290 px sidebar, so they became a
+rail of icons on the far left (as in Discord or Slack), with Ctrl+1…6, an unread badge
+on Chats, a green dot on Calls while a call or share runs, and our picture at the
+bottom (opens the picture editor). The tab's name is the sidebar's title.
+
+- [ ] A:
+
+# 2. Agents: their own account, or a tab of their own?
+
+Proposal: an agent is a Jami account of its own on this machine (not a linked device,
+as D-18 says), created and deleted in the **Agents** tab, which stays a tab rather than
+a section of Accounts: agents are things you talk to, accounts are who you are.
+
+- [ ] A:
+
+# 3. How an agent runs
+
+Proposal, first version:
+
+1. "new agent" asks for a name, a picture (the pixel editor) and a kind: Claude Code or
+   Codex, both through ACP (Agent Client Protocol: the agent runs as a subprocess and
+   speaks JSON-RPC over stdio).
+2. Joma creates a Jami account for it (no username on the name server, unless you want
+   one) and adds it as a contact of your accounts, so it shows in Chats like a person.
+3. A message to the agent's conversation goes to its ACP session; its answers, tool
+   calls and permission requests come back as messages. Permission requests become
+   buttons (allow once, always, deny).
+4. The agent runs only on this machine, in a working directory you choose, and only
+   while Joma runs. Your other devices see the conversation (it is a normal Jami
+   conversation) and can write to it: the machine running the agent answers.
+5. Contacts can be given access to an agent later (it is a Jami account: they can add
+   it), off by default.
+
+- [ ] A:
+
+# 4. What the agent may do
+
+Proposal: the working directory is fixed per agent; the ACP permission prompts are
+always shown to you (never auto-allowed at first); no screen or remote control for
+agents until we discuss it again.
+
+- [ ] A:
+
+# 5. Logging in with another device and the username
+
+What happened: you linked an account here, and Joma offered "choose a username". The
+linked account did have one, but Joma read it only from details the daemon fills in
+later. Since 0.4.3 Joma asks the name server for its own name once online, and the top
+bar shows `@name` (verified in the nest: a fresh profile linked to `arol` shows
+`@arol`, sees the three devices, and got the picture).
+
+If you had typed another handle: the name server holds one name per account and names
+cannot be taken back, so registering a second name for an account that has one fails
+("already registered"); a name nobody has would have been tried and refused. Joma now
+hides "choose a username" once the name is known.
+
+Proposal: keep it this way; "choose a username" appears only when the name server says
+the account has none.
+
+- [ ] A:
+
+# 6. Devices all called "zoma"
+
+Every test profile on this machine named its device after the hostname, so the Devices
+tab lists "zoma" three times. On real machines names differ, but two Joma on one machine
+(or a renamed laptop) look the same. Proposal: a new device names itself
+`<hostname> · Joma` and the Devices tab shows the first 8 characters of the id next to
+equal names.
+
+- [ ] A:

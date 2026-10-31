@@ -2939,7 +2939,7 @@ impl Joma {
                 }
                 match &self.linking {
                     Some(l) if !l.token.is_empty() => Reply::Text {
-                        text: format!("{}\n\nOn your other device: joma link-device <this code>, or Joma → contacts → you → link a device.", l.token),
+                        text: format!("{}\n\nOn your other device: joma link-device <this code>, or Joma → Devices → paste the code.", l.token),
                     },
                     _ => Reply::Error { message: "preparing the code: run `joma link` again in a few seconds".into() },
                 }

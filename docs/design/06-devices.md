@@ -12,6 +12,11 @@ A Jami account lives on several devices (D-18). Joma uses Jami's linking and add
   password) and ends with DONE (error empty on success; else the empty account is
   removed). `joma link` / `joma link-device` do the same from a shell; the latter
   confirms without asking.
+- **The username of a linked account** is not in its details at first: once
+  registered, Joma takes `Account.registeredName` from the volatile details or asks the
+  name server (`lookupAddress` of our own URI) and keeps the answer, so it never offers
+  to choose a username the account already has (fixed in 0.4.3; before, "choose a
+  username" showed and registering another name would have failed on the name server).
 - **A linked account learns things late:** this device's id is in the *volatile*
   details (`Account.deviceID`), the name may be only in `profile.vcf`. Joma re-reads
   them when the account registers (`refresh_identity`) and never writes a profile from

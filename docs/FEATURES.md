@@ -1,5 +1,10 @@
 # Features
 
+## Layout
+A rail of tabs on the left (Ctrl+1…6): **chats**, **calls** (what runs now, with open
+and end, and past calls and shares), **contacts**, **devices**, **accounts**, **agents**
+(a sketch for now); your picture at the bottom opens it for editing.
+
 ## Account
 Creating an account asks for your name (what contacts see), then an optional username:
 it is registered on Jami's name server once the account is online, so contacts can find
@@ -8,15 +13,16 @@ writes the profile contacts receive (accounts made by Joma 0.2 and earlier had n
 contacts saw a 40-digit ID; it is added the next time the account comes online).
 
 One machine can hold several accounts, each its own identity with its own contacts and
-history. Contacts → you shows the open one; "other account" creates or links another
-(back returns), and "other accounts" lists the rest: a click opens one (`joma accounts`,
+history. The **accounts** tab shows the open one, the others on this machine (a click
+opens one), **create a new account** and **log in with another device** (brings an
+account you already have; its username comes with it, nothing to choose) (`joma accounts`,
 `joma account <name>`). Joma reopens the last one at start. The others stay connected,
 but only the open one is shown and notifies. The bin next to your name removes the
 account from this machine: two clicks when your other devices keep it, else typing
 `delete`, since an account no other device has is lost for good.
 
 ## Your picture
-Contacts → you → your picture (or the pencil): choose a picture (cropped square) or
+Your picture at the bottom of the rail (or the pencil in Accounts): choose a picture (cropped square) or
 **draw pixels**: a 16×16 grid with pen, eraser, fill and mirror, colours from a grid of
 hues and greys (shift+click a colour: the background), a live preview; "use it" sets
 it. Contacts receive it with your profile and see it in their lists, headers and
@@ -35,7 +41,7 @@ saw you active forget it; you still see theirs. Jami's own reachability cannot b
 hidden. Saved as `invisible` in `~/.config/joma/quick.toml`.
 
 ## Contacts
-The **contacts** tab next to **chats** (Ctrl+Shift+K) lists everyone you added, with or
+The **contacts** tab (Ctrl+3, or Ctrl+Shift+K) lists everyone you added, with or
 without a chat:
 - requests waiting for you on top (accept or decline);
 - each contact with the presence dot, a star, and quick buttons: message, call, video
@@ -57,14 +63,14 @@ One Jami account can live on several devices (Joma or the Jami app); each has ev
 conversation. A message you send reaches your other devices first, and a contact who
 was offline gets it from whichever of your devices is online, even if the one you wrote
 on is off (tested: sender off, the second device delivered within seconds).
-- **Contacts → you:** your devices, "this device" first. A dot shows which ones run Joma
+- **Devices** tab: your devices, "this device" first. A dot shows which ones run Joma
   now (active or away; they tell each other, also when you are invisible to contacts).
   The pencil renames this device; ⊘ revokes another (click twice): it loses the account.
 - **Link a device:**
   1. on the new machine, Joma's welcome screen: **link to your account** shows a code and
      its QR (or `joma link` prints it);
-  2. on a device that has the account: **Contacts → you → link a device** and paste the
-     code (or `joma link-device <code>`; the Jami app scans the QR);
+  2. on a device that has the account: **Devices → paste the code** (the tab shows the
+     steps and the commands to copy) (or `joma link-device <code>`; the Jami app scans the QR);
   3. Joma asks whether to send the account to the device at that address; the command
      line sends it without asking. An account with a password asks for it on the new
      device.
@@ -175,7 +181,7 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
-- unreleased (0.4.3 in progress): a rail of tabs on the left (chats, calls, contacts,
+- 0.4.3 (2026-10-31): a rail of tabs on the left (chats, calls, contacts,
   devices, accounts, agents; Ctrl+1…6); Calls lists what runs now and past calls and
   shares; Devices explains linking with the commands to run; Accounts holds the open
   account, the others, create / log in with another device; Agents is a placeholder.

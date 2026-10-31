@@ -689,7 +689,7 @@ impl Joma {
         }
         let token = l.token.clone();
         card.child(div().child(
-            "On your other device: Joma → contacts → you → link a device, and paste this code; or in the Jami app: Link device, and scan it.",
+            "On your other device: Joma → Devices → paste the code (or run joma link-device <code> there); or in the Jami app: Link device, and scan it.",
         ))
         .when(!token.is_empty(), |d| {
             let copy = token.clone();
@@ -758,7 +758,13 @@ impl Joma {
             let dot = self.device_dot(&id);
             let armed = self.is_armed(&format!("revoke:{id}"));
             let i = id.clone();
-            let label = if name.is_empty() { format!("{}…", &id[..id.len().min(8)]) } else { name };
+            // Equal names (two Joma on one host) get the start of the id.
+            let twins = self.model.devices.values().filter(|n| **n == name).count() > 1;
+            let label = match (name.is_empty(), twins) {
+                (true, _) => format!("{}…", &id[..id.len().min(8)]),
+                (false, true) => format!("{name} · {}", &id[..id.len().min(6)]),
+                (false, false) => name,
+            };
             group = group.child(
                 div()
                     .flex()
