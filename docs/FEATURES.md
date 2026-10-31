@@ -109,11 +109,22 @@ Beside the message box:
   only for voice, a window for video), click again to stop.
 
 ## Watching together
-A YouTube link's card has **watch together** (or `joma watch-together <to> <url>`, any
-link or file both sides can open): each side plays it in its own mpv, and play, pause
-and seeks follow from either side; the other gets **join** or **no**. It rides the call
-when there is one, else account messages. Closing mpv or **stop** ends it for both.
-Details and next steps: `docs/discussions/2026-10-31-media.qmd`.
+Type `@youtube epic fails` (the YouTube button beside the message box writes `@youtube `
+for you) and Enter: Joma searches and sends the first five results to the conversation
+(as text with links, readable in any Jami app); Joma shows them as cards. Each has **for
+me** (plays in your own mpv) and **together** (invites the conversation); when a session
+runs, **queue** and **switch** instead. A single YouTube link's card has the same.
+
+In a session everyone who joined plays the video in their own mpv, kept in step (a
+seek aims ahead by how long that player takes to buffer; small gaps are closed by
+playing up to 10 % faster or slower). The panel above the conversation shows the video,
+the time, who watches and the queue, with **play/pause**, **next**, **end** and
+**leave**. Every playback action (play, pause, seek, switch, next, end) is a proposal
+that passes when at least half of the participants agree, the proposer included: two
+people both command at once; in a group the others see it with **yes**/**no** and the
+count. Doing it in mpv counts as proposing it (in a group your player stays with the
+others until it passes). Adding to the queue needs no vote; at a video's end the queue
+goes on. `joma watch-together <to> <url>` starts one from the command line.
 
 ## Files
 Paste a picture (Ctrl+V), paste files copied in the file manager, or drop files on the
@@ -217,6 +228,9 @@ when mise has Joma here, since the two would compete and the launcher would star
 whichever ran last.
 
 ## Log
+- 0.5.1 (2026-10-31): `@youtube <search>` shares five results in the conversation;
+  watching together in any conversation (groups too) with a queue and votes (half of
+  the participants decide; two people both command); tighter sync for streams.
 - 0.5.0 (2026-10-31): watching together (mpv on both sides, kept in step);
   discussions on agents, watching together, transcription and GIFs.
 - 0.4.6 (2026-10-31): laser pointer and pen on a shared screen, shown on the sharer's

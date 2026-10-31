@@ -32,6 +32,15 @@ play, after a seek from the one who joined, and after a pause.
 
 - [ ] A:
 
+# 1b. Since then (0.5.1, your request)
+
+`@youtube <search>` posts five results everyone sees; sessions belong to the
+conversation (groups included), with a queue, and every playback action passes when
+half of the participants agree (two people both command). Not tested with three people
+yet (needs a third test account in a group); the vote counting is unit-tested.
+
+- [ ] A:
+
 # 2. Watching together: what is next
 
 Proposals, in order:

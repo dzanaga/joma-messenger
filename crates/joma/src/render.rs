@@ -59,6 +59,8 @@ pub const G_YOUTUBE: &str = "\u{f16a}";
 pub const G_PLAY: &str = "\u{f04b}";
 pub const G_STOP: &str = "\u{f04d}";
 pub const G_POINTER: &str = "\u{f245}";
+pub const G_PAUSE: &str = "\u{f04c}";
+pub const G_FORWARD: &str = "\u{f051}";
 
 /// The emoji the picker offers.
 const EMOJI: &[&str] = &[
@@ -318,7 +320,15 @@ impl Joma {
             .selected
             .as_ref()
             .and_then(|s| self.model.conversations.get(s))
-            .map(|c| c.messages.iter().filter_map(|m| crate::media::youtube_id(&m.text)).collect())
+            .map(|c| {
+                c.messages
+                    .iter()
+                    .flat_map(|m| match crate::watch::parse_results(&m.text) {
+                        Some((_, list)) => list.into_iter().map(|(_, id)| id).collect(),
+                        None => crate::media::youtube_id(&m.text).into_iter().collect::<Vec<_>>(),
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
         for id in ids {
             self.want_youtube_preview(&id);
@@ -1823,17 +1833,14 @@ impl Joma {
         row.child(div().flex_1().min_w(px(0.)).child(self.composer.clone()))
             .child(button("emoji", G_SMILE, "", t, self.emoji_open).on_click(cx.listener(|this, _, _, cx| {
                 this.emoji_open = !this.emoji_open;
-                this.youtube = None;
                 cx.notify();
             })))
-            .child(button("yt", G_YOUTUBE, "", t, self.youtube.is_some()).on_click(cx.listener(|this, _, _, cx| {
+            // YouTube: the message box becomes the search box (`@youtube …`, then Enter).
+            .child(button("yt", G_YOUTUBE, "", t, false).on_click(cx.listener(|this, _, _, cx| {
                 this.emoji_open = false;
-                if this.youtube.is_some() {
-                    this.youtube = None;
-                    cx.notify();
-                } else {
-                    this.search_youtube(cx);
-                }
+                this.composer.update(cx, |c, cx| c.set_text("@youtube ", cx));
+                this.focus_composer = true;
+                cx.notify();
             })))
             .child(button("rec-voice", G_MIC, "", t, false).on_click(cx.listener(|this, _, _, cx| this.start_recording(false, cx))))
             .child(button("rec-video", G_VIDEO, "", t, false).on_click(cx.listener(|this, _, _, cx| this.start_recording(true, cx))))
@@ -1863,49 +1870,6 @@ impl Joma {
             );
         }
         Some(div().mx(px(12.)).mt(px(6.)).p(px(6.)).border_1().border_color(t.border).bg(t.panel).max_h(px(200.)).child(div().id("emoji-scroll").overflow_y_scroll().max_h(px(188.)).child(grid)).into_any_element())
-    }
-
-    fn youtube_popover(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let y = self.youtube.as_ref()?;
-        let head = div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .pb(px(4.))
-            .child(div().text_color(t.muted).text_size(px(t.size - 2.)).child(if y.query.is_empty() { "YouTube".to_owned() } else { format!("YouTube · “{}”", y.query) }))
-            .child(button("yt-close", G_TIMES, "", t, false).on_click(cx.listener(|this, _, _, cx| {
-                this.youtube = None;
-                cx.notify();
-            })));
-        let body: AnyElement = match &y.results {
-            None => div().text_color(t.muted).child("searching…").into_any_element(),
-            Some(Err(e)) => div().text_color(t.yellow).child(e.clone()).into_any_element(),
-            Some(Ok(list)) if list.is_empty() => div().text_color(t.muted).child("nothing found").into_any_element(),
-            Some(Ok(list)) => {
-                let mut col = div().flex().flex_col();
-                for v in list {
-                    let id = v.id.clone();
-                    col = col.child(
-                        div()
-                            .id(SharedString::from(format!("ytr-{}", v.id)))
-                            .flex()
-                            .items_center()
-                            .gap(px(8.))
-                            .px(px(6.))
-                            .py(px(4.))
-                            .cursor_pointer()
-                            .hover(|d| d.bg(t.raised))
-                            .child(div().flex_none().text_color(t.red).child(G_YOUTUBE))
-                            .child(div().flex_1().min_w(px(0.)).truncate().text_color(t.bright).child(v.title.clone()))
-                            .child(div().flex_none().max_w(px(140.)).truncate().text_size(px(t.size - 2.)).text_color(t.muted).child(v.channel.clone()))
-                            .child(div().flex_none().w(px(66.)).flex().justify_end().text_size(px(t.size - 2.)).text_color(t.muted).child(crate::media::duration_label(v.duration)))
-                            .on_click(cx.listener(move |this, _, _, cx| this.pick_youtube(&id, cx))),
-                    );
-                }
-                col.into_any_element()
-            }
-        };
-        Some(div().mx(px(12.)).mt(px(6.)).p(px(8.)).border_1().border_color(t.border).bg(t.panel).child(head).child(body).into_any_element())
     }
 
     /// A YouTube link's card: thumbnail, title and channel; a click opens it.
@@ -1957,10 +1921,21 @@ impl Joma {
                             .child(div().text_size(px(t.size - 2.)).text_color(t.accent).child("open in the browser"))
                             .child({
                                 let (u, title) = (url.clone(), p.title.clone());
-                                button(SharedString::from(format!("ytw-{msg_id}")), G_PLAY, "watch together", t, false).on_click(cx.listener(move |this, _, _, cx| {
-                                    cx.stop_propagation();
-                                    this.start_watch(&u, &title, cx);
-                                }))
+                                let (u2, title2) = (url.clone(), p.title.clone());
+                                let session = self.selected.as_ref().is_some_and(|c| self.watches.get(c).is_some_and(|w| w.joined));
+                                div()
+                                    .flex()
+                                    .gap(px(4.))
+                                    .child(button(SharedString::from(format!("ytw-{msg_id}")), if session { G_EXCHANGE } else { G_USERS }, if session { "switch" } else { "together" }, t, false).on_click(cx.listener(move |this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        this.start_watch(&u, &title, cx);
+                                    })))
+                                    .when(session, |d| {
+                                        d.child(button(SharedString::from(format!("ytq-{msg_id}")), G_PLUS, "queue", t, false).on_click(cx.listener(move |this, _, _, cx| {
+                                            cx.stop_propagation();
+                                            this.queue_watch(&u2, &title2, cx);
+                                        })))
+                                    })
                             }),
                     ),
             )
@@ -2580,49 +2555,139 @@ impl Joma {
         )
     }
 
-    /// Watching together: an invitation to answer, or the session running.
+    /// Watching together in the open conversation: the invitation, or the session with
+    /// its queue and the proposals to vote on.
     fn watch_panels(&self, t: &Theme, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let mut keys: Vec<&String> = self.watches.keys().collect();
-        keys.sort();
-        keys.into_iter()
-            .filter_map(|k| self.watches.get(k).map(|w| (k.clone(), w)))
-            .map(|(key, w)| {
-                let name = self.model.name_of(&w.peer);
-                let invited = w.player.is_none();
-                let (k1, k2) = (key.clone(), key.clone());
-                let text = if invited {
-                    format!("{name} wants to watch together: {}", w.title)
-                } else {
-                    format!("{G_PLAY} watching together with {name}: {} · in step", w.title)
-                };
+        use crate::watch::Action;
+        let Some(conv) = self.selected.clone() else { return Vec::new() };
+        let Some(w) = self.watches.get(&conv) else { return Vec::new() };
+        let me = self.model.me.clone();
+        let leader = self.model.name_of(&w.leader);
+        let mut panel = div().flex().flex_col().gap(px(4.)).px(px(12.)).py(px(6.)).border_b_1().border_color(t.border).bg(if w.joined { t.panel } else { t.accent_bg });
+        let (c1, c2) = (conv.clone(), conv.clone());
+        if !w.joined {
+            return vec![panel
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(div().flex_1().min_w(px(0.)).truncate().text_color(t.bright).child(format!("{leader} invites you to watch together: {}", w.current.title)))
+                        .child(button("w-join", G_PLAY, "join", t, true).on_click(cx.listener(move |this, _, _, cx| this.join_watch(&c1, cx))))
+                        .child(button("w-no", G_TIMES, "no", t, false).on_click(cx.listener(move |this, _, _, cx| this.leave_watch(&c2, cx)))),
+                )
+                .into_any_element()];
+        }
+        let n = w.participants.len();
+        let playing = w.playing;
+        let pos = w.position();
+        let (c3, c4, c5, c6) = (conv.clone(), conv.clone(), conv.clone(), conv.clone());
+        panel = panel.child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .child(div().text_color(t.green).child(if playing { G_PLAY } else { G_PAUSE }))
+                .child(div().flex_none().text_size(px(t.size - 2.)).text_color(t.muted).child(format!("{n} watching · {}", crate::watch::clock(pos))))
+                .child(div().flex_1().min_w(px(0.)).truncate().text_color(t.bright).child(w.current.title.clone()))
+                .child(button("w-pp", if playing { G_PAUSE } else { G_PLAY }, if playing { "pause" } else { "play" }, t, false).on_click(cx.listener(move |this, _, _, cx| {
+                    let (playing, pos) = this.watches.get(&c3).map(|w| (w.playing, w.position())).unwrap_or_default();
+                    this.propose(&c3, if playing { Action::Pause { pos } } else { Action::Play { pos } }, cx);
+                })))
+                .when(!w.queue.is_empty(), |d| d.child(button("w-skip", G_FORWARD, "next", t, false).on_click(cx.listener(move |this, _, _, cx| this.propose(&c4, Action::Skip, cx)))))
+                .child(button("w-stop", G_STOP, "end", t, false).on_click(cx.listener(move |this, _, _, cx| this.propose(&c5, Action::Stop, cx))))
+                .child(button("w-leave", G_TIMES, "leave", t, false).text_color(t.red).on_click(cx.listener(move |this, _, _, cx| this.leave_watch(&c6, cx)))),
+        );
+        if !w.queue.is_empty() {
+            let list = w.queue.iter().enumerate().map(|(i, q)| format!("{}. {}", i + 1, q.title)).collect::<Vec<_>>().join("  ·  ");
+            panel = panel.child(div().truncate().text_size(px(t.size - 2.)).text_color(t.muted).child(format!("queue: {list}")));
+        }
+        for p in &w.proposals {
+            let (cy, cn, pid) = (conv.clone(), conv.clone(), p.pid);
+            let mine = p.by == me;
+            let voted = p.yes.contains(&me) || p.no.contains(&me);
+            let need = n.div_ceil(2);
+            panel = panel.child(
                 div()
                     .flex()
                     .items_center()
-                    .justify_between()
+                    .gap(px(6.))
+                    .child(div().text_color(t.yellow).child(G_BOLT))
+                    .child(div().flex_1().min_w(px(0.)).truncate().text_color(t.text).child(format!(
+                        "{} proposes: {} · {}/{need} yes",
+                        if mine { "you".to_owned() } else { self.model.name_of(&p.by) },
+                        p.action.label(),
+                        p.yes.len()
+                    )))
+                    .when(!voted, |d| {
+                        d.child(button(SharedString::from(format!("wy-{pid}")), G_CHECK, "yes", t, true).on_click(cx.listener(move |this, _, _, cx| this.vote_watch(&cy, pid, true, cx))))
+                            .child(button(SharedString::from(format!("wn-{pid}")), G_TIMES, "no", t, false).on_click(cx.listener(move |this, _, _, cx| this.vote_watch(&cn, pid, false, cx))))
+                    }),
+            );
+        }
+        vec![panel.into_any_element()]
+    }
+
+    /// An `@youtube` message: its query and five results, each to play alone, or to
+    /// watch together (queue or switch when a session runs).
+    fn youtube_results(&self, t: &Theme, msg_id: &str, query: &str, results: Vec<(String, String)>, cx: &mut Context<Self>) -> AnyElement {
+        let session = self.selected.as_ref().is_some_and(|c| self.watches.get(c).is_some_and(|w| w.joined));
+        let mut col = div().mt(px(4.)).flex().flex_col().gap(px(4.)).w(px(520.)).max_w_full().child(
+            div().flex().items_center().gap(px(6.)).text_size(px(t.size - 2.)).text_color(t.muted).child(div().text_color(t.red).child(G_YOUTUBE)).child(format!("YouTube · “{query}”")),
+        );
+        for (i, (line, id)) in results.into_iter().enumerate() {
+            let p = self.youtube_preview(&id).unwrap_or_default();
+            let title = if p.title.is_empty() { line.split(" · ").next().unwrap_or(&line).to_owned() } else { p.title.clone() };
+            let url = crate::media::watch_url(&id);
+            let (u1, u2, u3, t2, t3) = (url.clone(), url.clone(), url.clone(), title.clone(), title.clone());
+            col = col.child(
+                div()
+                    .flex()
                     .gap(px(8.))
-                    .px(px(12.))
-                    .py(px(6.))
-                    .border_b_1()
+                    .p(px(4.))
+                    .border_1()
                     .border_color(t.border)
-                    .bg(if invited { t.accent_bg } else { t.panel })
-                    .child(div().flex_1().min_w(px(0.)).truncate().text_color(t.bright).child(text))
+                    .bg(t.panel)
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(112.))
+                            .h(px(63.))
+                            .bg(t.bar)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_color(t.red)
+                            .when_some(p.thumb.clone(), |d, th| d.child(gpui::img(th).w(px(112.)).h(px(63.)).object_fit(ObjectFit::Cover)))
+                            .when(p.thumb.is_none(), |d| d.child(G_YOUTUBE)),
+                    )
                     .child(
                         div()
                             .flex()
-                            .flex_none()
-                            .gap(px(6.))
-                            .when(invited, |d| {
-                                d.child(button(SharedString::from(format!("wjoin-{key}")), G_PLAY, "join", t, true).on_click(cx.listener(move |this, _, _, cx| this.join_watch(&k1, cx))))
-                            })
+                            .flex_col()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .gap(px(3.))
+                            .child(div().truncate().text_color(t.bright).child(title))
+                            .child(div().truncate().text_size(px(t.size - 2.5)).text_color(t.muted).child(line.splitn(2, " · ").nth(1).unwrap_or("").to_owned()))
                             .child(
-                                button(SharedString::from(format!("wstop-{key}")), G_TIMES, if invited { "no" } else { "stop" }, t, false)
-                                    .text_color(t.red)
-                                    .on_click(cx.listener(move |this, _, _, cx| this.stop_watch(&k2, cx))),
+                                div()
+                                    .flex()
+                                    .gap(px(4.))
+                                    .child(button(SharedString::from(format!("yr-me-{msg_id}-{i}")), G_PLAY, "for me", t, false).on_click(cx.listener(move |this, _, _, cx| this.play_alone(&u1, cx))))
+                                    .when(!session, |d| {
+                                        d.child(button(SharedString::from(format!("yr-tg-{msg_id}-{i}")), G_USERS, "together", t, false).on_click(cx.listener(move |this, _, _, cx| this.start_watch(&u2, &t2, cx))))
+                                    })
+                                    .when(session, |d| {
+                                        let (u4, t4) = (u3.clone(), t3.clone());
+                                        d.child(button(SharedString::from(format!("yr-q-{msg_id}-{i}")), G_PLUS, "queue", t, false).on_click(cx.listener(move |this, _, _, cx| this.queue_watch(&u3, &t3, cx))))
+                                            .child(button(SharedString::from(format!("yr-sw-{msg_id}-{i}")), G_EXCHANGE, "switch", t, false).on_click(cx.listener(move |this, _, _, cx| this.start_watch(&u4, &t4, cx))))
+                                    }),
                             ),
-                    )
-                    .into_any_element()
-            })
-            .collect()
+                    ),
+            );
+        }
+        col.into_any_element()
     }
 
     /// Shares without a call: an offer to answer, ours running, or theirs on the stage.
@@ -2738,14 +2803,15 @@ impl Joma {
                             }),
                     )
                     .child({
-                        let yt = crate::media::youtube_id(&m.text);
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_1()
-                            .min_w(px(0.))
-                            .child(div().text_color(if me { t.text } else { t.bright }).child(m.text.clone()))
-                            .when_some(yt, |d, id| d.child(self.youtube_card(t, &id, &m.id, cx)))
+                        let results = crate::watch::parse_results(&m.text);
+                        let yt = if results.is_some() { None } else { crate::media::youtube_id(&m.text) };
+                        let body = div().flex().flex_col().flex_1().min_w(px(0.));
+                        match results {
+                            Some((query, list)) => body.child(self.youtube_results(t, &m.id, &query, list, cx)),
+                            None => body
+                                .child(div().text_color(if me { t.text } else { t.bright }).child(m.text.clone()))
+                                .when_some(yt, |d, id| d.child(self.youtube_card(t, &id, &m.id, cx))),
+                        }
                     }),
                 MsgKind::Event => match m.file.clone() {
                     // A file: click to open it, or to download one too big to come by itself.
@@ -2973,8 +3039,7 @@ impl Joma {
                 d.child(body)
                     .when_some(quick, |d, q| d.child(q))
                     .when(!conv.request, |d| {
-                        d.children(self.youtube_popover(t, cx))
-                            .children(self.emoji_popover(t, cx))
+                        d.children(self.emoji_popover(t, cx))
                             .children(self.attachment_strip(t, &conv.id, cx))
                             .child(self.composer_row(t, cx))
                     })
