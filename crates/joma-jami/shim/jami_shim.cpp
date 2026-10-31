@@ -507,6 +507,10 @@ dispatch(const std::string& m, const Json::Value& a)
     if (m == "setCodecDetails")
         return setCodecDetails(str(a, 0), (unsigned) num(a, 1), smap(a, 2));
     // Video
+    if (m == "startLocalMediaRecorder")
+        return startLocalMediaRecorder(str(a, 0), str(a, 1));
+    if (m == "stopLocalRecorder")
+        return stopLocalRecorder(str(a, 0)), Json::Value();
     if (m == "getCapabilities")
         return toJson(getCapabilities(str(a, 0)));
     if (m == "getSettings")

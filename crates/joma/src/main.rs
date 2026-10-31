@@ -14,6 +14,7 @@ mod composer;
 mod desk;
 mod hypr;
 mod ipc;
+mod media;
 mod model;
 mod presence;
 mod setup;

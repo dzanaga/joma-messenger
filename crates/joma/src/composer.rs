@@ -137,6 +137,17 @@ impl Composer {
             }
         }
     }
+    /// Type `text` at the cursor (an emoji from the picker).
+    pub fn insert(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.replace(None, text, false, cx);
+    }
+    /// Replace the whole text (a link chosen from a search).
+    pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.text = text.to_owned();
+        self.selected = text.len()..text.len();
+        self.marked = None;
+        cx.notify();
+    }
     pub fn clear(&mut self, cx: &mut Context<Self>) {
         self.text.clear();
         self.selected = 0..0;

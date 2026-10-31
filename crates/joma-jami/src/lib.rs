@@ -597,3 +597,13 @@ pub fn codecs(account: &str) -> Result<Vec<(u32, Details)>> {
 pub fn set_codec_details(account: &str, id: u32, details: &Details) -> Result<bool> {
     Ok(call("setCodecDetails", json!([account, id, details]))?.as_bool().unwrap_or(false))
 }
+
+/// Record a message: audio only with an empty `video_input`, else from that camera.
+/// `path` has no extension; the daemon adds one and returns the full path ("" failed).
+pub fn start_recorder(video_input: &str, path: &str) -> Result<String> {
+    Ok(call("startLocalMediaRecorder", json!([video_input, path]))?.as_str().unwrap_or_default().to_owned())
+}
+
+pub fn stop_recorder(path: &str) -> Result<()> {
+    call("stopLocalRecorder", json!([path])).map(drop)
+}

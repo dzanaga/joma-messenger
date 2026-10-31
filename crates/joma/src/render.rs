@@ -54,6 +54,20 @@ pub const G_FILL: &str = "\u{f1fc}";
 pub const G_MIRROR: &str = "\u{f0db}";
 pub const G_USERS: &str = "\u{f0c0}";
 pub const G_COG: &str = "\u{f013}";
+pub const G_SMILE: &str = "\u{f118}";
+pub const G_YOUTUBE: &str = "\u{f16a}";
+pub const G_PLAY: &str = "\u{f04b}";
+pub const G_STOP: &str = "\u{f04d}";
+
+/// The emoji the picker offers.
+const EMOJI: &[&str] = &[
+    "😀", "😃", "😄", "😁", "😆", "😅", "🤣", "😂", "🙂", "😉", "😊", "😇", "🥰", "😍", "🤩", "😘", "😋", "😛", "😜", "🤪", "😝", "🤗", "🤭", "🤫",
+    "🤔", "🤐", "🤨", "😐", "😑", "😶", "😏", "😒", "🙄", "😬", "😌", "😔", "😪", "😴", "😷", "🤒", "🤕", "🤢", "🤮", "🥵", "🥶", "😵", "🤯", "🤠",
+    "🥳", "😎", "🤓", "🧐", "😕", "😟", "🙁", "😮", "😯", "😲", "😳", "🥺", "😦", "😧", "😨", "😰", "😥", "😢", "😭", "😱", "😖", "😣", "😞", "😓",
+    "😩", "😫", "🥱", "😤", "😡", "😠", "🤬", "😈", "💀", "💩", "🤡", "👻", "👽", "🤖", "👍", "👎", "👌", "✌️", "🤞", "🤟", "🤘", "👋", "👏", "🙌",
+    "🙏", "💪", "👀", "🧠", "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "💔", "💯", "🔥", "✨", "⭐", "🎉", "🎁", "🎂", "🍕", "🍔", "🍺", "☕", "🍷",
+    "⚽", "🎮", "🎵", "🎬", "📷", "💻", "📱", "⌨️", "🚀", "✈️", "🚗", "🏠", "🌍", "☀️", "🌙", "🌧️", "❄️", "✅", "❌", "⚠️", "❓", "💡", "📌", "⏰",
+];
 pub const G_USER_CIRCLE: &str = "\u{f2bd}";
 pub const G_ROBOT: &str = "\u{f06a9}";
 pub const G_CROSSHAIRS: &str = "\u{f05b}";
@@ -297,6 +311,16 @@ impl Joma {
                     cx.drop_image(old.image, Some(window));
                 }
             }
+        }
+        // Previews of the YouTube links in the open conversation, fetched once.
+        let ids: Vec<String> = self
+            .selected
+            .as_ref()
+            .and_then(|s| self.model.conversations.get(s))
+            .map(|c| c.messages.iter().filter_map(|m| crate::media::youtube_id(&m.text)).collect())
+            .unwrap_or_default();
+        for id in ids {
+            self.want_youtube_preview(&id);
         }
         let gone: Vec<String> = self.previews.keys().filter(|k| self.desk.shared(k).is_none()).cloned().collect();
         for k in gone {
@@ -1712,6 +1736,165 @@ impl Joma {
         )
     }
 
+    /// The composer with its buttons: emoji, YouTube, voice and video messages; while
+    /// recording, the recording's time with send and cancel.
+    fn composer_row(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let row = div().flex().items_center().gap(px(6.)).px(px(12.)).py(px(8.));
+        if let Some(r) = &self.recording {
+            let secs = r.started.elapsed().as_secs();
+            return row
+                .child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .h(px(t.size + 20.))
+                        .px(px(10.))
+                        .border_1()
+                        .border_color(t.red)
+                        .child(div().size(px(9.)).rounded_full().bg(t.red))
+                        .child(div().text_color(t.bright).child(format!("recording a {} message · {}:{:02}", if r.video { "video" } else { "voice" }, secs / 60, secs % 60))),
+                )
+                .child(button("rec-send", G_CHECK, "send", t, true).on_click(cx.listener(|this, _, _, cx| this.stop_recording(true, cx))))
+                .child(button("rec-cancel", G_TIMES, "", t, false).on_click(cx.listener(|this, _, _, cx| this.stop_recording(false, cx))))
+                .into_any_element();
+        }
+        row.child(div().flex_1().min_w(px(0.)).child(self.composer.clone()))
+            .child(button("emoji", G_SMILE, "", t, self.emoji_open).on_click(cx.listener(|this, _, _, cx| {
+                this.emoji_open = !this.emoji_open;
+                this.youtube = None;
+                cx.notify();
+            })))
+            .child(button("yt", G_YOUTUBE, "", t, self.youtube.is_some()).on_click(cx.listener(|this, _, _, cx| {
+                this.emoji_open = false;
+                if this.youtube.is_some() {
+                    this.youtube = None;
+                    cx.notify();
+                } else {
+                    this.search_youtube(cx);
+                }
+            })))
+            .child(button("rec-voice", G_MIC, "", t, false).on_click(cx.listener(|this, _, _, cx| this.start_recording(false, cx))))
+            .child(button("rec-video", G_VIDEO, "", t, false).on_click(cx.listener(|this, _, _, cx| this.start_recording(true, cx))))
+            .into_any_element()
+    }
+
+    fn emoji_popover(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.emoji_open {
+            return None;
+        }
+        let mut grid = div().flex().flex_wrap().gap(px(2.));
+        for (i, e) in EMOJI.iter().enumerate() {
+            let e2 = *e;
+            grid = grid.child(
+                div()
+                    .id(SharedString::from(format!("emo-{i}")))
+                    .size(px(30.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(t.size + 5.))
+                    .rounded(px(3.))
+                    .cursor_pointer()
+                    .hover(|d| d.bg(t.raised))
+                    .child(e2)
+                    .on_click(cx.listener(move |this, _, _, cx| this.insert_emoji(e2, cx))),
+            );
+        }
+        Some(div().mx(px(12.)).mt(px(6.)).p(px(6.)).border_1().border_color(t.border).bg(t.panel).max_h(px(200.)).child(div().id("emoji-scroll").overflow_y_scroll().max_h(px(188.)).child(grid)).into_any_element())
+    }
+
+    fn youtube_popover(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let y = self.youtube.as_ref()?;
+        let head = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .pb(px(4.))
+            .child(div().text_color(t.muted).text_size(px(t.size - 2.)).child(if y.query.is_empty() { "YouTube".to_owned() } else { format!("YouTube · “{}”", y.query) }))
+            .child(button("yt-close", G_TIMES, "", t, false).on_click(cx.listener(|this, _, _, cx| {
+                this.youtube = None;
+                cx.notify();
+            })));
+        let body: AnyElement = match &y.results {
+            None => div().text_color(t.muted).child("searching…").into_any_element(),
+            Some(Err(e)) => div().text_color(t.yellow).child(e.clone()).into_any_element(),
+            Some(Ok(list)) if list.is_empty() => div().text_color(t.muted).child("nothing found").into_any_element(),
+            Some(Ok(list)) => {
+                let mut col = div().flex().flex_col();
+                for v in list {
+                    let id = v.id.clone();
+                    col = col.child(
+                        div()
+                            .id(SharedString::from(format!("ytr-{}", v.id)))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .px(px(6.))
+                            .py(px(4.))
+                            .cursor_pointer()
+                            .hover(|d| d.bg(t.raised))
+                            .child(div().flex_none().text_color(t.red).child(G_YOUTUBE))
+                            .child(div().flex_1().min_w(px(0.)).truncate().text_color(t.bright).child(v.title.clone()))
+                            .child(div().flex_none().max_w(px(140.)).truncate().text_size(px(t.size - 2.)).text_color(t.muted).child(v.channel.clone()))
+                            .child(div().flex_none().w(px(66.)).flex().justify_end().text_size(px(t.size - 2.)).text_color(t.muted).child(crate::media::duration_label(v.duration)))
+                            .on_click(cx.listener(move |this, _, _, cx| this.pick_youtube(&id, cx))),
+                    );
+                }
+                col.into_any_element()
+            }
+        };
+        Some(div().mx(px(12.)).mt(px(6.)).p(px(8.)).border_1().border_color(t.border).bg(t.panel).child(head).child(body).into_any_element())
+    }
+
+    /// A YouTube link's card: thumbnail, title and channel; a click opens it.
+    fn youtube_card(&self, t: &Theme, id: &str, msg_id: &str, cx: &mut Context<Self>) -> AnyElement {
+        let p = self.youtube_preview(id).unwrap_or_default();
+        let url = crate::media::watch_url(id);
+        div()
+            .id(SharedString::from(format!("ytc-{msg_id}")))
+            .mt(px(4.))
+            .flex()
+            .gap(px(10.))
+            .w(px(420.))
+            .p(px(6.))
+            .border_1()
+            .border_color(t.border)
+            .border_l_2()
+            .bg(t.panel)
+            .cursor_pointer()
+            .hover(|d| d.bg(t.raised))
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(128.))
+                    .h(px(72.))
+                    .bg(t.bar)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_color(t.red)
+                    .when_some(p.thumb.clone(), |d, th| d.child(gpui::img(th).w(px(128.)).h(px(72.)).object_fit(ObjectFit::Cover)))
+                    .when(p.thumb.is_none(), |d| d.child(G_YOUTUBE)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .gap(px(2.))
+                    .child(div().text_color(t.bright).child(if p.title.is_empty() { "YouTube video".to_owned() } else { p.title.clone() }))
+                    .child(div().text_size(px(t.size - 2.)).text_color(t.muted).child(p.channel.clone()))
+                    .child(div().text_size(px(t.size - 2.)).text_color(t.accent).child("open in the browser")),
+            )
+            .on_click(cx.listener(move |_, _, _, _| {
+                let _ = std::process::Command::new("xdg-open").arg(&url).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+            }))
+            .into_any_element()
+    }
+
     /// Files waiting to go with the next Enter: a picture shows itself, a file its name.
     fn attachment_strip(&self, t: &Theme, conv: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
         let files = self.attachments.get(conv).filter(|f| !f.is_empty())?;
@@ -2411,7 +2594,7 @@ impl Joma {
             let repeat = last_author == m.author && m.kind == MsgKind::Text;
             // A system line breaks a run, so the next message names its author again.
             last_author = if m.kind == MsgKind::Text { m.author.clone() } else { String::new() };
-            let row = div().flex().gap(px(10.)).py(px(1.)).child(div().flex_none().w(px(42.)).text_color(t.muted).child(hm));
+            let row = div().flex().items_start().gap(px(10.)).py(px(1.)).child(div().flex_none().w(px(42.)).text_color(t.muted).child(hm));
             list = list.child(match m.kind {
                 MsgKind::Text => row
                     .child(
@@ -2420,6 +2603,7 @@ impl Joma {
                             .flex_none()
                             .items_center()
                             .gap(px(6.))
+                            .h(px(t.size + 7.))
                             .w(px(118.))
                             .when(!repeat, |d| {
                                 let key = crate::model::bare_uri(&m.author).to_owned();
@@ -2428,11 +2612,21 @@ impl Joma {
                                 d.child(avatar(t, picture, &key, &initial_of, 18., None)).child(div().flex_1().min_w(px(0.)).truncate().text_color(color).child(who))
                             }),
                     )
-                    .child(div().flex_1().min_w(px(0.)).text_color(if me { t.text } else { t.bright }).child(m.text.clone())),
+                    .child({
+                        let yt = crate::media::youtube_id(&m.text);
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .child(div().text_color(if me { t.text } else { t.bright }).child(m.text.clone()))
+                            .when_some(yt, |d, id| d.child(self.youtube_card(t, &id, &m.id, cx)))
+                    }),
                 MsgKind::Event => match m.file.clone() {
                     // A file: click to open it, or to download one too big to come by itself.
                     Some(file) => {
                         let saved = self.saved_file(&conv.id, &file.id);
+                        let file_id = file.id.clone();
                         let have = saved.is_some();
                         let hint = match (have, me, self.downloads.contains_key(&file.id)) {
                             (true, _, _) => " · open".to_owned(),
@@ -2454,6 +2648,21 @@ impl Joma {
                                     }))
                                 })
                                 .child(format!("{who} · {}{hint}", m.text))
+                                // A voice or video message plays with mpv.
+                                .when_some(saved.clone().filter(|p| crate::media::is_audio(p) || crate::media::is_video(p)), |d, path| {
+                                    let fid = file_id.clone();
+                                    let playing = self.playing.as_ref().is_some_and(|(id, _)| *id == file_id);
+                                    let voice = crate::media::is_audio(&path) || path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("voice"));
+                                    d.child(
+                                        div().mt(px(4.)).flex().child(
+                                            button(SharedString::from(format!("play-{}", m.id)), if playing { G_STOP } else { G_PLAY }, if playing { "stop" } else if voice { "play voice message" } else { "play video" }, t, playing)
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    cx.stop_propagation();
+                                                    this.toggle_play(&fid, &path, cx);
+                                                })),
+                                        ),
+                                    )
+                                })
                                 // A picture shows itself once it is here.
                                 .when_some(saved.filter(|p| is_picture(p)), |d, path| {
                                     // Sized from the file's header, so the list does not jump
@@ -2635,7 +2844,12 @@ impl Joma {
             .when(!self.stage, |d| {
                 d.child(body)
                     .when_some(quick, |d, q| d.child(q))
-                    .when(!conv.request, |d| d.children(self.attachment_strip(t, &conv.id, cx)).child(div().px(px(12.)).py(px(8.)).child(self.composer.clone())))
+                    .when(!conv.request, |d| {
+                        d.children(self.youtube_popover(t, cx))
+                            .children(self.emoji_popover(t, cx))
+                            .children(self.attachment_strip(t, &conv.id, cx))
+                            .child(self.composer_row(t, cx))
+                    })
             })
             .into_any_element()
     }

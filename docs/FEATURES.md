@@ -97,6 +97,17 @@ Jami username or ID (Ctrl+N). History, typing indicator, unread counts, desktop
 notifications when the window is not active. Names come from peers' profiles and the
 name server.
 
+## Voice and video messages, emoji, YouTube
+Beside the message box:
+- ☺ **emoji**: a grid; a click types one at the cursor.
+- ▶ **YouTube**: searches YouTube for what is typed (yt-dlp, no account), a click puts
+  the link in the box. A YouTube link in a conversation shows its thumbnail, title and
+  channel (fetched once from YouTube and kept in `~/.cache/joma/youtube`); a click opens
+  it in the browser.
+- 🎤 **voice message** and 🎥 **video message** (from the camera): record, then send
+  or ✕. They go as files (`.ogg`, `.webm`); received ones have **play** (mpv: sound
+  only for voice, a window for video), click again to stop.
+
 ## Files
 Paste a picture (Ctrl+V), paste files copied in the file manager, or drop files on the
 conversation: they wait above the composer (✕ removes one) and Enter sends them, after
@@ -189,6 +200,8 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
+- 0.4.5 (2026-10-31): voice and video messages (record, send, play with mpv); an
+  emoji picker; YouTube search from the message box and link previews.
 - 0.4.4 (2026-10-31): settings: audio devices, noise and echo removal, automatic gain,
   camera and its mode, call quality, the share's frame rate.
 - 0.4.3 (2026-10-31): a rail of tabs on the left (chats, calls, contacts,

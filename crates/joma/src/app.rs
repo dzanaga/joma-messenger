@@ -82,6 +82,12 @@ pub enum AppMsg {
     Tray(crate::tray::TrayAction),
     /// A thumbnail for the source picker: the picker's generation, the source's key.
     Thumb(u64, String, Picture),
+    /// A recording was stopped (its file closed): send it, or throw it away.
+    Recorded { conv: String, path: String, send: bool },
+    /// YouTube search results for search number `gen`.
+    YouTube(u64, anyhow::Result<Vec<crate::media::Video>>),
+    /// A link preview was fetched (or failed) for this video id.
+    Preview(String),
     /// The area drawn with `slurp`, for what the picker was asked for.
     Area(PickFor, anyhow::Result<Source>),
 }
@@ -122,6 +128,23 @@ pub fn quality_bitrate(q: &str) -> Option<u32> {
         "high" => Some(4000),
         _ => None,
     }
+}
+
+/// A voice or video message being recorded.
+pub struct Recording {
+    pub conv: String,
+    /// The file the daemon writes (with its extension).
+    pub path: String,
+    pub started: Instant,
+    pub video: bool,
+}
+
+/// A YouTube search from the composer's text.
+pub struct YouTubeSearch {
+    pub gen: u64,
+    pub query: String,
+    /// None while searching.
+    pub results: Option<Result<Vec<crate::media::Video>, String>>,
 }
 
 /// What a click on the pixel grid does.
@@ -322,6 +345,14 @@ pub struct Joma {
     pub profile_edit: Option<ProfileEdit>,
     /// The settings panel, when open.
     pub settings: Option<SettingsView>,
+    pub recording: Option<Recording>,
+    /// The file mpv plays now (its message's file id), and mpv.
+    pub playing: Option<(String, std::process::Child)>,
+    pub emoji_open: bool,
+    pub youtube: Option<YouTubeSearch>,
+    youtube_gen: u64,
+    /// Link previews by video id (None: being fetched or failed).
+    pub previews_yt: HashMap<String, Option<crate::media::Preview>>,
     /// Shares that took place (Calls tab), newest last.
     pub share_log: Vec<ShareLog>,
     /// Shares running now: session key → (started, unix time, we share).
@@ -577,6 +608,12 @@ impl Joma {
             picker: None,
             profile_edit: None,
             settings: None,
+            recording: None,
+            playing: None,
+            emoji_open: false,
+            youtube: None,
+            youtube_gen: 0,
+            previews_yt: HashMap::new(),
             share_log: Vec::new(),
             running_shares: HashMap::new(),
             picker_gen: 0,
@@ -987,6 +1024,27 @@ impl Joma {
             AppMsg::Portal(call, result) => {
                 let acc = self.model.account.clone();
                 self.desk.portal_ready(&acc, &call, result);
+                cx.notify();
+            }
+            AppMsg::Recorded { conv, path, send } => {
+                if send {
+                    if let Reply::Error { message } = self.send_file(&conv, &path) {
+                        self.show_flash(format!("not sent: {message}"), cx);
+                    }
+                    self.pinned_bottom = true;
+                } else {
+                    let _ = std::fs::remove_file(&path);
+                }
+                cx.notify();
+            }
+            AppMsg::YouTube(gen, r) => {
+                if let Some(y) = self.youtube.as_mut().filter(|y| y.gen == gen) {
+                    y.results = Some(r.map_err(|e| e.to_string()));
+                    cx.notify();
+                }
+            }
+            AppMsg::Preview(id) => {
+                self.previews_yt.insert(id.clone(), crate::media::cached(&id));
                 cx.notify();
             }
             AppMsg::Area(target, area) => match area {
@@ -1685,6 +1743,139 @@ impl Joma {
         let mut v: Vec<(String, Instant, bool)> = self.running_shares.iter().map(|(k, (t, _, s))| (k[2..].to_owned(), *t, *s)).collect();
         v.sort_by_key(|(_, t, _)| *t);
         v
+    }
+
+    // ---- Voice and video messages, emoji, YouTube ---------------------------------
+
+    /// Start recording a message for the open conversation (`video`: from the camera).
+    pub fn start_recording(&mut self, video: bool, cx: &mut Context<Self>) {
+        if self.recording.is_some() {
+            return;
+        }
+        let Some(conv) = self.selected.clone() else { return };
+        let input = if video { camera_source() } else { String::new() };
+        if video && input.is_empty() {
+            return self.show_flash("no camera to record with", cx);
+        }
+        let dir = std::env::current_dir().unwrap_or_default().join("recorded");
+        let _ = std::fs::create_dir_all(&dir);
+        let stamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let base = dir.join(format!("{}-{stamp}", if video { "video" } else { "voice" }));
+        match joma_jami::start_recorder(&input, &base.to_string_lossy()) {
+            Ok(path) if !path.is_empty() => {
+                self.recording = Some(Recording { conv, path, started: Instant::now(), video });
+            }
+            Ok(_) => self.show_flash("could not start recording", cx),
+            Err(e) => self.show_flash(format!("could not record: {e}"), cx),
+        }
+        cx.notify();
+    }
+
+    /// Stop recording; send what was recorded, or throw it away. Stopping waits for the
+    /// recorder's threads, so it runs off the UI thread.
+    pub fn stop_recording(&mut self, send: bool, cx: &mut Context<Self>) {
+        let Some(r) = self.recording.take() else { return };
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let _ = joma_jami::stop_recorder(&r.path);
+            // The file is complete once the recorder closed it.
+            for _ in 0..20 {
+                if std::fs::metadata(&r.path).is_ok_and(|m| m.len() > 0) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(150));
+            }
+            std::thread::sleep(Duration::from_millis(300));
+            let _ = tx.unbounded_send(AppMsg::Recorded { conv: r.conv, path: r.path, send });
+        });
+        if send {
+            self.show_flash("sending the recording…", cx);
+        }
+        cx.notify();
+    }
+
+    /// Play a voice or video message with mpv, or stop the one playing.
+    pub fn toggle_play(&mut self, file_id: &str, path: &std::path::Path, cx: &mut Context<Self>) {
+        if let Some((id, mut child)) = self.playing.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+            if id == file_id {
+                cx.notify();
+                return;
+            }
+        }
+        match crate::media::play(path) {
+            Ok(child) => self.playing = Some((file_id.to_owned(), child)),
+            Err(e) => self.show_flash(format!("cannot play it (mpv?): {e}"), cx),
+        }
+        cx.notify();
+    }
+
+    /// Whether mpv still plays `file_id`.
+    pub fn is_playing(&mut self, file_id: &str) -> bool {
+        match self.playing.as_mut() {
+            Some((id, child)) if id == file_id => matches!(child.try_wait(), Ok(None)),
+            _ => false,
+        }
+    }
+
+    pub fn insert_emoji(&mut self, e: &str, cx: &mut Context<Self>) {
+        self.composer.update(cx, |c, cx| c.insert(e, cx));
+        self.focus_composer = true;
+        cx.notify();
+    }
+
+    /// Search YouTube for the composer's text.
+    pub fn search_youtube(&mut self, cx: &mut Context<Self>) {
+        let query = self.composer.read(cx).text().trim().to_owned();
+        if query.is_empty() {
+            self.youtube = Some(YouTubeSearch { gen: 0, query, results: Some(Err("type what to search in the message box, then press the button".into())) });
+            cx.notify();
+            return;
+        }
+        self.youtube_gen += 1;
+        let gen = self.youtube_gen;
+        self.youtube = Some(YouTubeSearch { gen, query: query.clone(), results: None });
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.unbounded_send(AppMsg::YouTube(gen, crate::media::search(&query, 8)));
+        });
+        cx.notify();
+    }
+
+    /// Put a chosen video's link in the composer (Enter sends it).
+    pub fn pick_youtube(&mut self, id: &str, cx: &mut Context<Self>) {
+        let url = crate::media::watch_url(id);
+        self.composer.update(cx, |c, cx| c.set_text(&url, cx));
+        self.youtube = None;
+        self.focus_composer = true;
+        cx.notify();
+    }
+
+    /// The preview of a YouTube link: cached, or fetched once in the background.
+    pub fn youtube_preview(&self, id: &str) -> Option<crate::media::Preview> {
+        if let Some(p) = self.previews_yt.get(id) {
+            return p.clone();
+        }
+        crate::media::cached(id)
+    }
+
+    pub fn want_youtube_preview(&mut self, id: &str) {
+        if self.previews_yt.contains_key(id) {
+            return;
+        }
+        if let Some(p) = crate::media::cached(id) {
+            self.previews_yt.insert(id.to_owned(), Some(p));
+            return;
+        }
+        self.previews_yt.insert(id.to_owned(), None);
+        let tx = self.tx.clone();
+        let id = id.to_owned();
+        std::thread::spawn(move || {
+            if crate::media::fetch(&id).is_ok() {
+                let _ = tx.unbounded_send(AppMsg::Preview(id));
+            }
+        });
     }
 
     // ---- Settings -----------------------------------------------------------------
