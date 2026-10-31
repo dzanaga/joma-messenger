@@ -147,6 +147,17 @@ pub struct YouTubeSearch {
     pub results: Option<Result<Vec<crate::media::Video>, String>>,
 }
 
+/// What the pointer does on a shared screen.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum InkTool {
+    /// Zoom and pan (the default).
+    None,
+    /// Our pointer shows on their screen as a red dot.
+    Laser,
+    /// Drag to draw; the strokes stay until cleared.
+    Pen,
+}
+
 /// What a click on the pixel grid does.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PaintTool {
@@ -346,6 +357,12 @@ pub struct Joma {
     /// The settings panel, when open.
     pub settings: Option<SettingsView>,
     pub recording: Option<Recording>,
+    pub ink_tool: InkTool,
+    pub ink_color: u32,
+    /// The stroke being drawn, and the last laser message's time.
+    pub ink_stroke: Option<u32>,
+    ink_next: u32,
+    pub ink_laser_at: Option<Instant>,
     /// The file mpv plays now (its message's file id), and mpv.
     pub playing: Option<(String, std::process::Child)>,
     pub emoji_open: bool,
@@ -609,6 +626,11 @@ impl Joma {
             profile_edit: None,
             settings: None,
             recording: None,
+            ink_tool: InkTool::None,
+            ink_color: 0xff3355,
+            ink_stroke: None,
+            ink_next: 1,
+            ink_laser_at: None,
             playing: None,
             emoji_open: false,
             youtube: None,
@@ -959,6 +981,10 @@ impl Joma {
             cx.notify();
         }
         self.track_shares();
+        // mpv finished: the button goes back to play.
+        if self.playing.as_mut().is_some_and(|(_, c)| !matches!(c.try_wait(), Ok(None))) {
+            self.playing = None;
+        }
         let acc = self.model.account.clone();
         for after in self.desk.tick(&acc) {
             self.after(after, cx);
@@ -1010,6 +1036,8 @@ impl Joma {
                         self.show_flash("peer stopped watching", cx)
                     }
                     ShareEvent::Error(e) => self.show_flash(format!("desktop share: {e}"), cx),
+                    // The strip shows the drawing's state.
+                    ShareEvent::Ink => cx.notify(),
                 }
                 let _ = call;
             }
@@ -1745,6 +1773,66 @@ impl Joma {
         v
     }
 
+    // ---- Drawing on a shared screen ------------------------------------------------
+
+    /// Send a drawing message to the share being watched.
+    pub fn ink(&mut self, msg: joma_desk::ink::Ink, cx: &mut Context<Self>) {
+        if let Some(v) = self.viewing_key().and_then(|k| self.desk.viewer(&k)) {
+            v.ink(msg);
+            cx.notify();
+        }
+    }
+
+    /// The pointer on the stage at a fraction (x, y) of the picture.
+    pub fn ink_move(&mut self, x: f32, y: f32, pressed: bool, cx: &mut Context<Self>) {
+        use joma_desk::ink::Ink;
+        match self.ink_tool {
+            InkTool::Laser => {
+                // About 30 a second is enough for a smooth dot.
+                if self.ink_laser_at.is_none_or(|t| t.elapsed() > Duration::from_millis(30)) {
+                    self.ink_laser_at = Some(Instant::now());
+                    self.ink(Ink::Laser { x, y }, cx);
+                }
+            }
+            InkTool::Pen if pressed => {
+                if let Some(id) = self.ink_stroke {
+                    self.ink(Ink::Stroke { id, color: self.ink_color, width: 5., pts: vec![(x, y)] }, cx);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn ink_down(&mut self, x: f32, y: f32, cx: &mut Context<Self>) {
+        if self.ink_tool == InkTool::Pen {
+            let id = self.ink_next;
+            self.ink_next += 1;
+            self.ink_stroke = Some(id);
+            self.ink(joma_desk::ink::Ink::Stroke { id, color: self.ink_color, width: 5., pts: vec![(x, y)] }, cx);
+        }
+    }
+
+    pub fn set_ink_tool(&mut self, tool: InkTool, cx: &mut Context<Self>) {
+        if self.ink_tool == InkTool::Laser && tool != InkTool::Laser {
+            self.ink(joma_desk::ink::Ink::LaserOff, cx);
+        }
+        self.ink_tool = if self.ink_tool == tool { InkTool::None } else { tool };
+        cx.notify();
+    }
+
+    /// Clear the drawing of the share we watch, or of ours.
+    pub fn clear_ink(&mut self, key: Option<&str>, cx: &mut Context<Self>) {
+        match key {
+            Some(k) => {
+                if let Some((share, _)) = self.desk.shared(k) {
+                    share.clear_ink();
+                }
+            }
+            None => self.ink(joma_desk::ink::Ink::Clear, cx),
+        }
+        cx.notify();
+    }
+
     // ---- Voice and video messages, emoji, YouTube ---------------------------------
 
     /// Start recording a message for the open conversation (`video`: from the camera).
@@ -1809,14 +1897,6 @@ impl Joma {
             Err(e) => self.show_flash(format!("cannot play it (mpv?): {e}"), cx),
         }
         cx.notify();
-    }
-
-    /// Whether mpv still plays `file_id`.
-    pub fn is_playing(&mut self, file_id: &str) -> bool {
-        match self.playing.as_mut() {
-            Some((id, child)) if id == file_id => matches!(child.try_wait(), Ok(None)),
-            _ => false,
-        }
     }
 
     pub fn insert_emoji(&mut self, e: &str, cx: &mut Context<Self>) {

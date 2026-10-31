@@ -177,6 +177,12 @@ skips the question
 what goes out, as a live picture refreshed about once a second, with its name; "change"
 picks another screen or window without interrupting the viewer.
 
+**Pointing and drawing.** While watching a Joma share, the bar under it has **laser**
+(your pointer shows on their screen as a red dot) and **pen** (drag to draw, four
+colours); **clear** wipes the drawing on both sides. The sharer sees it on their own
+screen, over every window and without catching clicks, and has **clear drawings** in
+their share strip; drawings go when the viewer leaves or the source changes.
+
 **Watching.** The bar under the stage drags to share the height between the stage and
 the chat (double click: the stage takes the window, the contact list steps aside too).
 The shared screen fills the stage, fitted; below it: **fit** (all of it),
@@ -200,6 +206,8 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
+- 0.4.6 (2026-10-31): laser pointer and pen on a shared screen, shown on the sharer's
+  screen; clear on both sides.
 - 0.4.5 (2026-10-31): voice and video messages (record, send, play with mpv); an
   emoji picker; YouTube search from the message box and link previews.
 - 0.4.4 (2026-10-31): settings: audio devices, noise and echo removal, automatic gain,

@@ -3024,7 +3024,7 @@ dependencies = [
 
 [[package]]
 name = "joma"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "anyhow",
  "futures",
@@ -3048,10 +3048,11 @@ dependencies = [
 
 [[package]]
 name = "joma-desk"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "anyhow",
  "ashpd 0.11.1",
+ "calloop 0.14.5",
  "drm-fourcc",
  "futures",
  "gliff-proto",
@@ -3061,16 +3062,19 @@ dependencies = [
  "gliff-vk",
  "hypr-capture",
  "hypr-ipc",
+ "hypr-wl",
  "serde",
  "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "wayland-client",
+ "wayland-protocols-wlr",
 ]
 
 [[package]]
 name = "joma-jami"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "anyhow",
  "cc",
@@ -3081,7 +3085,7 @@ dependencies = [
 
 [[package]]
 name = "joma-quick"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "anyhow",
  "serde",
@@ -3091,7 +3095,7 @@ dependencies = [
 
 [[package]]
 name = "joma-theme"
-version = "0.4.5"
+version = "0.4.6"
 
 [[package]]
 name = "js-sys"
@@ -6544,6 +6548,19 @@ dependencies = [
  "wayland-backend",
  "wayland-client",
  "wayland-protocols 0.31.2",
+ "wayland-scanner",
+]
+
+[[package]]
+name = "wayland-protocols-wlr"
+version = "0.3.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb04e52f7836d7c7976c78ca0250d61e33873c34156a2a1fc9474828ec268234"
+dependencies = [
+ "bitflags 2.13.2",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols 0.32.13",
  "wayland-scanner",
 ]
 

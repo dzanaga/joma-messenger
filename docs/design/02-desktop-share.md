@@ -35,6 +35,16 @@ viewer watches: the capture restarts, the encoder follows the new size (a new
 the output's capture cut on the CPU before encoding: its ring is CPU-readable (linear
 or wl_shm), and the pointer is moved into the area and hidden outside it.
 
+**Ink** (`joma-desk/ink.rs`): the viewer's laser and strokes, as fractions of the
+shared picture, travel as JSON lines over a second connection through the same tunnel
+(the token, then `I` instead of `\n`); the sharer answers `clear`. The share's accept
+loop runs the video session and the drawing channel as local tasks side by side. On the
+sharer they show in an overlay of our own: a `zwlr_layer_shell` surface on the shared
+output (layer overlay, an empty input region so clicks go through), drawn in software
+into a wl_shm buffer, rewriting only the rectangle that changed and waiting for the
+compositor to release the buffer. A window or an area is placed from Hyprland's
+geometry (looked up again every second). GPUI has no layer shell, hence the overlay.
+
 **Preview** (`joma-desk/preview.rs`): picker thumbnails and the sharer's live preview
 (1 fps) capture into wl_shm (the compositor copies the frame; no encoder, no render
 node of ours) and shrink on the CPU.

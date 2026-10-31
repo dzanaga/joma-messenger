@@ -42,6 +42,79 @@ pub enum ShareEvent {
     ViewerConnected { pipeline: &'static str },
     ViewerLeft,
     Error(String),
+    /// The viewer drew or pointed (the overlay shows it already).
+    Ink,
+}
+
+/// Where a source lies on its output, as fractions of it (for the ink overlay).
+pub fn place_of(source: &Source) -> (String, crate::ink::Place) {
+    let full = (0., 0., 1., 1.);
+    let Ok(inst) = hypr_ipc::Instance::discover(None) else { return (String::new(), full) };
+    let mons = inst.monitors().unwrap_or_default();
+    match source {
+        Source::Screen { output } => (output.clone(), full),
+        Source::Area { output, rect } => {
+            let Some(m) = mons.iter().find(|m| m.name == *output) else { return (output.clone(), full) };
+            let (w, h) = (m.width.max(1) as f32, m.height.max(1) as f32);
+            (output.clone(), (rect.0 as f32 / w, rect.1 as f32 / h, rect.2 as f32 / w, rect.3 as f32 / h))
+        }
+        Source::Window { address, monitor, .. } => {
+            #[derive(Deserialize)]
+            struct C {
+                address: String,
+                at: [i32; 2],
+                size: [i32; 2],
+            }
+            let Some(m) = mons.iter().find(|m| m.name == *monitor) else { return (monitor.clone(), full) };
+            let clients: Vec<C> = inst.request_json("clients").unwrap_or_default();
+            let Some(c) = clients.iter().find(|c| c.address == *address) else { return (monitor.clone(), full) };
+            // Monitor positions and window geometry are logical; the mode is in pixels.
+            let (lw, lh) = (m.width as f32 / m.scale.max(0.1), m.height as f32 / m.scale.max(0.1));
+            let (x, y) = ((c.at[0] - m.x) as f32, (c.at[1] - m.y) as f32);
+            (monitor.clone(), (x / lw, y / lh, c.size[0] as f32 / lw, c.size[1] as f32 / lh))
+        }
+    }
+}
+
+/// The drawing on a share: what the viewer drew, and the overlay showing it here.
+#[derive(Default)]
+pub struct InkHub {
+    pub canvas: crate::ink::Canvas,
+    overlay: Option<(String, crate::ink::Overlay)>,
+    place: Option<(Instant, String, crate::ink::Place)>,
+}
+
+impl InkHub {
+    /// Apply a message and show the result over `source`.
+    pub fn apply(&mut self, ink: &crate::ink::Ink, source: &Source) {
+        self.canvas.apply(ink);
+        // The window may move: look again every second.
+        if self.place.as_ref().is_none_or(|(t, _, _)| t.elapsed() > Duration::from_secs(1)) {
+            let (out, place) = place_of(source);
+            self.place = Some((Instant::now(), out, place));
+        }
+        let Some((_, out, place)) = self.place.clone() else { return };
+        if out.is_empty() {
+            return;
+        }
+        if self.overlay.as_ref().is_none_or(|(o, _)| *o != out) {
+            self.overlay = match crate::ink::Overlay::start(&out) {
+                Ok(o) => Some((out.clone(), o)),
+                Err(e) => {
+                    tracing::warn!(error = %format!("{e:#}"), "no ink overlay");
+                    None
+                }
+            };
+        }
+        if let Some((_, o)) = &self.overlay {
+            o.draw(&self.canvas, place);
+        }
+    }
+
+    /// The source changed: place again at the next message.
+    pub fn moved(&mut self) {
+        self.place = None;
+    }
 }
 
 /// The output or window being shared.
@@ -275,6 +348,9 @@ pub struct Share {
     pub token: String,
     pub source: Source,
     pub screen: Screen,
+    /// What the viewer drew; `clear_ink` wipes it on both sides.
+    pub ink: Arc<std::sync::Mutex<InkHub>>,
+    ink_out: tokio::sync::broadcast::Sender<crate::ink::Ink>,
     switch: watch::Sender<Source>,
     stop: watch::Sender<bool>,
     thread: Option<std::thread::JoinHandle<()>>,
@@ -282,7 +358,7 @@ pub struct Share {
 
 impl Share {
     /// Listen on loopback for the viewer. `events` is called from the share thread.
-    pub fn start(token: String, source: Source, events: impl Fn(ShareEvent) + Send + 'static) -> Result<Share> {
+    pub fn start(token: String, source: Source, events: impl Fn(ShareEvent) + Send + Sync + 'static) -> Result<Share> {
         let screen = source.screen()?;
         let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
         listener.set_nonblocking(true)?;
@@ -290,11 +366,17 @@ impl Share {
         let (stop, stop_rx) = watch::channel(false);
         let (switch, switch_rx) = watch::channel(source.clone());
         let (tok, scr) = (token.clone(), screen.clone());
+        let ink = Arc::new(std::sync::Mutex::new(InkHub::default()));
+        let (ink_out, _) = tokio::sync::broadcast::channel(64);
+        let (ink2, out2) = (ink.clone(), ink_out.clone());
         let thread = std::thread::Builder::new().name("joma-share".into()).spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
-            rt.block_on(accept_loop(listener, tok, scr, switch_rx, stop_rx, events));
+            // Video and drawing connections run side by side as local tasks (the encoders
+            // stay on this thread).
+            let local = tokio::task::LocalSet::new();
+            local.block_on(&rt, accept_loop(listener, tok, scr, switch_rx, stop_rx, events, ink2, out2));
         })?;
-        Ok(Share { port, token, source, screen, switch, stop, thread: Some(thread) })
+        Ok(Share { port, token, source, screen, ink, ink_out, switch, stop, thread: Some(thread) })
     }
 
     /// Share another output or window; a watching viewer follows without reconnecting.
@@ -302,7 +384,16 @@ impl Share {
         self.screen = source.screen()?;
         self.source = source.clone();
         self.switch.send_replace(source);
+        self.clear_ink();
         Ok(())
+    }
+
+    /// Wipe the drawing here and on the viewer's side.
+    pub fn clear_ink(&self) {
+        let mut hub = self.ink.lock().unwrap();
+        hub.moved();
+        hub.apply(&crate::ink::Ink::Clear, &self.source);
+        let _ = self.ink_out.send(crate::ink::Ink::Clear);
     }
 }
 
@@ -315,36 +406,103 @@ impl Drop for Share {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn accept_loop(
     listener: std::net::TcpListener,
     token: String,
     screen: Screen,
-    mut source: watch::Receiver<Source>,
+    source: watch::Receiver<Source>,
     mut stop: watch::Receiver<bool>,
-    events: impl Fn(ShareEvent),
+    events: impl Fn(ShareEvent) + Send + Sync + 'static,
+    ink: Arc<std::sync::Mutex<InkHub>>,
+    ink_out: tokio::sync::broadcast::Sender<crate::ink::Ink>,
 ) {
     let listener = match tokio::net::TcpListener::from_std(listener) {
         Ok(l) => l,
         Err(e) => return events(ShareEvent::Error(e.to_string())),
     };
+    let events = Arc::new(events);
+    let mut video: Option<tokio::task::JoinHandle<()>> = None;
     loop {
         tokio::select! {
             conn = listener.accept() => {
-                let Ok((sock, _)) = conn else { continue };
+                let Ok((mut sock, _)) = conn else { continue };
+                // The token, then '\n' for the video or 'I' for the drawing channel.
+                let mut line = [0u8; 33];
+                let read = tokio::time::timeout(Duration::from_secs(10), sock.read_exact(&mut line)).await;
+                if !matches!(read, Ok(Ok(_))) || !same(&line[..32], token.as_bytes()) {
+                    tracing::warn!("a connection presented the wrong token");
+                    continue;
+                }
+                if line[32] == b'I' {
+                    let (ink, out, ev, src) = (ink.clone(), ink_out.subscribe(), events.clone(), source.clone());
+                    tokio::task::spawn_local(async move {
+                        if let Err(e) = serve_ink(sock, ink, out, src, move || ev(ShareEvent::Ink)).await {
+                            tracing::debug!(error = %e, "ink channel ended");
+                        }
+                    });
+                    continue;
+                }
+                if line[32] != b'\n' {
+                    continue;
+                }
                 // One viewer at a time: a 1:1 call has one peer.
-                let r = serve(sock, &token, &screen, &mut source, &mut stop, &events).await;
-                match r {
-                    Ok(()) => events(ShareEvent::ViewerLeft),
-                    Err(e) => {
-                        tracing::warn!(error = %format!("{e:#}"), "share session ended");
-                        events(ShareEvent::Error(format!("{e:#}")));
+                if video.as_ref().is_some_and(|v| !v.is_finished()) {
+                    tracing::warn!("a second viewer connection was refused");
+                    continue;
+                }
+                let (screen, mut source, mut stop, events, ink) = (screen.clone(), source.clone(), stop.clone(), events.clone(), ink.clone());
+                video = Some(tokio::task::spawn_local(async move {
+                    let r = serve(sock, &screen, &mut source, &mut stop, events.as_ref()).await;
+                    match r {
+                        Ok(()) => events(ShareEvent::ViewerLeft),
+                        Err(e) => {
+                            tracing::warn!(error = %format!("{e:#}"), "share session ended");
+                            events(ShareEvent::Error(format!("{e:#}")));
+                        }
                     }
-                }
-                if *stop.borrow() {
-                    return;
-                }
+                    // The viewer left: what it drew goes with it.
+                    ink.lock().unwrap().apply(&crate::ink::Ink::Clear, &source.borrow());
+                }));
             }
-            _ = stop.changed() => return,
+            _ = stop.changed() => {
+                // Let the session tell the viewer, then end.
+                if let Some(v) = video.take() {
+                    let _ = tokio::time::timeout(Duration::from_secs(2), v).await;
+                }
+                return;
+            }
+        }
+    }
+}
+
+/// The drawing channel: JSON lines both ways (the viewer draws; we send `clear`).
+async fn serve_ink(
+    sock: TcpStream,
+    ink: Arc<std::sync::Mutex<InkHub>>,
+    mut out: tokio::sync::broadcast::Receiver<crate::ink::Ink>,
+    source: watch::Receiver<Source>,
+    drew: impl Fn(),
+) -> Result<()> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let (rd, mut wr) = sock.into_split();
+    let mut lines = BufReader::new(rd).lines();
+    loop {
+        tokio::select! {
+            line = lines.next_line() => {
+                let Some(line) = line? else { return Ok(()) };
+                let Ok(msg) = serde_json::from_str::<crate::ink::Ink>(&line) else { continue };
+                let src = source.borrow().clone();
+                // The overlay is drawn on its own thread; applying only sends to it.
+                ink.lock().unwrap().apply(&msg, &src);
+                drew();
+            }
+            msg = out.recv() => {
+                let Ok(msg) = msg else { continue };
+                let mut text = serde_json::to_string(&msg)?;
+                text.push('\n');
+                wr.write_all(text.as_bytes()).await?;
+            }
         }
     }
 }
@@ -518,19 +676,13 @@ impl Video {
 
 
 async fn serve(
-    mut sock: TcpStream,
-    token: &str,
+    sock: TcpStream,
     screen: &Screen,
     source: &mut watch::Receiver<Source>,
     stop: &mut watch::Receiver<bool>,
     events: &impl Fn(ShareEvent),
 ) -> Result<()> {
     sock.set_nodelay(true)?;
-    let mut line = [0u8; 33];
-    tokio::time::timeout(Duration::from_secs(10), sock.read_exact(&mut line)).await.context("no token")??;
-    if !same(&line[..32], token.as_bytes()) || line[32] != b'\n' {
-        bail!("a connection presented the wrong token");
-    }
     let (rd, wr) = sock.into_split();
     let mut rx = Framed::new(rd);
     let mut tx = Framed::new(wr);

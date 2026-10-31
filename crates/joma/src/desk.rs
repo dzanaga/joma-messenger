@@ -142,8 +142,8 @@ impl Desk {
         peer: &str,
         peer_joma: bool,
         source: Source,
-        events: impl Fn(ShareEvent) + Send + 'static,
-        changed: impl Fn() + Send + 'static,
+        events: impl Fn(ShareEvent) + Send + Sync + 'static,
+        changed: impl Fn() + Send + Sync + 'static,
     ) -> After {
         if !matches!(self.session(call).sharing, Sharing::Off) {
             return After::Nothing;
@@ -171,8 +171,8 @@ impl Desk {
         account: &str,
         uri: &str,
         source: Source,
-        events: impl Fn(ShareEvent) + Send + 'static,
-        changed: impl Fn() + Send + 'static,
+        events: impl Fn(ShareEvent) + Send + Sync + 'static,
+        changed: impl Fn() + Send + Sync + 'static,
     ) -> After {
         let key = direct_key(uri);
         if !matches!(self.session(&key).sharing, Sharing::Off) {
@@ -221,8 +221,8 @@ impl Desk {
         call: &str,
         peer: &str,
         source: Source,
-        events: impl Fn(ShareEvent) + Send + 'static,
-        changed: impl Fn() + Send + 'static,
+        events: impl Fn(ShareEvent) + Send + Sync + 'static,
+        changed: impl Fn() + Send + Sync + 'static,
     ) -> Result<()> {
         let token = signal::token();
         let share = Share::start(token.clone(), source.clone(), events)?;
@@ -450,7 +450,7 @@ impl Desk {
     }
 
     /// The tunnel to a sharer is up: start viewing through it.
-    pub fn tunnel_opened(&mut self, tunnel_id: &str, port: u16, changed: impl Fn() + Send + 'static) {
+    pub fn tunnel_opened(&mut self, tunnel_id: &str, port: u16, changed: impl Fn() + Send + Sync + 'static) {
         for s in self.sessions.values_mut() {
             if let Viewing::Opening { tunnel, token } = &s.viewing {
                 if tunnel == tunnel_id {

@@ -18,6 +18,11 @@ gliff-sw.workspace = true
 gliff-va.workspace = true
 hypr-capture.workspace = true
 hypr-ipc.workspace = true
+# The ink overlay: a layer-shell surface of our own on the shared screen.
+hypr-wl = { git = "https://github.com/omacom/gliff", rev = "58c742452ded3f10a2ce61f60eb4845f18205e29" }
+wayland-client = "0.31"
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+calloop = "0.14"
 drm-fourcc = "2"
 ashpd = { version = "0.11", default-features = false, features = ["async-std"] }
 futures = "0.3"

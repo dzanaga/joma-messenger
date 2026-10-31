@@ -22,6 +22,12 @@
   capture is unpaced, so libjami's `AudioInput::readFromDevice` spins during a test call
   and hanging up blocks in `SIPCall::stopAllMedia` (joins that loop). End test calls by
   stopping the profiles; real audio devices are paced and not affected.
+- **Check that a test profile is silent before any audio test** (`grep audioApi
+  <profile>/config/jami/dring.yml` says `alsa`, plugin `nulldev`): on 2026-10-31 carol and
+  dave were on pulseaudio (real microphone and speakers) through a test call. With the
+  null device, libjami's local recorder spins like the calls do and stopping it never
+  returns: voice messages cannot be recorded in the nest (Joma stops it off the UI
+  thread; send a prepared `.ogg` with `joma send-file` to test the rest).
 - **Test profiles never register usernames**: the public name server cannot take a name
   back (`register_name` refuses under `JOMA_PROFILE`). On 2026-10-29 a retried onboarding
   typed into the username step and registered `arol` for a throwaway account. Check the

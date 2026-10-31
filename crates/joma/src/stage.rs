@@ -178,6 +178,14 @@ impl StageView {
         }
     }
 
+    /// Where `at` falls on the picture, as fractions (None: outside it).
+    pub fn fraction(&mut self, at: Point<Pixels>) -> Option<(f32, f32)> {
+        let r = self.rect();
+        let x = (f32::from(at.x) - f32::from(r.origin.x)) / f32::from(r.size.width).max(1.);
+        let y = (f32::from(at.y) - f32::from(r.origin.y)) / f32::from(r.size.height).max(1.);
+        ((0.0..=1.0).contains(&x) && (0.0..=1.0).contains(&y)).then_some((x, y))
+    }
+
     /// Keep the pointer (in picture pixels) away from the stage's edges.
     pub fn follow_pointer(&mut self, x: f32, y: f32) {
         if !self.follow || self.drag.is_some() || !self.zoomed() {

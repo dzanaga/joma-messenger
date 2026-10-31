@@ -58,6 +58,7 @@ pub const G_SMILE: &str = "\u{f118}";
 pub const G_YOUTUBE: &str = "\u{f16a}";
 pub const G_PLAY: &str = "\u{f04b}";
 pub const G_STOP: &str = "\u{f04d}";
+pub const G_POINTER: &str = "\u{f245}";
 
 /// The emoji the picker offers.
 const EMOJI: &[&str] = &[
@@ -1533,6 +1534,9 @@ impl Joma {
     fn stage_canvas(&self, t: &Theme, image: Arc<RenderImage>, pointer: Option<(joma_desk::view::Pointer, Arc<RenderImage>)>, cx: &mut Context<Self>) -> AnyElement {
         let bg = t.bar;
         let view = self.stage_view.clone();
+        // What we drew on the shared screen (only while watching one).
+        let ink = self.viewing_key().and_then(|k| self.desk.viewer(&k)).map(|v| v.state.lock().unwrap().ink.clone());
+        let inking = self.ink_tool != InkTool::None && ink.is_some();
         let painted = canvas(
             |_, _, _| {},
             move |bounds, _, window, _| {
@@ -1548,6 +1552,9 @@ impl Joma {
                 drop(v);
                 window.with_content_mask(Some(ContentMask { bounds }), |window| {
                     let _ = window.paint_image(r, Corners::default(), image.clone(), 0, false);
+                    if let Some(c) = &ink {
+                        paint_ink(window, c, r);
+                    }
                     if let Some((p, cursor)) = &pointer {
                         if p.visible {
                             let k = f32::from(r.size.width) / w.max(1.);
@@ -1590,16 +1597,41 @@ impl Joma {
                 drop(v);
                 cx.notify();
             }))
+            .when(inking, |d| d.cursor_crosshair())
             .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, window, cx| {
                 if e.click_count == 2 {
                     this.stage_view.borrow_mut().drag = None;
                     this.toggle_fullscreen(window, cx);
                     return;
                 }
+                if this.ink_tool != InkTool::None && this.viewing_key().is_some() {
+                    let at = this.stage_view.borrow_mut().fraction(e.position);
+                    if let Some((x, y)) = at {
+                        this.ink_down(x, y, cx);
+                    }
+                    return;
+                }
                 let mut v = this.stage_view.borrow_mut();
                 v.drag = Some((e.position, v.center));
             }))
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                if !*hovered && this.ink_tool == InkTool::Laser {
+                    this.ink(joma_desk::ink::Ink::LaserOff, cx);
+                }
+            }))
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
+                if this.ink_tool != InkTool::None && this.viewing_key().is_some() {
+                    let at = this.stage_view.borrow_mut().fraction(e.position);
+                    match at {
+                        Some((x, y)) => this.ink_move(x, y, e.pressed_button == Some(MouseButton::Left), cx),
+                        None if this.ink_tool == InkTool::Laser => this.ink(joma_desk::ink::Ink::LaserOff, cx),
+                        None => {}
+                    }
+                    if e.pressed_button != Some(MouseButton::Left) {
+                        this.ink_stroke = None;
+                    }
+                    return;
+                }
                 let mut v = this.stage_view.borrow_mut();
                 if v.drag.is_some() {
                     if e.pressed_button == Some(MouseButton::Left) {
@@ -1614,6 +1646,7 @@ impl Joma {
             }))
             .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, _| {
                 this.stage_view.borrow_mut().drag = None;
+                this.ink_stroke = None;
             }))
             .into_any_element()
     }
@@ -1678,6 +1711,33 @@ impl Joma {
                     .flex_none()
                     .items_center()
                     .gap(px(4.))
+                    .when(self.viewing_key().is_some(), |d| {
+                        let pen = self.ink_tool == InkTool::Pen;
+                        let mut d = d
+                            .child(small("ink-laser", G_POINTER, "laser", self.ink_tool == InkTool::Laser).on_click(cx.listener(|this, _, _, cx| this.set_ink_tool(InkTool::Laser, cx))))
+                            .child(small("ink-pen", G_PENCIL, "pen", pen).on_click(cx.listener(|this, _, _, cx| this.set_ink_tool(InkTool::Pen, cx))));
+                        if pen {
+                            for (i, c) in [0xff3355u32, 0xffcc00, 0x33dd77, 0x33bbff].into_iter().enumerate() {
+                                let on = self.ink_color == c;
+                                d = d.child(
+                                    div()
+                                        .id(SharedString::from(format!("ink-c{i}")))
+                                        .size(px(16.))
+                                        .rounded_full()
+                                        .bg(gpui::rgb(c))
+                                        .border_2()
+                                        .border_color(if on { t.bright } else { gpui::transparent_black() })
+                                        .cursor_pointer()
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.ink_color = c;
+                                            cx.notify();
+                                        })),
+                                );
+                            }
+                        }
+                        d.child(small("ink-clear", G_ERASER, "clear", false).on_click(cx.listener(|this, _, _, cx| this.clear_ink(None, cx))))
+                            .child(div().w(px(1.)).h(px(16.)).mx(px(2.)).bg(t.border))
+                    })
                     .child(small("z-fit", "", "fit", zoom == Zoom::Fit).on_click(cx.listener(|this, _, _, cx| this.zoom(Zoom::Fit, cx))))
                     .child(small("z-fill", "", "fill", zoom == Zoom::Fill).on_click(cx.listener(|this, _, _, cx| this.zoom(Zoom::Fill, cx))))
                     .child(small("z-1", "", "1:1", zoom == Zoom::Actual).on_click(cx.listener(|this, _, _, cx| this.zoom(Zoom::Actual, cx))))
@@ -1953,6 +2013,7 @@ impl Joma {
         };
         let state = s.sharing_label().unwrap_or_default();
         let preview = self.previews.get(key).map(|f| f.image.clone());
+        let drawn = self.desk.shared(key).is_some_and(|(sh, _)| !sh.ink.lock().unwrap().canvas.is_empty());
         let bg = t.bar;
         let thumb = div()
             .flex_none()
@@ -2003,6 +2064,10 @@ impl Joma {
                         .flex()
                         .flex_none()
                         .gap(px(6.))
+                        .when(drawn, |d| {
+                            let k = key.to_owned();
+                            d.child(button(SharedString::from(format!("inkclr-{key}")), G_ERASER, "clear drawings", t, false).on_click(cx.listener(move |this, _, _, cx| this.clear_ink(Some(&k), cx))))
+                        })
                         .when(joma, |d| {
                             d.child(button(SharedString::from(format!("src-{key}")), G_EXCHANGE, "change", t, false).on_click(cx.listener(move |this, _, _, cx| this.change_source(&k1, cx))))
                         })
@@ -3112,6 +3177,38 @@ impl Render for Joma {
             .children(picker)
             .children(profile)
             .children(settings)
+    }
+}
+
+/// Our drawing over the shared picture at `r`: strokes as chains of dots, the laser.
+fn paint_ink(window: &mut Window, c: &joma_desk::ink::Canvas, r: Bounds<Pixels>) {
+    let (ox, oy, w, h) = (f32::from(r.origin.x), f32::from(r.origin.y), f32::from(r.size.width), f32::from(r.size.height));
+    let at = |(x, y): (f32, f32)| (ox + x * w, oy + y * h);
+    let mut dot = |x: f32, y: f32, rad: f32, color: Hsla| {
+        let b = Bounds::new(point(px(x - rad), px(y - rad)), size(px(rad * 2.), px(rad * 2.)));
+        window.paint_quad(gpui::fill(b, color).corner_radii(px(rad)));
+    };
+    for s in &c.strokes {
+        let color: Hsla = gpui::rgb(s.color).into();
+        let rad = (s.width / 2.).max(1.5);
+        let pts: Vec<(f32, f32)> = s.pts.iter().map(|&q| at(q)).collect();
+        if let Some(&(x, y)) = pts.first() {
+            dot(x, y, rad, color);
+        }
+        for p in pts.windows(2) {
+            let ((ax, ay), (bx, by)) = (p[0], p[1]);
+            let n = ((bx - ax).hypot(by - ay) / (rad * 0.6)).ceil().max(1.) as usize;
+            for i in 1..=n {
+                let k = i as f32 / n as f32;
+                dot(ax + (bx - ax) * k, ay + (by - ay) * k, rad, color);
+            }
+        }
+    }
+    if let Some((x, y, _)) = c.laser {
+        let (x, y) = at((x, y));
+        let red: Hsla = gpui::rgb(0xff2244).into();
+        dot(x, y, 14., red.opacity(0.3));
+        dot(x, y, 6., red);
     }
 }
 

@@ -8,6 +8,7 @@
 //! - [`portal`]: the fallback, Jami's own screen share through the desktop portal.
 
 pub mod gpu;
+pub mod ink;
 pub mod portal;
 pub mod preview;
 #[allow(dead_code)] // vendored whole from gliff
