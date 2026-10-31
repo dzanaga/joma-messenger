@@ -21,6 +21,14 @@ but only the open one is shown and notifies. The bin next to your name removes t
 account from this machine: two clicks when your other devices keep it, else typing
 `delete`, since an account no other device has is lost for good.
 
+## Settings
+The gear at the bottom of the rail: microphone, speakers and the device that rings;
+noise and echo removal (auto, Jami's, the system's, off) and automatic gain; the camera,
+its resolution and frame rate; call quality (auto lets Jami adapt; low, medium, high
+fix the video bitrate at 0.5, 1.5 or 4 Mb/s, applied again at every start since the
+daemon forgets it); the Joma desktop share's frame rate (30 or 60). Saved in Jami's own
+configuration, and `share_fps`, `video_quality` in `quick.toml`.
+
 ## Your picture
 Your picture at the bottom of the rail (or the pencil in Accounts): choose a picture (cropped square) or
 **draw pixels**: a 16×16 grid with pen, eraser, fill and mirror, colours from a grid of
@@ -181,6 +189,8 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
+- 0.4.4 (2026-10-31): settings: audio devices, noise and echo removal, automatic gain,
+  camera and its mode, call quality, the share's frame rate.
 - 0.4.3 (2026-10-31): a rail of tabs on the left (chats, calls, contacts,
   devices, accounts, agents; Ctrl+1…6); Calls lists what runs now and past calls and
   shares; Devices explains linking with the commands to run; Accounts holds the open

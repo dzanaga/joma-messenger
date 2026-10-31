@@ -40,6 +40,10 @@ pub struct QuickConfig {
     pub setup_dismissed: bool,
     /// The account Joma opens (Jami's account id); empty or gone: the first one.
     pub account: String,
+    /// The Joma desktop share's frame rate cap (30 or 60).
+    pub share_fps: u32,
+    /// Video calls: "auto" (Jami adapts the bitrate), or "low", "medium", "high".
+    pub video_quality: String,
 }
 
 impl Default for QuickConfig {
@@ -63,6 +67,8 @@ impl Default for QuickConfig {
             invisible: false,
             setup_dismissed: false,
             account: String::new(),
+            share_fps: 60,
+            video_quality: "auto".into(),
         }
     }
 }

@@ -530,3 +530,70 @@ pub fn device_id(account: &str) -> Result<String> {
 pub fn account_uri(account: &str) -> Result<String> {
     Ok(account_details(account)?.get("Account.username").cloned().unwrap_or_default())
 }
+
+// ---- Settings -------------------------------------------------------------------
+
+/// Audio devices: (inputs, outputs, and the current [output, input, ringtone] indexes).
+pub fn audio_devices() -> Result<(Vec<String>, Vec<String>, Vec<usize>)> {
+    let list = |m: &str| -> Result<Vec<String>> { Ok(serde_json::from_value(call(m, json!([]))?).unwrap_or_default()) };
+    let current: Vec<String> = serde_json::from_value(call("getCurrentAudioDevicesIndex", json!([]))?).unwrap_or_default();
+    Ok((list("getAudioInputDeviceList")?, list("getAudioOutputDeviceList")?, current.iter().map(|i| i.parse().unwrap_or(0)).collect()))
+}
+
+/// Use audio input (`input`), output, or ringtone device number `index`.
+pub fn set_audio_device(kind: &str, index: usize) -> Result<()> {
+    let m = match kind {
+        "input" => "setAudioInputDevice",
+        "output" => "setAudioOutputDevice",
+        _ => "setAudioRingtoneDevice",
+    };
+    call(m, json!([index])).map(drop)
+}
+
+/// Noise suppression, echo cancellation ("auto", "audioProcessor", "system", "false"…)
+/// and automatic gain.
+pub fn audio_processing() -> Result<(String, String, bool)> {
+    let s = |m: &str| -> Result<String> { Ok(call(m, json!([]))?.as_str().unwrap_or_default().to_owned()) };
+    Ok((s("getNoiseSuppressState")?, s("getEchoCancellationState")?, call("isAgcEnabled", json!([]))?.as_bool().unwrap_or(false)))
+}
+
+pub fn set_noise_suppression(state: &str) -> Result<()> {
+    call("setNoiseSuppressState", json!([state])).map(drop)
+}
+
+pub fn set_echo_cancellation(state: &str) -> Result<()> {
+    call("setEchoCancellationState", json!([state])).map(drop)
+}
+
+pub fn set_agc(on: bool) -> Result<()> {
+    call("setAgcState", json!([on])).map(drop)
+}
+
+/// The camera's modes: channel → size ("1280x720") → frame rates.
+pub fn camera_capabilities(device: &str) -> Result<std::collections::BTreeMap<String, std::collections::BTreeMap<String, Vec<String>>>> {
+    Ok(serde_json::from_value(call("getCapabilities", json!([device]))?).unwrap_or_default())
+}
+
+/// The camera's current settings (`size`, `rate`, `channel`, `name`, `id`).
+pub fn camera_settings(device: &str) -> Result<Details> {
+    Ok(serde_json::from_value(call("getSettings", json!([device]))?).unwrap_or_default())
+}
+
+pub fn apply_camera_settings(device: &str, settings: &Details) -> Result<()> {
+    call("applySettings", json!([device, settings])).map(drop)
+}
+
+pub fn set_default_camera(device: &str) -> Result<()> {
+    call("setDefaultDevice", json!([device])).map(drop)
+}
+
+/// The account's active codecs with their details (`CodecInfo.name`, `.type`,
+/// `.bitrate`, `.autoQualityEnabled`…), by codec id.
+pub fn codecs(account: &str) -> Result<Vec<(u32, Details)>> {
+    let ids: Vec<u32> = serde_json::from_value(call("getActiveCodecList", json!([account]))?).unwrap_or_default();
+    ids.into_iter().map(|id| Ok((id, serde_json::from_value(call("getCodecDetails", json!([account, id]))?).unwrap_or_default()))).collect()
+}
+
+pub fn set_codec_details(account: &str, id: u32, details: &Details) -> Result<bool> {
+    Ok(call("setCodecDetails", json!([account, id, details]))?.as_bool().unwrap_or(false))
+}

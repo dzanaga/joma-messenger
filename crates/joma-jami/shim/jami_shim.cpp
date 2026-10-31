@@ -106,6 +106,26 @@ toJson(const VecMap& v)
     return a;
 }
 static Json::Value
+toJson(const std::vector<unsigned>& v)
+{
+    Json::Value a(Json::arrayValue);
+    for (auto x : v)
+        a.append(x);
+    return a;
+}
+static Json::Value
+toJson(const libjami::VideoCapabilities& caps)
+{
+    Json::Value o(Json::objectValue);
+    for (const auto& [channel, sizes] : caps) {
+        Json::Value c(Json::objectValue);
+        for (const auto& [size, rates] : sizes)
+            c[size] = toJson(rates);
+        o[channel] = c;
+    }
+    return o;
+}
+static Json::Value
 toJson(const std::vector<uint8_t>& v)
 {
     // Payloads are small (trust requests carry a vCard); send them as text.
@@ -454,7 +474,47 @@ dispatch(const std::string& m, const Json::Value& a)
         return toJson(sendAccountTextMessage(str(a, 0), str(a, 1), smap(a, 2), flag(a, 3) ? 1 : 0));
     if (m == "sendTextMessage")
         return sendTextMessage(str(a, 0), str(a, 1), smap(a, 2), str(a, 3), flag(a, 4)), Json::Value();
+    // Audio settings
+    if (m == "getAudioInputDeviceList")
+        return toJson(getAudioInputDeviceList());
+    if (m == "getAudioOutputDeviceList")
+        return toJson(getAudioOutputDeviceList());
+    if (m == "getCurrentAudioDevicesIndex")
+        return toJson(getCurrentAudioDevicesIndex());
+    if (m == "setAudioInputDevice")
+        return setAudioInputDevice((int32_t) num(a, 0)), Json::Value();
+    if (m == "setAudioOutputDevice")
+        return setAudioOutputDevice((int32_t) num(a, 0)), Json::Value();
+    if (m == "setAudioRingtoneDevice")
+        return setAudioRingtoneDevice((int32_t) num(a, 0)), Json::Value();
+    if (m == "getNoiseSuppressState")
+        return getNoiseSuppressState();
+    if (m == "setNoiseSuppressState")
+        return setNoiseSuppressState(str(a, 0)), Json::Value();
+    if (m == "getEchoCancellationState")
+        return getEchoCancellationState();
+    if (m == "setEchoCancellationState")
+        return setEchoCancellationState(str(a, 0)), Json::Value();
+    if (m == "isAgcEnabled")
+        return isAgcEnabled();
+    if (m == "setAgcState")
+        return setAgcState(flag(a, 0)), Json::Value();
+    // Codecs
+    if (m == "getActiveCodecList")
+        return toJson(getActiveCodecList(str(a, 0)));
+    if (m == "getCodecDetails")
+        return toJson(getCodecDetails(str(a, 0), (unsigned) num(a, 1)));
+    if (m == "setCodecDetails")
+        return setCodecDetails(str(a, 0), (unsigned) num(a, 1), smap(a, 2));
     // Video
+    if (m == "getCapabilities")
+        return toJson(getCapabilities(str(a, 0)));
+    if (m == "getSettings")
+        return toJson(getSettings(str(a, 0)));
+    if (m == "applySettings")
+        return applySettings(str(a, 0), smap(a, 1)), Json::Value();
+    if (m == "setDefaultDevice")
+        return setDefaultDevice(str(a, 0)), Json::Value();
     if (m == "getDeviceList")
         return toJson(getDeviceList());
     if (m == "getDefaultDevice")

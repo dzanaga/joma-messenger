@@ -53,6 +53,7 @@ pub const G_ERASER: &str = "\u{f12d}";
 pub const G_FILL: &str = "\u{f1fc}";
 pub const G_MIRROR: &str = "\u{f0db}";
 pub const G_USERS: &str = "\u{f0c0}";
+pub const G_COG: &str = "\u{f013}";
 pub const G_USER_CIRCLE: &str = "\u{f2bd}";
 pub const G_ROBOT: &str = "\u{f06a9}";
 pub const G_CROSSHAIRS: &str = "\u{f05b}";
@@ -1178,11 +1179,33 @@ impl Joma {
             )
             .child(
                 div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .id("rail-settings")
+                            .size(px(38.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(4.))
+                            .text_size(px(t.size + 3.))
+                            .text_color(if self.settings.is_some() { t.accent } else { t.muted })
+                            .cursor_pointer()
+                            .hover(|d| d.text_color(t.bright).bg(t.raised))
+                            .child(G_COG)
+                            .on_click(cx.listener(|this, _, _, cx| this.open_settings(cx))),
+                    )
+                    .child(
+                div()
                     .id("rail-me")
                     .cursor_pointer()
                     .hover(|d| d.opacity(0.8))
                     .child(avatar(t, self.model.avatars.get(&self.model.me).cloned(), &self.model.me, &self.model.my_name, 30., Some(if self.quick.invisible { t.muted } else { t.green })))
                     .on_click(cx.listener(|this, _, _, cx| this.open_profile(cx))),
+                    ),
             )
             .into_any_element()
     }
@@ -1804,6 +1827,118 @@ impl Joma {
                         .when(crate::desk::direct_peer(key).is_none(), |d| {
                             d.child(button(SharedString::from(format!("unshare-{key}")), G_TIMES, "stop", t, false).text_color(t.red).on_click(cx.listener(|this, _, _, cx| this.toggle_share(cx))))
                         }),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// Settings: audio and video devices, sound processing, video quality, the share.
+    fn settings_overlay(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let v = self.settings.clone()?;
+        let section = |title: &str| div().pt(px(12.)).pb(px(4.)).text_size(px(t.size - 2.5)).text_color(t.muted).child(title.to_uppercase());
+        let label = |text: &str| div().w(px(120.)).flex_none().pt(px(4.)).text_color(t.text).child(text.to_owned());
+        let row = |l: gpui::Div, chips: gpui::Div| div().flex().gap(px(10.)).py(px(3.)).child(l).child(chips.flex().flex_wrap().gap(px(4.)).flex_1().min_w(px(0.)));
+        // A row of choices; `pick` runs with the chosen value.
+        fn chips(t: &Theme, cx: &mut Context<Joma>, id: &str, options: Vec<(String, String)>, current: &str, pick: fn(&mut Joma, &str, &mut Context<Joma>)) -> gpui::Div {
+            let mut d = div();
+            for (i, (value, text)) in options.into_iter().enumerate() {
+                let on = value == current;
+                d = d.child(button(SharedString::from(format!("{id}-{i}")), "", &text, t, on).on_click(cx.listener(move |this, _, _, cx| pick(this, &value, cx))));
+            }
+            d
+        }
+        let idx = |i: usize| v.current.get(i).copied().unwrap_or(0).to_string();
+        let devices = |list: &[String]| list.iter().enumerate().map(|(i, n)| (i.to_string(), if n.is_empty() { format!("device {i}") } else { n.clone() })).collect::<Vec<_>>();
+        let processing = vec![("auto".to_owned(), "auto".to_owned()), ("audioProcessor".into(), "Jami's".into()), ("system".into(), "system".into()), ("none".into(), "off".into())];
+        let size_now = v.camera_settings.get("size").cloned().unwrap_or_default();
+        let rate_now = v.camera_settings.get("rate").cloned().unwrap_or_default();
+        let rates: Vec<(String, String)> = v
+            .sizes
+            .iter()
+            .find(|(s, _)| *s == size_now)
+            .map(|(_, r)| r.iter().map(|x| (x.clone(), format!("{} fps", x.split('.').next().unwrap_or(x)))).collect())
+            .unwrap_or_default();
+        let body = div()
+            .id("settings-body")
+            .flex()
+            .flex_col()
+            .px(px(16.))
+            .pb(px(16.))
+            .max_h(px(560.))
+            .overflow_y_scroll()
+            .child(section("audio"))
+            .child(row(label("microphone"), chips(t, cx, "ain", devices(&v.inputs), &idx(1), |j, x, cx| j.set_audio("input", x.parse().unwrap_or(0), cx))))
+            .child(row(label("speakers"), chips(t, cx, "aout", devices(&v.outputs), &idx(0), |j, x, cx| j.set_audio("output", x.parse().unwrap_or(0), cx))))
+            .child(row(label("ringtone on"), chips(t, cx, "aring", devices(&v.outputs), &idx(2), |j, x, cx| j.set_audio("ringtone", x.parse().unwrap_or(0), cx))))
+            .child(row(label("noise removal"), chips(t, cx, "ns", processing.clone(), &v.noise, |j, x, cx| j.set_processing("noise", x, cx))))
+            .child(row(label("echo removal"), chips(t, cx, "ec", processing, &v.echo, |j, x, cx| j.set_processing("echo", x, cx))))
+            .child(row(
+                label("auto gain"),
+                chips(t, cx, "agc", vec![("on".into(), "on".into()), ("off".into(), "off".into())], if v.agc { "on" } else { "off" }, |j, x, cx| j.set_processing("agc", x, cx)),
+            ))
+            .child(section("video"))
+            .when(v.cameras.is_empty(), |d| d.child(div().py(px(3.)).text_color(t.muted).child("no camera found")))
+            .when(!v.cameras.is_empty(), |d| {
+                d.child(row(label("camera"), chips(t, cx, "cam", v.cameras.iter().map(|c| (c.clone(), c.clone())).collect(), &v.camera, |j, x, cx| j.set_camera(x, cx))))
+                    .child(row(label("resolution"), chips(t, cx, "size", v.sizes.iter().take(8).map(|(s, _)| (s.clone(), s.clone())).collect(), &size_now, |j, x, cx| j.set_camera_mode(Some(x), None, cx))))
+                    .child(row(label("frame rate"), chips(t, cx, "rate", rates, &rate_now, |j, x, cx| j.set_camera_mode(None, Some(x), cx))))
+            })
+            .child(row(
+                label("call quality"),
+                chips(
+                    t,
+                    cx,
+                    "vq",
+                    vec![("auto".into(), "auto".into()), ("low".into(), "low · 0.5 Mb/s".into()), ("medium".into(), "medium · 1.5".into()), ("high".into(), "high · 4".into())],
+                    &self.quick.video_quality,
+                    |j, x, cx| j.set_video_quality(x, cx),
+                ),
+            ))
+            .child(section("desktop share (Joma)"))
+            .child(row(
+                label("frame rate"),
+                chips(t, cx, "sfps", vec![("30".into(), "30 fps · lighter".into()), ("60".into(), "60 fps · smoother".into())], &self.quick.share_fps.to_string(), |j, x, cx| {
+                    j.set_share_fps(x.parse().unwrap_or(60), cx)
+                }),
+            ))
+            .child(div().pt(px(10.)).text_size(px(t.size - 2.)).text_color(t.muted).child("Devices and sound apply to the next call; the share's frame rate to the next share."));
+        Some(
+            div()
+                .id("settings-overlay")
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(gpui::black().opacity(0.55))
+                .occlude()
+                .child(
+                    div()
+                        .id("settings-box")
+                        .flex()
+                        .flex_col()
+                        .w(px(640.))
+                        .max_w_full()
+                        .m(px(16.))
+                        .bg(t.bg)
+                        .border_1()
+                        .border_color(t.accent)
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .px(px(12.))
+                                .py(px(8.))
+                                .border_b_1()
+                                .border_color(t.border)
+                                .child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child("Settings"))
+                                .child(button("set-close", G_TIMES, "", t, false).on_click(cx.listener(|this, _, _, cx| {
+                                    this.settings = None;
+                                    cx.notify();
+                                }))),
+                        )
+                        .child(body),
                 )
                 .into_any_element(),
         )
@@ -2617,6 +2752,7 @@ impl Render for Joma {
         let full = if self.fullscreen { self.fullscreen_stage(&t, cx) } else { None };
         let picker = self.picker_overlay(&t, cx);
         let profile = self.profile_overlay(&t, cx);
+        let settings = self.settings_overlay(&t, cx);
         let body = if let Some(full) = full {
             full
         } else if self.gate == Gate::Ready && self.narrow {
@@ -2661,6 +2797,11 @@ impl Render for Joma {
             .on_action(cx.listener(|this, _: &Search, window, cx| this.set_mode(Mode::Search, window, cx)))
             .on_action(cx.listener(|this, _: &Cancel, window, cx| {
                 // Esc closes the picker or the profile, then leaves full screen.
+                if this.settings.is_some() {
+                    this.settings = None;
+                    cx.notify();
+                    return;
+                }
                 if this.profile_edit.is_some() {
                     this.profile_edit = None;
                     cx.notify();
@@ -2756,6 +2897,7 @@ impl Render for Joma {
             .when(!self.fullscreen, |d| d.child(self.status_line(&t)))
             .children(picker)
             .children(profile)
+            .children(settings)
     }
 }
 

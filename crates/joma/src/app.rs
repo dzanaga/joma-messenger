@@ -97,6 +97,33 @@ pub enum PickFor {
     Switch(String),
 }
 
+/// The settings panel: what the daemon reported when it opened.
+#[derive(Clone, Default)]
+pub struct SettingsView {
+    pub inputs: Vec<String>,
+    pub outputs: Vec<String>,
+    /// [output, input, ringtone] device numbers.
+    pub current: Vec<usize>,
+    pub noise: String,
+    pub echo: String,
+    pub agc: bool,
+    pub cameras: Vec<String>,
+    pub camera: String,
+    /// The default camera's sizes (largest first) and, per size, its rates.
+    pub sizes: Vec<(String, Vec<String>)>,
+    pub camera_settings: joma_jami::Details,
+}
+
+/// Video bitrates for the quality presets, in kbit/s.
+pub fn quality_bitrate(q: &str) -> Option<u32> {
+    match q {
+        "low" => Some(500),
+        "medium" => Some(1500),
+        "high" => Some(4000),
+        _ => None,
+    }
+}
+
 /// What a click on the pixel grid does.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PaintTool {
@@ -293,6 +320,8 @@ pub struct Joma {
     pub picker: Option<Picker>,
     /// Editing our picture.
     pub profile_edit: Option<ProfileEdit>,
+    /// The settings panel, when open.
+    pub settings: Option<SettingsView>,
     /// Shares that took place (Calls tab), newest last.
     pub share_log: Vec<ShareLog>,
     /// Shares running now: session key → (started, unix time, we share).
@@ -547,6 +576,7 @@ impl Joma {
             stage_view: Rc::new(RefCell::new(crate::stage::StageView::default())),
             picker: None,
             profile_edit: None,
+            settings: None,
             share_log: Vec::new(),
             running_shares: HashMap::new(),
             picker_gen: 0,
@@ -578,6 +608,7 @@ impl Joma {
             accounts: Vec::new(),
             adding_account: None,
         };
+        joma_desk::share::set_max_fps(j.quick.share_fps);
         j.configure_inputs(cx);
         j.boot(cx);
         // Started in the tray: the window maps into `special:joma` (a rule on its first
@@ -676,6 +707,10 @@ impl Joma {
         self.refresh_identity();
         self.load_profiles();
         self.share_log = load_share_log(&self.model.account);
+        if self.quick.video_quality != "auto" && !self.quick.video_quality.is_empty() {
+            let q = self.quick.video_quality.clone();
+            self.apply_video_quality(&q);
+        }
         self.running_shares.clear();
         self.subscribed.clear();
         self.load_contacts();
@@ -1650,6 +1685,120 @@ impl Joma {
         let mut v: Vec<(String, Instant, bool)> = self.running_shares.iter().map(|(k, (t, _, s))| (k[2..].to_owned(), *t, *s)).collect();
         v.sort_by_key(|(_, t, _)| *t);
         v
+    }
+
+    // ---- Settings -----------------------------------------------------------------
+
+    pub fn open_settings(&mut self, cx: &mut Context<Self>) {
+        let (inputs, outputs, current) = joma_jami::audio_devices().unwrap_or_default();
+        let (noise, echo, agc) = joma_jami::audio_processing().unwrap_or_default();
+        let cameras = joma_jami::video_devices().unwrap_or_default();
+        let camera = joma_jami::default_video_device().unwrap_or_default();
+        let mut v = SettingsView { inputs, outputs, current, noise, echo, agc, cameras, camera, ..Default::default() };
+        self.load_camera_modes(&mut v);
+        self.settings = Some(v);
+        cx.notify();
+    }
+
+    fn load_camera_modes(&self, v: &mut SettingsView) {
+        v.sizes.clear();
+        if v.camera.is_empty() {
+            return;
+        }
+        let caps = joma_jami::camera_capabilities(&v.camera).unwrap_or_default();
+        v.camera_settings = joma_jami::camera_settings(&v.camera).unwrap_or_default();
+        let channel = v.camera_settings.get("channel").cloned().filter(|c| caps.contains_key(c)).or_else(|| caps.keys().next().cloned());
+        if let Some(sizes) = channel.and_then(|c| caps.get(&c).cloned()) {
+            let area = |s: &str| s.split_once('x').map(|(w, h)| w.parse::<u64>().unwrap_or(0) * h.parse::<u64>().unwrap_or(0)).unwrap_or(0);
+            let mut list: Vec<(String, Vec<String>)> = sizes.into_iter().collect();
+            list.sort_by_key(|(s, _)| std::cmp::Reverse(area(s)));
+            v.sizes = list;
+        }
+    }
+
+    pub fn set_audio(&mut self, kind: &str, index: usize, cx: &mut Context<Self>) {
+        if let Err(e) = joma_jami::set_audio_device(kind, index) {
+            self.show_flash(format!("could not change the device: {e}"), cx);
+        }
+        self.open_settings(cx);
+    }
+
+    pub fn set_processing(&mut self, what: &str, value: &str, cx: &mut Context<Self>) {
+        let r = match what {
+            "noise" => joma_jami::set_noise_suppression(value),
+            "echo" => joma_jami::set_echo_cancellation(value),
+            _ => joma_jami::set_agc(value == "on"),
+        };
+        if let Err(e) = r {
+            self.show_flash(format!("could not change it: {e}"), cx);
+        }
+        self.open_settings(cx);
+    }
+
+    pub fn set_camera(&mut self, device: &str, cx: &mut Context<Self>) {
+        if let Err(e) = joma_jami::set_default_camera(device) {
+            self.show_flash(format!("could not change the camera: {e}"), cx);
+        }
+        self.open_settings(cx);
+    }
+
+    pub fn set_camera_mode(&mut self, size: Option<&str>, rate: Option<&str>, cx: &mut Context<Self>) {
+        let Some(v) = self.settings.as_ref() else { return };
+        let mut st = v.camera_settings.clone();
+        if let Some(s) = size {
+            st.insert("size".into(), s.to_owned());
+            // Keep the rate if that size has it, else its first.
+            let rates = v.sizes.iter().find(|(z, _)| z == s).map(|(_, r)| r.clone()).unwrap_or_default();
+            if !st.get("rate").is_some_and(|r| rates.contains(r)) {
+                if let Some(r) = rates.first() {
+                    st.insert("rate".into(), r.clone());
+                }
+            }
+        }
+        if let Some(r) = rate {
+            st.insert("rate".into(), r.to_owned());
+        }
+        let cam = v.camera.clone();
+        if let Err(e) = joma_jami::apply_camera_settings(&cam, &st) {
+            self.show_flash(format!("could not change the camera: {e}"), cx);
+        }
+        self.open_settings(cx);
+    }
+
+    /// Choose a video quality preset: applied now and at every start.
+    pub fn set_video_quality(&mut self, q: &str, cx: &mut Context<Self>) {
+        self.apply_video_quality(q);
+        self.quick.video_quality = q.to_owned();
+        self.save_quick(cx);
+        cx.notify();
+    }
+
+    /// Set this account's video codecs to a preset. The daemon keeps codec details in
+    /// memory only, so this runs whenever an account opens.
+    fn apply_video_quality(&self, q: &str) {
+        let acc = self.model.account.clone();
+        for (id, mut d) in joma_jami::codecs(&acc).unwrap_or_default() {
+            if d.get("CodecInfo.type").map(String::as_str) != Some("VIDEO") {
+                continue;
+            }
+            match quality_bitrate(q) {
+                Some(b) => {
+                    d.insert("CodecInfo.autoQualityEnabled".into(), "false".into());
+                    d.insert("CodecInfo.bitrate".into(), b.to_string());
+                }
+                None => {
+                    d.insert("CodecInfo.autoQualityEnabled".into(), "true".into());
+                }
+            }
+            let _ = joma_jami::set_codec_details(&acc, id, &d);
+        }
+    }
+
+    pub fn set_share_fps(&mut self, fps: u32, cx: &mut Context<Self>) {
+        self.quick.share_fps = fps;
+        joma_desk::share::set_max_fps(fps);
+        self.save_quick(cx);
+        cx.notify();
     }
 
     // ---- Our picture --------------------------------------------------------------

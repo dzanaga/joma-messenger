@@ -29,7 +29,12 @@ use crate::rate::{Ladder, LinkEstimator, RateController, LEVELS};
 use crate::va::VaEncoder;
 use crate::signal::same;
 
-const MAX_FPS: u32 = 60;
+static MAX_FPS_SETTING: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(60);
+
+/// The frame rate cap of shares started from now on (Joma's settings: 30 or 60).
+pub fn set_max_fps(fps: u32) {
+    MAX_FPS_SETTING.store(fps.clamp(5, 60), std::sync::atomic::Ordering::Relaxed);
+}
 
 /// What the sharer reports to the app.
 #[derive(Debug, Clone)]
@@ -595,9 +600,10 @@ async fn serve(
 
     let mut pixels = screen.width as u64 * screen.height as u64;
     let mut link = LinkEstimator::new();
-    let mut ctl = RateController::new(pixels, if can_dual { 2 } else { 1 }, MAX_FPS, None);
+    let max_fps = MAX_FPS_SETTING.load(std::sync::atomic::Ordering::Relaxed);
+    let mut ctl = RateController::new(pixels, if can_dual { 2 } else { 1 }, max_fps, None);
     let mut ladder = Ladder::new(0);
-    let mut fps = MAX_FPS;
+    let mut fps = max_fps;
     let mut want_dual = can_dual;
     let mut pending: Option<CapturedFrame> = None;
     let mut last_sent: Option<Instant> = None;
@@ -651,14 +657,14 @@ async fn serve(
                         link.on_ack(now, frame_id);
                         let rate_changed = ctl.on_ack(now, &mut link).is_some();
                         let level = ladder.consider(now, &link, ctl.is_slow_start(), ctl.congested_recently(now),
-                            pixels, can_dual, can_single, MAX_FPS);
+                            pixels, can_dual, can_single, max_fps);
                         if let Some(i) = level {
                             // Resolution steps are not taken yet: the stream keeps its size and
                             // gives up frame rate and chroma detail only.
                             let l = &LEVELS[i];
-                            fps = l.fps_cap.min(MAX_FPS);
+                            fps = l.fps_cap.min(max_fps);
                             want_dual = can_dual && (l.aux || !can_single);
-                            ctl.reconfigure(pixels, if want_dual { 2 } else { 1 }, MAX_FPS);
+                            ctl.reconfigure(pixels, if want_dual { 2 } else { 1 }, max_fps);
                         }
                         if rate_changed || level.is_some() {
                             if let Some(e) = video.enc.as_mut() {
@@ -728,7 +734,7 @@ async fn serve(
             if video.stream != stream && video.enc.is_some() {
                 // Another source or a resized window: the rate follows the new area.
                 pixels = stream.0 as u64 * stream.1 as u64;
-                ctl.reconfigure(pixels, if dual { 2 } else { 1 }, MAX_FPS);
+                ctl.reconfigure(pixels, if dual { 2 } else { 1 }, max_fps);
             }
             video.rebuild(stream, dual, ctl.stream_bitrate(), fps, ctl.vbv_ms(fps))?;
             let effective = screen.scale * stream.0 as f32 / extent.0.max(1) as f32;
