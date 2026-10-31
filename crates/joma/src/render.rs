@@ -1912,12 +1912,14 @@ impl Joma {
     fn youtube_card(&self, t: &Theme, id: &str, msg_id: &str, cx: &mut Context<Self>) -> AnyElement {
         let p = self.youtube_preview(id).unwrap_or_default();
         let url = crate::media::watch_url(id);
+        let open = url.clone();
         div()
             .id(SharedString::from(format!("ytc-{msg_id}")))
             .mt(px(4.))
             .flex()
             .gap(px(10.))
-            .w(px(420.))
+            .w(px(470.))
+            .max_w_full()
             .p(px(6.))
             .border_1()
             .border_color(t.border)
@@ -1947,10 +1949,23 @@ impl Joma {
                     .gap(px(2.))
                     .child(div().text_color(t.bright).child(if p.title.is_empty() { "YouTube video".to_owned() } else { p.title.clone() }))
                     .child(div().text_size(px(t.size - 2.)).text_color(t.muted).child(p.channel.clone()))
-                    .child(div().text_size(px(t.size - 2.)).text_color(t.accent).child("open in the browser")),
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .child(div().text_size(px(t.size - 2.)).text_color(t.accent).child("open in the browser"))
+                            .child({
+                                let (u, title) = (url.clone(), p.title.clone());
+                                button(SharedString::from(format!("ytw-{msg_id}")), G_PLAY, "watch together", t, false).on_click(cx.listener(move |this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.start_watch(&u, &title, cx);
+                                }))
+                            }),
+                    ),
             )
             .on_click(cx.listener(move |_, _, _, _| {
-                let _ = std::process::Command::new("xdg-open").arg(&url).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+                let _ = std::process::Command::new("xdg-open").arg(&open).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
             }))
             .into_any_element()
     }
@@ -2565,6 +2580,51 @@ impl Joma {
         )
     }
 
+    /// Watching together: an invitation to answer, or the session running.
+    fn watch_panels(&self, t: &Theme, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let mut keys: Vec<&String> = self.watches.keys().collect();
+        keys.sort();
+        keys.into_iter()
+            .filter_map(|k| self.watches.get(k).map(|w| (k.clone(), w)))
+            .map(|(key, w)| {
+                let name = self.model.name_of(&w.peer);
+                let invited = w.player.is_none();
+                let (k1, k2) = (key.clone(), key.clone());
+                let text = if invited {
+                    format!("{name} wants to watch together: {}", w.title)
+                } else {
+                    format!("{G_PLAY} watching together with {name}: {} · in step", w.title)
+                };
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(8.))
+                    .px(px(12.))
+                    .py(px(6.))
+                    .border_b_1()
+                    .border_color(t.border)
+                    .bg(if invited { t.accent_bg } else { t.panel })
+                    .child(div().flex_1().min_w(px(0.)).truncate().text_color(t.bright).child(text))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_none()
+                            .gap(px(6.))
+                            .when(invited, |d| {
+                                d.child(button(SharedString::from(format!("wjoin-{key}")), G_PLAY, "join", t, true).on_click(cx.listener(move |this, _, _, cx| this.join_watch(&k1, cx))))
+                            })
+                            .child(
+                                button(SharedString::from(format!("wstop-{key}")), G_TIMES, if invited { "no" } else { "stop" }, t, false)
+                                    .text_color(t.red)
+                                    .on_click(cx.listener(move |this, _, _, cx| this.stop_watch(&k2, cx))),
+                            ),
+                    )
+                    .into_any_element()
+            })
+            .collect()
+    }
+
     /// Shares without a call: an offer to answer, ours running, or theirs on the stage.
     fn direct_panels(&self, t: &Theme, cx: &mut Context<Self>) -> Vec<AnyElement> {
         use crate::desk::{direct_peer, Sharing, Viewing};
@@ -2759,6 +2819,7 @@ impl Joma {
         let conv = self.selected.as_ref().and_then(|s| self.model.conversations.get(s)).cloned();
         let call_panel = self.call_panel(t, conv.as_ref(), cx);
         let direct = self.direct_panels(t, cx);
+        let watch = self.watch_panels(t, cx);
         let Some(conv) = conv else {
             return div()
                 .flex()
@@ -2766,6 +2827,7 @@ impl Joma {
                 .flex_1()
                 .when_some(call_panel, |d, p| d.child(p))
                 .children(direct)
+                .children(watch)
                 .child(
                     div()
                         .flex()
@@ -2906,6 +2968,7 @@ impl Joma {
             .child(header)
             .when_some(call_panel, |d, p| d.child(p))
             .children(direct)
+            .children(watch)
             .when(!self.stage, |d| {
                 d.child(body)
                     .when_some(quick, |d, q| d.child(q))

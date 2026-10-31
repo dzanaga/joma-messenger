@@ -108,6 +108,13 @@ Beside the message box:
   or ✕. They go as files (`.ogg`, `.webm`); received ones have **play** (mpv: sound
   only for voice, a window for video), click again to stop.
 
+## Watching together
+A YouTube link's card has **watch together** (or `joma watch-together <to> <url>`, any
+link or file both sides can open): each side plays it in its own mpv, and play, pause
+and seeks follow from either side; the other gets **join** or **no**. It rides the call
+when there is one, else account messages. Closing mpv or **stop** ends it for both.
+Details and next steps: `docs/discussions/2026-10-31-media.qmd`.
+
 ## Files
 Paste a picture (Ctrl+V), paste files copied in the file manager, or drop files on the
 conversation: they wait above the composer (✕ removes one) and Enter sends them, after
@@ -206,6 +213,8 @@ GPUs the desktop share can use).
 and the launcher here or on another machine over SSH. It needs the `jami-daemon` package.
 
 ## Log
+- 0.5.0 (2026-10-31): watching together (mpv on both sides, kept in step);
+  discussions on agents, watching together, transcription and GIFs.
 - 0.4.6 (2026-10-31): laser pointer and pen on a shared screen, shown on the sharer's
   screen; clear on both sides.
 - 0.4.5 (2026-10-31): voice and video messages (record, send, play with mpv); an

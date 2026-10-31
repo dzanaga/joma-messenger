@@ -51,6 +51,8 @@ pub enum Request {
     Accounts,
     /// Open another account (by name, username or id).
     UseAccount { to: String },
+    /// Watch `url` (a link or a file both sides can open) together with `to`.
+    WatchTogether { to: String, url: String },
     /// Set the profile picture from a file (cropped square), or remove it (`None`).
     Avatar { path: Option<String> },
     /// Quit Joma (closing its window only hides it).

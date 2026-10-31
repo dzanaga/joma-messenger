@@ -20,6 +20,7 @@ mod presence;
 mod setup;
 mod stage;
 mod tray;
+mod watch;
 mod render;
 mod theme;
 
@@ -42,6 +43,8 @@ const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); -
        joma send-file <to> [path]
                                  send a file (without a path, Joma asks for one)
        joma open <to>            show a conversation in Joma
+       joma watch-together <to> <url>
+                                 watch a video together (each side plays it in mpv)
        joma avatar <file>|--remove
                                  set your profile picture (cropped square), or remove it
        joma link                 on a new Joma: join your account from another device;
@@ -88,6 +91,7 @@ fn cli(args: &[String]) -> Option<i32> {
         Some("watch") if args.len() == 2 => Request::Watch { to: args[1].clone() },
         Some("open") if args.len() == 2 => Request::Open { to: args[1].clone() },
         Some("link") if args.len() == 1 => Request::Link,
+        Some("watch-together") if args.len() == 3 => Request::WatchTogether { to: args[1].clone(), url: args[2].clone() },
         Some("avatar") if args.len() == 2 => Request::Avatar {
             path: (args[1] != "--remove").then(|| std::fs::canonicalize(&args[1]).map_or_else(|_| args[1].clone(), |c| c.to_string_lossy().into_owned())),
         },

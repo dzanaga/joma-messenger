@@ -84,6 +84,8 @@ pub enum AppMsg {
     Thumb(u64, String, Picture),
     /// A recording was stopped (its file closed): send it, or throw it away.
     Recorded { conv: String, path: String, send: bool },
+    /// The watch-together player of a session (by key) changed or closed.
+    Watch(String, crate::watch::PlayerEvent),
     /// YouTube search results for search number `gen`.
     YouTube(u64, anyhow::Result<Vec<crate::media::Video>>),
     /// A link preview was fetched (or failed) for this video id.
@@ -357,6 +359,8 @@ pub struct Joma {
     /// The settings panel, when open.
     pub settings: Option<SettingsView>,
     pub recording: Option<Recording>,
+    /// Watching a video together, by session key (a call id, or `direct:<peer>`).
+    pub watches: HashMap<String, crate::watch::Session>,
     pub ink_tool: InkTool,
     pub ink_color: u32,
     /// The stroke being drawn, and the last laser message's time.
@@ -626,6 +630,7 @@ impl Joma {
             profile_edit: None,
             settings: None,
             recording: None,
+            watches: HashMap::new(),
             ink_tool: InkTool::None,
             ink_color: 0xff3355,
             ink_stroke: None,
@@ -981,6 +986,21 @@ impl Joma {
             cx.notify();
         }
         self.track_shares();
+        // The one who started the watch keeps the other in step.
+        let due: Vec<String> = self
+            .watches
+            .iter()
+            .filter(|(_, w)| w.lead && w.player.is_some() && w.last_sent.is_some_and(|t| t.elapsed() > Duration::from_secs(3)))
+            .map(|(k, _)| k.clone())
+            .collect();
+        for k in due {
+            if let Some(st) = self.watches.get(&k).and_then(|w| w.player.as_ref()).map(|p| p.state()) {
+                self.send_watch(&k, &st);
+                if let Some(w) = self.watches.get_mut(&k) {
+                    w.last_sent = Some(Instant::now());
+                }
+            }
+        }
         // mpv finished: the button goes back to play.
         if self.playing.as_mut().is_some_and(|(_, c)| !matches!(c.try_wait(), Ok(None))) {
             self.playing = None;
@@ -1054,6 +1074,26 @@ impl Joma {
                 self.desk.portal_ready(&acc, &call, result);
                 cx.notify();
             }
+            AppMsg::Watch(key, ev) => {
+                match ev {
+                    crate::watch::PlayerEvent::Changed => {
+                        if let Some(st) = self.watches.get(&key).and_then(|w| w.player.as_ref()).map(|p| p.state()) {
+                            self.send_watch(&key, &st);
+                            if let Some(w) = self.watches.get_mut(&key) {
+                                w.last_sent = Some(Instant::now());
+                            }
+                        }
+                    }
+                    crate::watch::PlayerEvent::Closed => {
+                        if self.watches.get(&key).is_some_and(|w| w.player.is_some()) {
+                            self.watches.remove(&key);
+                            self.send_watch(&key, &crate::watch::WatchMsg::Stop);
+                            self.show_flash("you stopped watching together", cx);
+                        }
+                    }
+                }
+                cx.notify();
+            }
             AppMsg::Recorded { conv, path, send } => {
                 if send {
                     if let Reply::Error { message } = self.send_file(&conv, &path) {
@@ -1123,6 +1163,12 @@ impl Joma {
         }
         let acc = self.model.account.clone();
         match &ev {
+            Event::CallMessage { call, from, payloads, .. } if payloads.contains_key(crate::watch::MIME) => {
+                if let Some(msg) = payloads.get(crate::watch::MIME).and_then(|p| crate::watch::WatchMsg::decode(p)) {
+                    self.on_watch(call, bare_uri(from), msg, cx);
+                }
+                return;
+            }
             Event::CallMessage { call, from, payloads, .. } => {
                 if let Some(msg) = payloads.get(MIME).and_then(|p| DeskMsg::decode(p)) {
                     let peer = bare_uri(from).to_owned();
@@ -1162,6 +1208,12 @@ impl Joma {
                         self.tell_presence();
                     }
                     cx.notify();
+                    return;
+                }
+                if let Some(msg) = payloads.get(crate::watch::MIME).and_then(|p| crate::watch::WatchMsg::decode(p)) {
+                    let peer = bare_uri(from).to_owned();
+                    let key = crate::desk::direct_key(&peer);
+                    self.on_watch(&key, &peer, msg, cx);
                     return;
                 }
                 if let Some(msg) = payloads.get(MIME).and_then(|p| DeskMsg::decode(p)) {
@@ -1252,6 +1304,7 @@ impl Joma {
         }
         for call in ended_calls {
             self.desk.end(&acc, &call);
+            self.watches.remove(&call);
             if self.model.calls.is_empty() {
                 self.stage = false;
                 self.desk_frame = None;
@@ -1771,6 +1824,114 @@ impl Joma {
         let mut v: Vec<(String, Instant, bool)> = self.running_shares.iter().map(|(k, (t, _, s))| (k[2..].to_owned(), *t, *s)).collect();
         v.sort_by_key(|(_, t, _)| *t);
         v
+    }
+
+    // ---- Watching together -------------------------------------------------------
+
+    fn send_watch(&self, key: &str, msg: &crate::watch::WatchMsg) {
+        let mut payloads = joma_jami::Details::new();
+        payloads.insert(crate::watch::MIME.into(), msg.encode());
+        let acc = &self.model.account;
+        let sent = match crate::desk::direct_peer(key) {
+            Some(uri) => joma_jami::send_account_message(acc, uri, &payloads, false).map(drop),
+            None => joma_jami::send_call_message(acc, key, &payloads).map(drop),
+        };
+        if let Err(e) = sent {
+            tracing::warn!(error = %e, "could not send a watch message");
+        }
+    }
+
+    /// The session key for watching with a conversation's peer: the call with them if
+    /// one runs, else a session without a call.
+    fn watch_key(&self, conv: &str) -> Option<String> {
+        let c = self.model.conversations.get(conv).filter(|c| c.peers.len() == 1)?;
+        let call = self.model.calls.values().find(|k| k.conversation.as_deref() == Some(conv) && k.state == CallState::Current);
+        Some(call.map(|k| k.id.clone()).unwrap_or_else(|| crate::desk::direct_key(&c.peers[0])))
+    }
+
+    fn start_player(&mut self, key: &str, url: &str) -> Option<crate::watch::Player> {
+        let tx = self.tx.clone();
+        let k = key.to_owned();
+        match crate::watch::Player::start(url, own_profile(), move |ev| {
+            let _ = tx.unbounded_send(AppMsg::Watch(k.clone(), ev));
+        }) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                tracing::warn!(error = %format!("{e:#}"), "no player");
+                None
+            }
+        }
+    }
+
+    /// Start watching `url` with the open conversation's peer.
+    pub fn start_watch(&mut self, url: &str, title: &str, cx: &mut Context<Self>) {
+        let Some(conv) = self.selected.clone() else { return };
+        let Some(key) = self.watch_key(&conv) else {
+            return self.show_flash("watching together needs a one-to-one conversation", cx);
+        };
+        let peer = self.model.conversations.get(&conv).and_then(|c| c.peers.first().cloned()).unwrap_or_default();
+        self.watches.remove(&key);
+        let Some(player) = self.start_player(&key, url) else {
+            return self.show_flash("mpv could not open it", cx);
+        };
+        self.send_watch(&key, &crate::watch::WatchMsg::Start { url: url.to_owned(), title: title.to_owned() });
+        self.watches.insert(
+            key,
+            crate::watch::Session { peer: bare_uri(&peer).to_owned(), url: url.to_owned(), title: title.to_owned(), lead: true, player: Some(player), last_sent: Some(Instant::now()) },
+        );
+        self.show_flash("waiting for them to join; press play in mpv when ready", cx);
+        cx.notify();
+    }
+
+    pub fn join_watch(&mut self, key: &str, cx: &mut Context<Self>) {
+        let Some(url) = self.watches.get(key).filter(|w| w.player.is_none()).map(|w| w.url.clone()) else { return };
+        match self.start_player(key, &url) {
+            Some(p) => {
+                if let Some(w) = self.watches.get_mut(key) {
+                    w.player = Some(p);
+                }
+                self.send_watch(key, &crate::watch::WatchMsg::Join);
+            }
+            None => self.show_flash("mpv could not open it", cx),
+        }
+        cx.notify();
+    }
+
+    pub fn stop_watch(&mut self, key: &str, cx: &mut Context<Self>) {
+        if self.watches.remove(key).is_some() {
+            self.send_watch(key, &crate::watch::WatchMsg::Stop);
+        }
+        cx.notify();
+    }
+
+    fn on_watch(&mut self, key: &str, peer: &str, msg: crate::watch::WatchMsg, cx: &mut Context<Self>) {
+        use crate::watch::WatchMsg;
+        match msg {
+            WatchMsg::Start { url, title } => {
+                let who = self.model.name_of(peer);
+                notify_desktop(&format!("{who} wants to watch together"), &title);
+                self.show_flash(format!("{who} wants to watch “{title}” together"), cx);
+                self.watches.insert(key.to_owned(), crate::watch::Session { peer: peer.to_owned(), url, title, lead: false, player: None, last_sent: None });
+            }
+            WatchMsg::Join => {
+                // They joined: tell them where we are now.
+                if let Some(st) = self.watches.get(key).and_then(|w| w.player.as_ref()).map(|p| p.state()) {
+                    self.send_watch(key, &st);
+                    self.show_flash(format!("{} joined", self.model.name_of(peer)), cx);
+                }
+            }
+            WatchMsg::State { playing, pos, at_ms } => {
+                if let Some(p) = self.watches.get_mut(key).and_then(|w| w.player.as_mut()) {
+                    let _ = p.follow(playing, pos, at_ms);
+                }
+            }
+            WatchMsg::Stop => {
+                if self.watches.remove(key).is_some() {
+                    self.show_flash(format!("{} stopped watching", self.model.name_of(peer)), cx);
+                }
+            }
+        }
+        cx.notify();
     }
 
     // ---- Drawing on a shared screen ------------------------------------------------
@@ -3072,6 +3233,7 @@ impl Joma {
         let Some(call) = self.active_call().cloned() else { return };
         let acc = self.model.account.clone();
         self.desk.end(&acc, &call.id);
+        self.watches.remove(&call.id);
         let r = if call.state == CallState::Incoming {
             joma_jami::refuse_call(&acc, &call.id)
         } else {
@@ -3324,6 +3486,15 @@ impl Joma {
                 }
                 Reply::Done
             }
+            Request::WatchTogether { to, url } => match self.target(&to) {
+                Ok(conv) => {
+                    self.select(conv, cx);
+                    let title = crate::media::youtube_id(&url).and_then(|id| crate::media::cached(&id)).map(|p| p.title).unwrap_or_else(|| url.clone());
+                    self.start_watch(&url, &title, cx);
+                    Reply::Done
+                }
+                Err(e) => e,
+            },
             Request::Avatar { path } => {
                 if self.gate != Gate::Ready {
                     return Reply::Error { message: "Joma is not connected to Jami yet".into() };

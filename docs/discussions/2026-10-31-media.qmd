@@ -1,0 +1,91 @@
+---
+title: "Joma at night: watching together, transcription, GIFs"
+date: 2026-10-31
+lang: en
+---
+
+# How to read
+
+Under each question there is a `- [ ] A:` line.
+
+- **Tick it without writing anything:** you agree with the proposal.
+- **Tick it and add a detail:** you agree, with that detail.
+- **Leave it unticked and write:** I revise the proposal.
+
+Built tonight and open to change: watching together (0.5.0, a first version), voice
+and video messages, emoji, YouTube search and previews (0.4.5). Not built: transcription
+and GIFs, which need your answers first.
+
+# 1. Watching together: how it works now
+
+Each side plays the video in its own mpv, straight from the link (YouTube through
+yt-dlp, or any file or URL both can open): nothing of the video goes between you, so
+it is as smooth and sharp as watching alone, with sound. Joma only keeps play, pause and
+position in step: whoever pauses, plays or seeks, the other follows; the one who started
+sends where they are every 3 seconds, and the other seeks when more than 0.8 s apart or
+plays 5 % faster or slower when 0.15–0.8 s apart. Messages go in the call when there is
+one (fast), else as account messages (slower to arrive). Start it from a YouTube link's
+card (**watch together**) or `joma watch-together <to> <url>`; the other gets **join**.
+
+Verified in the nest with a clock video: both players showed the same frame after
+play, after a seek from the one who joined, and after a pause.
+
+- [ ] A:
+
+# 2. Watching together: what is next
+
+Proposals, in order:
+
+1. Talk while watching: start it from a call (it already rides the call when there is
+   one); suggest headphones (the call's echo cancellation does not know the video).
+2. Choose the video in Joma (the YouTube search popover gets a **watch together**
+   button), and a queue: the next video starts for both.
+3. Clocks: positions carry the sender's clock, assuming both machines are NTP-synced
+   (they are on Omarchy by default). If not, Joma can measure the offset with a ping
+   through the call.
+4. A "host" mode that streams the video to a friend without mpv: not planned, for the
+   reasons we discussed (redistribution, the host's upload).
+
+- [ ] A:
+
+# 3. Ads
+
+mpv with yt-dlp shows no ads: in practice it is an ad blocker, against YouTube's terms.
+Each side fetches its own copy, so nothing is redistributed. yt-dlp needs updating when
+YouTube changes (`pacman -Syu`). An alternative that keeps ads (or uses Premium) would be
+syncing the YouTube player in the browser, through an extension: much more work.
+
+- [ ] A: keep mpv / do the browser later / other
+
+# 4. Transcription of voice messages
+
+Proposal: local, with whisper.cpp (`whisper-cli`, in the AUR and as a package on
+Arch), a small model (`base` or `small`, multilingual, 150–500 MB) downloaded once on
+first use after asking. A voice message gets **transcribe**; the text appears under it
+and is kept in Joma's cache (not sent into the conversation). Runs on the CPU (the
+display GPU stays alone); a one-minute message takes a few seconds with `base`.
+
+Questions: automatic for every received message, or on click? Which language by
+default (auto-detect works, Italian is forced better)? Send the transcript to the
+conversation as well (useful for the other side), or keep it local?
+
+- [ ] A:
+
+# 5. GIFs
+
+GIF search needs an API key: Giphy and Tenor both require one, tied to an account and
+its terms. Proposals: (a) you create a Giphy key and set it in Settings; Joma searches
+with it and sends the GIF as a file (so it plays in Jami too); (b) no search, but
+pasting or dropping a GIF already works and shows animated in the conversation;
+(c) a local collection: a folder of GIFs you keep, searchable by name.
+
+- [ ] A: (a) / (b) / (c)
+
+# 6. Voice messages in the test setup
+
+Recording works with real devices; in the test profiles (silent ALSA null device) the
+recorder spins and cannot be stopped, as calls do. Joma stops it off the UI thread, so
+the window never freezes, but a test recording is never sent. Please try a voice
+message on your machine and tell me whether it sends and plays on the other side.
+
+- [ ] A:
