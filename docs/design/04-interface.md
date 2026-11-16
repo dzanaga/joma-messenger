@@ -52,3 +52,5 @@ ends, drawn at 16 px and tinted by the theme.
 Built so far (0.5.2.dev0): `ui.rs` holds the icons (`Icon`, embedded with `Assets`,
 painted in the text colour in effect and sized 1.25 × the text, so hover and "on"
 colours reach them) and `button`; the border token.
+`render/` has one file per view (`shell`, `sidebar`, `people`, `calls`, `stage_view`,
+`chat`, `overlays`); `mod.rs` keeps the shared helpers and the root `render`.
