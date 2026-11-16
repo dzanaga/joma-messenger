@@ -55,6 +55,9 @@ pub enum Request {
     WatchTogether { to: String, url: String },
     /// Set the profile picture from a file (cropped square), or remove it (`None`).
     Avatar { path: Option<String> },
+    /// Open a part of the interface (`settings`, `profile`, `keys`, `menu`, `chat-menu`,
+    /// `emoji`, `quick`, `close`): for scripts and screenshots.
+    Ui { what: String },
     /// Quit Joma (closing its window only hides it).
     Quit,
 }

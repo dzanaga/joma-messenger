@@ -3,44 +3,53 @@
 use super::*;
 
 impl Joma {
-    /// The composer with its buttons: emoji, YouTube, voice and video messages; while
-    /// recording, the recording's time with send and cancel.
+    /// The message field: the text, then attach, emoji, YouTube, voice and video messages
+    /// inside it; while recording, the recording's time with send and cancel.
     pub(super) fn composer_row(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let row = div().flex().items_center().gap(px(6.)).px(px(12.)).py(px(8.));
+        let field = div().flex().flex_none().items_end().gap(px(2.)).mx(px(S3)).mt(px(S1)).mb(px(S3)).pl(px(S2)).pr(px(S1)).bg(t.panel).border_1().rounded(px(radius()));
+        let tools = div().flex().flex_none().items_center().gap(px(2.)).h(px(t.size * 1.6 + 14.));
         if let Some(r) = &self.recording {
             let secs = r.started.elapsed().as_secs();
-            return row
+            return field
+                .border_color(t.red)
                 .child(
                     div()
                         .flex_1()
                         .flex()
                         .items_center()
-                        .gap(px(8.))
-                        .h(px(t.size + 20.))
-                        .px(px(10.))
-                        .border_1()
-                        .border_color(t.red)
+                        .gap(px(S2))
+                        .h(px(t.size * 1.6 + 14.))
                         .child(div().size(px(9.)).rounded_full().bg(t.red))
                         .child(div().text_color(t.bright).child(format!("recording a {} message · {}:{:02}", if r.video { "video" } else { "voice" }, secs / 60, secs % 60))),
                 )
-                .child(button("rec-send", G_CHECK, "send", t, true).on_click(cx.listener(|this, _, _, cx| this.stop_recording(true, cx))))
-                .child(button("rec-cancel", G_TIMES, "", t, false).on_click(cx.listener(|this, _, _, cx| this.stop_recording(false, cx))))
+                .child(
+                    tools
+                        .child(button("rec-send", G_CHECK, "send", t, true).on_click(cx.listener(|this, _, _, cx| this.stop_recording(true, cx))))
+                        .child(button("rec-cancel", G_TIMES, "", t, false).on_click(cx.listener(|this, _, _, cx| this.stop_recording(false, cx)))),
+                )
                 .into_any_element();
         }
-        row.child(div().flex_1().min_w(px(0.)).child(self.composer.clone()))
-            .child(button("emoji", G_SMILE, "", t, self.emoji_open).on_click(cx.listener(|this, _, _, cx| {
-                this.emoji_open = !this.emoji_open;
-                cx.notify();
-            })))
-            // YouTube: the message box becomes the search box (`@youtube …`, then Enter).
-            .child(button("yt", G_YOUTUBE, "", t, false).on_click(cx.listener(|this, _, _, cx| {
-                this.emoji_open = false;
-                this.composer.update(cx, |c, cx| c.set_text("@youtube ", cx));
-                this.focus_composer = true;
-                cx.notify();
-            })))
-            .child(button("rec-voice", G_MIC, "", t, false).on_click(cx.listener(|this, _, _, cx| this.start_recording(false, cx))))
-            .child(button("rec-video", G_VIDEO, "", t, false).on_click(cx.listener(|this, _, _, cx| this.start_recording(true, cx))))
+        let conv = self.selected.clone().unwrap_or_default();
+        field
+            .border_color(if self.composer_focused { t.accent.opacity(0.6) } else { t.border })
+            .child(div().flex_1().min_w(px(0.)).child(self.composer.clone()))
+            .child(
+                tools
+                    .child(button("send-file", G_CLIP, "", t, false).on_click(cx.listener(move |this, _, _, cx| this.pick_and_send(conv.clone(), cx))))
+                    .child(button("emoji", G_SMILE, "", t, self.emoji_open).on_click(cx.listener(|this, _, _, cx| {
+                        this.emoji_open = !this.emoji_open;
+                        cx.notify();
+                    })))
+                    // YouTube: the message box becomes the search box (`@youtube …`, then Enter).
+                    .child(button("yt", G_YOUTUBE, "", t, false).on_click(cx.listener(|this, _, _, cx| {
+                        this.emoji_open = false;
+                        this.composer.update(cx, |c, cx| c.set_text("@youtube ", cx));
+                        this.focus_composer = true;
+                        cx.notify();
+                    })))
+                    .child(button("rec-voice", G_MIC, "", t, false).on_click(cx.listener(|this, _, _, cx| this.start_recording(false, cx))))
+                    .child(button("rec-video", G_VIDEO, "", t, false).on_click(cx.listener(|this, _, _, cx| this.start_recording(true, cx)))),
+            )
             .into_any_element()
     }
 
@@ -324,8 +333,11 @@ impl Joma {
         col.into_any_element()
     }
 
+    /// The conversation as bubbles: ours on the right on the accent's tint, the others'
+    /// on the left; what happened (joined, a call) as a quiet centred line.
     pub(super) fn messages(&self, t: &Theme, conv: &Conversation, cx: &mut Context<Self>) -> AnyElement {
-        let mut list = div().id("messages").flex().flex_col().flex_1().overflow_y_scroll().track_scroll(&self.messages_scroll).px(px(14.)).py(px(8.));
+        let mut list = div().id("messages").flex().flex_col().flex_1().overflow_y_scroll().track_scroll(&self.messages_scroll).px(px(14.)).py(px(S2));
+        let group = conv.peers.len() > 1;
         let mut last_day = None;
         let mut last_author = String::new();
         for m in &conv.messages {
@@ -333,118 +345,102 @@ impl Joma {
             if last_day != Some(day) {
                 last_day = Some(day);
                 last_author.clear();
-                list = list.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.))
-                        .py(px(8.))
-                        .text_color(t.muted)
-                        .text_size(px(t.size - 2.))
-                        .child(div().h(px(1.)).flex_1().bg(t.border))
-                        .child(day_label)
-                        .child(div().h(px(1.)).flex_1().bg(t.border)),
-                );
+                list = list.child(div().flex().justify_center().pt(px(S3)).pb(px(S1)).child(caption(t, &day_label)));
             }
             let me = crate::model::bare_uri(&m.author) == self.model.me;
             let who = if me { "you".to_owned() } else { self.model.name_of(&m.author) };
             let color = if me { t.accent } else { author_color(t, &m.author) };
-            let repeat = last_author == m.author && m.kind == MsgKind::Text;
-            // A system line breaks a run, so the next message names its author again.
-            last_author = if m.kind == MsgKind::Text { m.author.clone() } else { String::new() };
-            let row = div().flex().items_start().gap(px(10.)).py(px(1.)).child(div().flex_none().w(px(42.)).text_color(t.muted).child(hm));
-            list = list.child(match m.kind {
-                MsgKind::Text => row
-                    .child(
+            let file = m.file.clone();
+            let bubbled = m.kind == MsgKind::Text || file.is_some();
+            let repeat = bubbled && last_author == m.author;
+            // A system line breaks a run, so the next bubble names its author again.
+            last_author = if bubbled { m.author.clone() } else { String::new() };
+            if !bubbled {
+                list = list.child(div().flex().justify_center().py(px(3.)).text_size(px(t.size - 2.)).text_color(t.muted).child(format!("{who} · {} · {hm}", m.text)));
+                continue;
+            }
+            // GPUI measures text at its full width before the limit applies, so a bubble
+            // whose text will wrap gets the limit as its width (the font is monospace:
+            // the estimate holds).
+            let cells = m.text.lines().map(|l| l.chars().map(|c| if c.is_ascii() { 1. } else { 1.8 }).sum::<f32>()).fold(0., f32::max);
+            let inner = self.bubble_max - 22.;
+            let wraps = cells * t.size * 0.6 > inner - 8.;
+            let bubble = div()
+                .flex()
+                .flex_col()
+                .flex_none()
+                .max_w(px(self.bubble_max))
+                .when(wraps, |d| d.w(px(self.bubble_max)))
+                .px(px(10.))
+                .py(px(5.))
+                .rounded(px(radius()))
+                .border_1()
+                .map(|d| if me { d.bg(t.accent_bg).border_color(t.accent.opacity(0.3)) } else { d.bg(t.raised).border_color(t.raised) })
+                .when(group && !me && !repeat, |d| d.child(div().text_size(px(t.size - 2.)).font_weight(FontWeight::BOLD).text_color(color).child(who.clone())));
+            let bubble = match file {
+                None => {
+                    let results = crate::watch::parse_results(&m.text);
+                    let yt = if results.is_some() { None } else { crate::media::youtube_id(&m.text) };
+                    match results {
+                        Some((query, found)) => bubble.child(self.youtube_results(t, &m.id, &query, found, cx)),
+                        None => bubble.child(div().text_color(t.bright).when(wraps, |d| d.w(px(inner))).child(m.text.clone())).when_some(yt, |d, id| d.child(self.youtube_card(t, &id, &m.id, cx))),
+                    }
+                }
+                // A file: click to open it, or to download one too big to come by itself.
+                Some(file) => {
+                    let saved = self.saved_file(&conv.id, &file.id);
+                    let file_id = file.id.clone();
+                    let have = saved.is_some();
+                    let hint = match (have, me, self.downloads.contains_key(&file.id)) {
+                        (true, _, _) => " · open".to_owned(),
+                        (false, true, _) => String::new(),
+                        (false, false, true) => " · downloading".to_owned(),
+                        (false, false, false) => format!(" · {} · download", size_label(file.size)),
+                    };
+                    let (conv_id, msg_id) = (conv.id.clone(), m.id.clone());
+                    bubble.child(
                         div()
+                            .id(SharedString::from(format!("file-{}", m.id)))
                             .flex()
-                            .flex_none()
-                            .items_center()
-                            .gap(px(6.))
-                            .h(px(t.size + 7.))
-                            .w(px(118.))
-                            .when(!repeat, |d| {
-                                let key = crate::model::bare_uri(&m.author).to_owned();
-                                let picture = self.model.avatars.get(&key).cloned();
-                                let initial_of = if me { self.model.my_name.clone() } else { who.clone() };
-                                d.child(avatar(t, picture, &key, &initial_of, 18., None)).child(div().flex_1().min_w(px(0.)).truncate().text_color(color).child(who))
+                            .flex_col()
+                            .text_color(t.text)
+                            .when(!me || have, |d| {
+                                d.cursor_pointer().hover(|d| d.text_color(t.accent)).on_click(cx.listener(move |this, _, _, cx| {
+                                    this.file_clicked(&conv_id, &msg_id, &file, cx);
+                                    cx.notify();
+                                }))
+                            })
+                            .child(div().flex().items_center().gap(px(6.)).child(div().text_color(t.muted).child(G_CLIP)).child(div().min_w(px(0.)).child(format!("{}{hint}", m.text))))
+                            // A voice or video message plays with mpv.
+                            .when_some(saved.clone().filter(|p| crate::media::is_audio(p) || crate::media::is_video(p)), |d, path| {
+                                let fid = file_id.clone();
+                                let playing = self.playing.as_ref().is_some_and(|(id, _)| *id == file_id);
+                                let voice = crate::media::is_audio(&path) || path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("voice"));
+                                d.child(
+                                    div().mt(px(S1)).flex().child(
+                                        button(SharedString::from(format!("play-{}", m.id)), if playing { G_STOP } else { G_PLAY }, if playing { "stop" } else if voice { "play voice message" } else { "play video" }, t, playing)
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                cx.stop_propagation();
+                                                this.toggle_play(&fid, &path, cx);
+                                            })),
+                                    ),
+                                )
+                            })
+                            // A picture shows itself once it is here.
+                            .when_some(saved.filter(|p| is_picture(p)), |d, path| {
+                                // Sized from the file's header, so the list does not jump
+                                // when the picture loads.
+                                let (w, h) = picture_box(&path, 360., 260.);
+                                d.child(div().mt(px(S1)).w(px(w)).h(px(h)).rounded(px(radius())).overflow_hidden().child(gpui::img(path).w(px(w)).h(px(h)).object_fit(ObjectFit::Contain)))
                             }),
                     )
-                    .child({
-                        let results = crate::watch::parse_results(&m.text);
-                        let yt = if results.is_some() { None } else { crate::media::youtube_id(&m.text) };
-                        let body = div().flex().flex_col().flex_1().min_w(px(0.));
-                        match results {
-                            Some((query, list)) => body.child(self.youtube_results(t, &m.id, &query, list, cx)),
-                            None => body
-                                .child(div().text_color(if me { t.text } else { t.bright }).child(m.text.clone()))
-                                .when_some(yt, |d, id| d.child(self.youtube_card(t, &id, &m.id, cx))),
-                        }
-                    }),
-                MsgKind::Event => match m.file.clone() {
-                    // A file: click to open it, or to download one too big to come by itself.
-                    Some(file) => {
-                        let saved = self.saved_file(&conv.id, &file.id);
-                        let file_id = file.id.clone();
-                        let have = saved.is_some();
-                        let hint = match (have, me, self.downloads.contains_key(&file.id)) {
-                            (true, _, _) => " · open".to_owned(),
-                            (false, true, _) => String::new(),
-                            (false, false, true) => " · downloading".to_owned(),
-                            (false, false, false) => format!(" · {} · download", size_label(file.size)),
-                        };
-                        let (conv_id, msg_id) = (conv.id.clone(), m.id.clone());
-                        row.child(
-                            div()
-                                .id(SharedString::from(format!("file-{}", m.id)))
-                                .flex_1()
-                                .text_color(t.muted)
-                                .italic()
-                                .when(!me || have, |d| {
-                                    d.cursor_pointer().hover(|d| d.text_color(t.accent)).on_click(cx.listener(move |this, _, _, cx| {
-                                        this.file_clicked(&conv_id, &msg_id, &file, cx);
-                                        cx.notify();
-                                    }))
-                                })
-                                .child(format!("{who} · {}{hint}", m.text))
-                                // A voice or video message plays with mpv.
-                                .when_some(saved.clone().filter(|p| crate::media::is_audio(p) || crate::media::is_video(p)), |d, path| {
-                                    let fid = file_id.clone();
-                                    let playing = self.playing.as_ref().is_some_and(|(id, _)| *id == file_id);
-                                    let voice = crate::media::is_audio(&path) || path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("voice"));
-                                    d.child(
-                                        div().mt(px(4.)).flex().child(
-                                            button(SharedString::from(format!("play-{}", m.id)), if playing { G_STOP } else { G_PLAY }, if playing { "stop" } else if voice { "play voice message" } else { "play video" }, t, playing)
-                                                .on_click(cx.listener(move |this, _, _, cx| {
-                                                    cx.stop_propagation();
-                                                    this.toggle_play(&fid, &path, cx);
-                                                })),
-                                        ),
-                                    )
-                                })
-                                // A picture shows itself once it is here.
-                                .when_some(saved.filter(|p| is_picture(p)), |d, path| {
-                                    // Sized from the file's header, so the list does not jump
-                                    // when the picture loads.
-                                    let (w, h) = picture_box(&path, 360., 260.);
-                                    d.child(
-                                        div()
-                                            .mt(px(4.))
-                                            .w(px(w + 2.))
-                                            .h(px(h + 2.))
-                                            .border_1()
-                                            .border_color(t.border)
-                                            .child(gpui::img(path).w(px(w)).h(px(h)).object_fit(ObjectFit::Contain)),
-                                    )
-                                }),
-                        )
-                    }
-                    None => row.child(div().flex_1().text_color(t.muted).italic().child(format!("{who} · {}", m.text))),
-                },
-            });
+                }
+            };
+            let bubble = bubble.child(div().flex().justify_end().text_size(px(t.size - 3.5)).text_color(t.muted).child(hm));
+            list = list.child(div().flex().flex_none().w_full().mt(px(if repeat { 3. } else { S2 })).when(me, |d| d.justify_end()).child(bubble));
         }
         if conv.composing {
-            list = list.child(div().pl(px(52.)).text_color(t.muted).italic().child("typing…"));
+            list = list.child(div().pt(px(S1)).text_size(px(t.size - 2.)).text_color(t.muted).child("typing…"));
         }
         list.into_any_element()
     }
@@ -483,13 +479,14 @@ impl Joma {
             .flex()
             .flex_none()
             .items_center()
-            .justify_between()
-            .px(px(12.))
-            .py(px(8.))
+            .gap(px(10.))
+            .h(px(46.))
+            .pl(px(S3))
+            .pr(px(S2))
             .border_b_1()
             .border_color(t.border)
             .when(self.narrow, |d| {
-                d.child(button("back", G_BACK, "", t, false).mr(px(8.)).on_click(cx.listener(|this, _, _, cx| {
+                d.child(button("back", G_BACK, "", t, false).on_click(cx.listener(|this, _, _, cx| {
                     this.narrow_chat = false;
                     cx.notify();
                 })))
@@ -498,7 +495,7 @@ impl Joma {
                 let peer = (conv.peers.len() == 1).then(|| crate::model::bare_uri(&conv.peers[0]).to_owned());
                 let picture = peer.as_ref().and_then(|p| self.model.avatars.get(p).cloned());
                 let key = peer.unwrap_or_else(|| conv.id.clone());
-                div().mr(px(10.)).child(avatar(t, picture, &key, &conv.title, 34., None))
+                avatar(t, picture, &key, &conv.title, 28., None)
             })
             .child(
                 div()
@@ -507,44 +504,33 @@ impl Joma {
                     .flex_1()
                     .min_w(px(0.))
                     .overflow_hidden()
-                    .child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child(conv.title.clone()))
-                    .child(div().text_size(px(t.size - 2.)).text_color(t.muted).child({
+                    .child(div().flex().items_center().gap(px(6.)).child(div().truncate().text_color(t.bright).font_weight(FontWeight::BOLD).child(conv.title.clone())).when(fav, |d| {
+                        d.child(div().flex_none().text_size(px(t.size - 3.)).text_color(t.yellow).child(G_STAR))
+                    }))
+                    .child(div().truncate().text_size(px(t.size - 2.)).text_color(t.muted).child({
                         let who = if peers == conv.title { peer_ids } else { format!("{peers} · {peer_ids}") };
-                        match status {
-                            Some(s) => format!("{s} · {who}"),
-                            None => who,
-                        }
+                        status.unwrap_or(who)
                     })),
             )
             .child(
                 div()
                     .flex()
-                    .items_center().gap(px(4.))
-                    .child(button("fav", if fav { G_STAR } else { G_STAR_O }, "", t, fav).on_click(cx.listener(|this, _, _, cx| this.toggle_favorite(cx))))
-                    .when(!conv.request && !self.is_removed(&conv.id), |d| {
-                        let id = conv.id.clone();
-                        d.child(button("remove", G_TRASH, "", t, false).on_click(cx.listener(move |this, _, _, cx| this.remove_from_list(&id, cx))))
-                    })
-                    .child(div().w(px(1.)).h(px(18.)).mx(px(2.)).bg(t.border))
-                    .child(button("quick", G_BOLT, if self.narrow { "" } else { "quick" }, t, self.quick_open).on_click(cx.listener(|this, _, _, cx| {
-                        this.quick_open = !this.quick_open;
-                        cx.notify();
-                    })))
-                    .when(!conv.request, |d| {
-                        let id = conv.id.clone();
-                        d.child(button("send-file", G_CLIP, "", t, false).on_click(cx.listener(move |this, _, _, cx| this.pick_and_send(id.clone(), cx))))
-                    })
+                    .flex_none()
+                    .items_center()
+                    .gap(px(2.))
                     .when(!has_call && !conv.request, |d| {
-                        d.child(div().w(px(1.)).h(px(18.)).mx(px(2.)).bg(t.border)).child(button("share-d", G_DESKTOP, "", t, false).on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(conv) = this.selected.clone() {
-                                if let Reply::Error { message } = this.share_direct(&conv, cx) {
-                                    this.show_flash(message, cx);
+                        d.child(button("call-a", G_PHONE, "", t, false).text_color(t.text).on_click(cx.listener(|this, _, _, cx| this.place_call(false, cx))))
+                            .child(button("call-v", G_VIDEO, "", t, false).text_color(t.text).on_click(cx.listener(|this, _, _, cx| this.place_call(true, cx))))
+                            .child(button("share-d", G_DESKTOP, "", t, false).text_color(t.text).on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(conv) = this.selected.clone() {
+                                    if let Reply::Error { message } = this.share_direct(&conv, cx) {
+                                        this.show_flash(message, cx);
+                                    }
                                 }
-                            }
-                        })))
-                        .child(button("call-a", G_PHONE, "", t, false).on_click(cx.listener(|this, _, _, cx| this.place_call(false, cx))))
-                            .child(button("call-v", G_VIDEO, "", t, false).on_click(cx.listener(|this, _, _, cx| this.place_call(true, cx))))
-                    }),
+                            })))
+                            .child(div().w(px(1.)).h(px(16.)).mx(px(S1)).bg(t.border))
+                    })
+                    .child(button("chat-more", G_MORE, "", t, self.menu == Some(Menu::Chat)).on_click(cx.listener(|this, _, _, cx| this.toggle_menu(Menu::Chat, cx)))),
             );
 
         let body: AnyElement = if conv.request {
@@ -580,7 +566,7 @@ impl Joma {
         };
 
         let quick = self.quick_open.then(|| {
-            let mut row = div().flex().flex_wrap().gap(px(6.)).px(px(12.)).py(px(6.)).border_t_1().border_color(t.border).bg(t.panel);
+            let mut row = div().flex().flex_none().flex_wrap().gap(px(6.)).px(px(S3)).py(px(6.));
             for (i, m) in self.quick.messages.iter().enumerate().take(9) {
                 row = row.child(
                     button(format!("q{i}"), &format!("{}", i + 1), m, t, false)

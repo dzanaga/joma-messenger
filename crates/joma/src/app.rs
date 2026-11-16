@@ -31,6 +31,7 @@ actions!(
     joma,
     [
         Quit,
+        ShowKeys,
         NextConversation,
         PrevConversation,
         NewConversation,
@@ -235,7 +236,16 @@ pub struct DeviceOp {
     pub peer: String,
 }
 
-/// What the sidebar lists (the rail on the left picks it).
+/// A menu that drops from a button.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Menu {
+    /// Ours: profile, invisible, username, to the tray.
+    Me,
+    /// The open conversation's: star, quick messages, send a file, remove.
+    Chat,
+}
+
+/// What the sidebar lists (the tab strip on top picks it).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tab {
     Chats,
@@ -374,6 +384,17 @@ pub struct Joma {
     /// The sharer's preview of each running Joma share, by session key.
     pub previews: HashMap<String, Frame>,
     pub flash: Option<(String, Instant)>,
+    /// The menu that is open: ours (the picture in the tab strip) or the conversation's.
+    pub menu: Option<Menu>,
+    /// The overlay listing the keys (F1).
+    pub keys_open: bool,
+    /// The message box has the keyboard (its field shows it).
+    pub composer_focused: bool,
+    /// The window is wide enough for the tabs' names.
+    pub tab_labels: bool,
+    /// How wide a bubble may get: three quarters of the conversation (GPUI's text does
+    /// not wrap under a percentage width).
+    pub bubble_max: f32,
     pub focus: FocusHandle,
     pub messages_scroll: ScrollHandle,
     pub pinned_bottom: bool,
@@ -636,6 +657,11 @@ impl Joma {
             picker_gen: 0,
             previews: HashMap::new(),
             flash: None,
+            menu: None,
+            keys_open: false,
+            composer_focused: false,
+            tab_labels: true,
+            bubble_max: 480.,
             focus: cx.focus_handle(),
             messages_scroll: ScrollHandle::new(),
             pinned_bottom: true,
@@ -663,6 +689,8 @@ impl Joma {
             adding_account: None,
         };
         joma_desk::share::set_max_fps(j.quick.share_fps);
+        crate::ui::set_rounded(j.quick.rounded);
+        j.composer.update(cx, |c, _| c.set_bare(true));
         j.configure_inputs(cx);
         j.boot(cx);
         // Started in the tray: the window maps into `special:joma` (a rule on its first
@@ -2345,6 +2373,46 @@ impl Joma {
         }
     }
 
+    pub fn set_rounded(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.quick.rounded = on;
+        crate::ui::set_rounded(on);
+        self.save_quick(cx);
+    }
+
+    pub fn set_show_version(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.quick.show_version = on;
+        self.save_quick(cx);
+    }
+
+    /// `joma ui <what>`: open a part of the interface from a script.
+    fn ui(&mut self, what: &str, cx: &mut Context<Self>) -> Reply {
+        match what {
+            "settings" => self.open_settings(cx),
+            "profile" => self.open_profile(cx),
+            "keys" => self.keys_open = true,
+            "menu" => self.menu = Some(Menu::Me),
+            "chat-menu" => self.menu = Some(Menu::Chat),
+            "emoji" => self.emoji_open = !self.emoji_open,
+            "quick" => self.quick_open = !self.quick_open,
+            "close" => {
+                self.settings = None;
+                self.profile_edit = None;
+                self.keys_open = false;
+                self.menu = None;
+                self.emoji_open = false;
+                self.quick_open = false;
+            }
+            other => return Reply::Error { message: format!("no such part: {other}") },
+        }
+        cx.notify();
+        Reply::Done
+    }
+
+    pub fn toggle_menu(&mut self, menu: Menu, cx: &mut Context<Self>) {
+        self.menu = if self.menu == Some(menu) { None } else { Some(menu) };
+        cx.notify();
+    }
+
     pub fn set_share_fps(&mut self, fps: u32, cx: &mut Context<Self>) {
         self.quick.share_fps = fps;
         joma_desk::share::set_max_fps(fps);
@@ -3520,11 +3588,13 @@ impl Joma {
                 self.toggle_window(window, cx);
                 Reply::Done
             }
+            Request::Ui { what } => self.ui(&what, cx),
             Request::Quick => {
                 // The file can change outside Joma (edited by hand, or another tool).
                 let quick = QuickConfig::load();
                 if quick != self.quick {
                     self.quick = quick;
+                    crate::ui::set_rounded(self.quick.rounded);
                     cx.notify();
                 }
                 Reply::Quick(self.quick_state())

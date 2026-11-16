@@ -54,3 +54,13 @@ painted in the text colour in effect and sized 1.25 × the text, so hover and "o
 colours reach them) and `button`; the border token.
 `render/` has one file per view (`shell`, `sidebar`, `people`, `calls`, `stage_view`,
 `chat`, `overlays`); `mod.rs` keeps the shared helpers and the root `render`.
+
+0.5.2.dev1: the shell and the conversation are restyled. `ui.rs` adds `radius()` (the
+`rounded` setting, a process-wide switch), `tile`, `badge`, `caption`, `menu_box` /
+`menu_item`; icon-only buttons have no frame. Menus are `Joma::menu` (`Menu::Me`,
+`Menu::Chat`), drawn by `menu_overlay` over a backdrop that closes them. Bubbles: GPUI
+measures text before a max width applies and does not wrap under a percentage, so a
+bubble gets a pixel limit (`bubble_max`, from the window) and a text that will wrap (an
+estimate, the font is monospace) gets that width outright. `scripts/shots.sh` screenshots
+every tab of a test profile in the nest, with the user's theme; `joma ui <part>` opens
+overlays for it.

@@ -26,14 +26,25 @@ impl Joma {
             };
             let id = c.id.clone();
             let dragged = Dragged { tab: Tab::Chats, id: c.id.clone(), title: c.title.clone() };
+            let peer = (c.peers.len() == 1).then(|| c.peers[0].clone());
+            let key = peer.clone().unwrap_or_else(|| c.id.clone());
+            let picture = peer.as_ref().and_then(|p| self.model.avatars.get(crate::model::bare_uri(p)).cloned());
+            let dot_color = match dot {
+                Dot::Active => Some(t.green),
+                Dot::Reachable => Some(t.green.opacity(0.35)),
+                Dot::None => None,
+            };
+            let stamp = c.last().map(|m| short_when(m.ts)).unwrap_or_default();
+            // One compact line: picture, name (the last message beside it, quiet), marks,
+            // time, unread.
             let row = div()
                     .id(SharedString::from(format!("conv-{}", c.id)))
                     .flex()
                     .flex_col()
-                    .px(px(10.))
-                    .py(px(6.))
-                    .border_l_2()
-                    .border_color(if selected { t.accent } else { gpui::transparent_black() })
+                    .flex_none()
+                    .mx(px(S1))
+                    .px(px(S2))
+                    .rounded(px(radius()))
                     .when(selected, |d| d.bg(t.accent_bg))
                     .hover(|d| d.bg(t.raised))
                     .cursor_pointer()
@@ -42,74 +53,29 @@ impl Joma {
                         this.select(id.clone(), cx);
                         this.narrow_chat = true;
                     }))
-                    .child({
-                        let peer = (c.peers.len() == 1).then(|| c.peers[0].clone());
-                        let key = peer.clone().unwrap_or_else(|| c.id.clone());
-                        let picture = peer.as_ref().and_then(|p| self.model.avatars.get(crate::model::bare_uri(p)).cloned());
-                        let dot_color = match dot {
-                            Dot::Active => Some(t.green),
-                            Dot::Reachable => Some(t.green.opacity(0.35)),
-                            Dot::None => None,
-                        };
-                        let stamp = c.last().map(|m| short_when(m.ts)).unwrap_or_default();
+                    .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(10.))
-                            .child(avatar(t, picture, &key, &c.title, 32., dot_color))
+                            .gap(px(S2))
+                            .h(px(34.))
+                            .child(avatar(t, picture, &key, &c.title, 22., dot_color))
                             .child(
                                 div()
-                                    .flex()
-                                    .flex_col()
-                                    .flex_1()
-                                    .min_w(px(0.))
-                                    .gap(px(1.))
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(5.))
-                                            .child(
-                                                div()
-                                                    .flex_1()
-                                                    .min_w(px(0.))
-                                                    .truncate()
-                                                    .text_color(if c.unread > 0 || selected { t.bright } else { t.text })
-                                                    .when(c.unread > 0, |d| d.font_weight(FontWeight::BOLD))
-                                                    .child(c.title.clone()),
-                                            )
-                                            .when(fav, |d| d.child(div().flex_none().text_size(px(t.size - 2.)).text_color(t.yellow).child(G_STAR)))
-                                            .when(has_call, |d| d.child(div().flex_none().text_size(px(t.size - 2.)).text_color(t.green).child(G_PHONE)))
-                                            .child(div().flex_none().text_size(px(t.size - 2.5)).text_color(if c.unread > 0 { t.accent } else { t.muted }).child(stamp)),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(6.))
-                                            .child(div().flex_1().min_w(px(0.)).truncate().text_color(t.muted).text_size(px(t.size - 1.5)).child(last))
-                                            .when(c.request, |d| d.child(div().flex_none().text_size(px(t.size - 2.)).text_color(t.yellow).child("request")))
-                                            .when(c.unread > 0, |d| {
-                                                d.child(
-                                                    div()
-                                                        .flex_none()
-                                                        .min_w(px(18.))
-                                                        .h(px(16.))
-                                                        .px(px(4.))
-                                                        .rounded(px(8.))
-                                                        .flex()
-                                                        .items_center()
-                                                        .justify_center()
-                                                        .bg(t.accent)
-                                                        .text_color(t.bar)
-                                                        .text_size(px(t.size - 2.5))
-                                                        .font_weight(FontWeight::BOLD)
-                                                        .child(c.unread.to_string()),
-                                                )
-                                            }),
-                                    ),
+                                    .flex_none()
+                                    .max_w(px(150.))
+                                    .truncate()
+                                    .text_color(if c.unread > 0 || selected { t.bright } else { t.text })
+                                    .when(c.unread > 0, |d| d.font_weight(FontWeight::BOLD))
+                                    .child(c.title.clone()),
                             )
-                    })
+                            .child(div().flex_1().min_w(px(0.)).truncate().text_color(t.muted).text_size(px(t.size - 2.)).child(last))
+                            .when(c.request, |d| d.child(div().flex_none().text_size(px(t.size - 2.)).text_color(t.yellow).child("request")))
+                            .when(fav, |d| d.child(div().flex_none().text_size(px(t.size - 3.)).text_color(t.yellow).child(G_STAR)))
+                            .when(has_call, |d| d.child(div().flex_none().text_size(px(t.size - 3.)).text_color(t.green).child(G_PHONE)))
+                            .when(c.unread == 0, |d| d.child(div().flex_none().text_size(px(t.size - 2.5)).text_color(t.muted).child(stamp)))
+                            .when(c.unread > 0, |d| d.child(badge(t, c.unread.min(99).to_string()))),
+                    )
                     .when(self.mode == Mode::Removed, |d| {
                         let (a, b) = (c.id.clone(), c.id.clone());
                         let armed = self.confirm_delete.as_ref().is_some_and(|(k, at)| *k == c.id && at.elapsed().as_secs() < 5);
@@ -136,33 +102,27 @@ impl Joma {
                     });
             list = list.child(if c.request || self.mode == Mode::Removed { row } else { draggable(row, dragged, t, cx) });
         }
-        let header = |label: &str| {
-            div()
-                .px(px(10.))
-                .pt(px(10.))
-                .pb(px(4.))
-                .text_size(px(t.size - 2.))
-                .text_color(t.muted)
-                .child(label.to_uppercase())
-        };
         div()
             .flex()
             .flex_col()
             .when(!self.narrow, |d| d.flex_none().w(px(290.)))
             .when(self.narrow, |d| d.flex_1().min_w(px(0.)))
             .h_full()
+            .overflow_hidden()
             .bg(t.panel)
-            .border_r_1()
-            .border_color(t.border)
+            .border_1()
+            .border_color(if self.mode != Mode::Chat { t.accent } else { t.border })
+            .rounded(px(radius()))
             .child(
                 div()
                     .flex()
                     .items_center()
                     .justify_between()
-                    .pr(px(8.))
-                    .h(px(44.))
+                    .flex_none()
+                    .pr(px(S1))
+                    .h(px(38.))
                     .child(
-                        header(match self.tab {
+                        caption(t, match self.tab {
                             Tab::Chats => "chats",
                             Tab::Calls => "calls",
                             Tab::Contacts => "contacts",
@@ -170,16 +130,12 @@ impl Joma {
                             Tab::Accounts => "accounts",
                             Tab::Agents => "agents",
                         })
-                        .pt(px(0.))
-                        .pb(px(0.))
-                        .text_size(px(t.size - 1.))
-                        .text_color(t.bright)
-                        .font_weight(FontWeight::BOLD),
+                        .pl(px(S3)),
                     )
                     .when(matches!(self.tab, Tab::Chats | Tab::Contacts), |d| d.child(
                         div()
                             .flex()
-                            .gap(px(4.))
+                            .gap(px(2.))
                             .child(
                                 button("btn-search", G_SEARCH, "", t, self.mode == Mode::Search)
                                     .on_click(cx.listener(|this, _, window, cx| this.set_mode(Mode::Search, window, cx))),
@@ -216,7 +172,16 @@ impl Joma {
                             Mode::RemoveAccount => "remove this account: only this device has it, so it is lost for good",
                             _ => "filter",
                         }))
-                        .child(self.input.clone()),
+                        .child(self.input.clone())
+                        .child(div().text_color(t.muted).text_size(px(t.size - 2.5)).pt(px(3.)).child(match self.mode {
+                            Mode::Add => "enter: add · esc: cancel",
+                            Mode::Search => "enter: open first · esc: cancel",
+                            Mode::Username => "enter: register · esc: cancel",
+                            Mode::LinkDevice => "enter: link · esc: cancel",
+                            Mode::DeviceName => "enter: rename · esc: cancel",
+                            Mode::RemoveAccount => "type delete, then enter · esc: keep it",
+                            _ => "",
+                        })),
                 )
             })
             .child(match self.tab {

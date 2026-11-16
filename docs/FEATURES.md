@@ -1,14 +1,24 @@
 # Features
 
 ## Layout
-A rail of tabs on the left (Ctrl+1…6): **chats**, **calls** (what runs now, with open
-and end, and past calls and shares), **contacts**, **devices**, **accounts**, **agents**
-(a sketch for now); your picture at the bottom opens it for editing.
+A strip of numbered tabs on top (Ctrl+1…6): **chats**, **calls** (what runs now, with
+open and end, and past calls and shares), **contacts**, **devices**, **accounts**,
+**agents** (a sketch for now). At its right: the version, settings, "to the tray", and
+your picture with a dot for your state (green online, grey invisible, yellow connecting,
+red offline). Your picture opens a menu: your picture, become invisible / visible,
+choose a username, settings, keys, to the tray.
+
+Below, two panels like tiled windows: the list and the conversation, the one in use
+bordered in the accent. Messages are bubbles, yours on the right. The conversation's
+header has call, video call and share; **⋯** holds star, quick messages, send a file and
+remove from the list. Attach, emoji, YouTube, voice and video messages are inside the
+message field. Notes that used to be in the status line pass at the bottom of the
+window. **F1** (or Ctrl+/) lists every key.
 
 ## Account
 Creating an account asks for your name (what contacts see), then an optional username:
 it is registered on Jami's name server once the account is online, so contacts can find
-you by it. Without one, "choose a username" in the top bar registers it later. Joma
+you by it. Without one, "choose a username" in your picture's menu registers it later. Joma
 writes the profile contacts receive (accounts made by Joma 0.2 and earlier had none, so
 contacts saw a 40-digit ID; it is added the next time the account comes online).
 
@@ -22,15 +32,16 @@ account from this machine: two clicks when your other devices keep it, else typi
 `delete`, since an account no other device has is lost for good.
 
 ## Settings
-The gear at the bottom of the rail: microphone, speakers and the device that rings;
+The sliders icon in the tab strip: rounded or square corners; the version shown or
+hidden; microphone, speakers and the device that rings;
 noise and echo removal (auto, Jami's, the system's, off) and automatic gain; the camera,
 its resolution and frame rate; call quality (auto lets Jami adapt; low, medium, high
 fix the video bitrate at 0.5, 1.5 or 4 Mb/s, applied again at every start since the
 daemon forgets it); the Joma desktop share's frame rate (30 or 60). Saved in Jami's own
-configuration, and `share_fps`, `video_quality` in `quick.toml`.
+configuration, and `share_fps`, `video_quality`, `rounded`, `show_version` in `quick.toml`.
 
 ## Your picture
-Your picture at the bottom of the rail (or the pencil in Accounts): choose a picture (cropped square) or
+Your picture in the tab strip → **your picture** (or the pencil in Accounts): choose a picture (cropped square) or
 **draw pixels**: a 16×16 grid with pen, eraser, fill and mirror, colours from a grid of
 hues and greys (shift+click a colour: the background), a live preview; "use it" sets
 it. Contacts receive it with your profile and see it in their lists, headers and
@@ -44,7 +55,7 @@ Jami app in the background always do), so Joma users tell each other more:
 - the conversation header says "active now", "away since 14:20", or "on Jami · seen
   14:32" (the last time they were active on Joma, or wrote).
 
-**visible / invisible** in the top bar: invisible sends contacts nothing, and those who
+**become invisible / visible** in your picture's menu: invisible sends contacts nothing, and those who
 saw you active forget it; you still see theirs. Jami's own reachability cannot be
 hidden. Saved as `invisible` in `~/.config/joma/quick.toml`.
 
@@ -144,7 +155,7 @@ colour, its dot lavender online, green with unread messages, red offline, grey i
   Again: it hides.
 - **Right click:** open, invisible, start at login, quit.
 - **Opening Joma** (the launcher, `joma`): a floating window, 980×680, centred, like a
-  messenger app. **"full" in the panel's top bar** pops out to it; **"to the tray"** pops
+  messenger app. the **expand** icon in the panel's tab strip pops out to it; the **tray** icon pops
   back in.
 - **Closing the window** (Super+W) hides it to the tray; Joma keeps receiving messages and
   calls. `joma`, the launcher, `joma open` or an incoming call bring it back. Ctrl+Q,
@@ -216,7 +227,7 @@ Ctrl+. and Alt+1…9 in the window or the panel; `joma send` and `joma send-quic
 
 ## Command line
 `joma chat <to> [n]` (JSON), `joma call <to> [--video]`, `joma share <to> [--source …]`, `joma watch <to>`,
-`joma send-file <to> [path]`, `joma open <to>`, `joma block <to>`, `joma unblock <to>`, `joma link`, `joma link-device <code>`, `joma accounts`, `joma account <name>`, `joma quit`, `joma probe [--bench]` (the
+`joma send-file <to> [path]`, `joma open <to>`, `joma block <to>`, `joma unblock <to>`, `joma link`, `joma link-device <code>`, `joma accounts`, `joma account <name>`, `joma ui settings|profile|keys|menu|chat-menu|emoji|quick|close`, `joma quit`, `joma probe [--bench]` (the
 GPUs the desktop share can use).
 
 ## Install
@@ -228,6 +239,11 @@ when mise has Joma here, since the two would compete and the launcher would star
 whichever ran last.
 
 ## Log
+- 0.5.2.dev1 (2026-11-17): the new look, first part: tabs in a strip on top, the list
+  and the conversation as tiles, bubbles, one message field with its tools inside, a
+  menu on your picture and one on the conversation (⋯), no top bar or status line, F1
+  for the keys; settings: rounded or square corners, version shown or hidden.
+  `joma ui <part>` opens a part of the interface from a script.
 - 0.5.2.dev0 (2026-11-17): Joma draws its own icons (thin lines, one grid) instead of
   the terminal font's glyphs, so they look the same with any font and sit centred;
   borders are hairlines on every theme. First step of the restyle

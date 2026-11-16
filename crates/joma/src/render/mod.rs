@@ -82,10 +82,10 @@ pub fn avatar(t: &Theme, picture: Option<std::path::PathBuf>, key: &str, name: &
         .flex_none()
         .size(px(side))
         .child(match picture {
-            Some(p) => div().size(px(side)).rounded(px(3.)).overflow_hidden().child(gpui::img(p).size(px(side)).object_fit(ObjectFit::Cover)).into_any_element(),
+            Some(p) => div().size(px(side)).rounded(px(radius())).overflow_hidden().child(gpui::img(p).size(px(side)).object_fit(ObjectFit::Cover)).into_any_element(),
             None => div()
                 .size(px(side))
-                .rounded(px(3.))
+                .rounded(px(radius()))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -296,6 +296,10 @@ impl Render for Joma {
         }
         // A narrow window (the compact panel) shows the list or one conversation.
         self.narrow = window.viewport_size().width < px(700.);
+        self.tab_labels = window.viewport_size().width >= px(900.);
+        let chat_width = f32::from(window.viewport_size().width) - if self.narrow || (self.stage && self.has_stage()) { 2. * GAP } else { 290. + 3. * GAP };
+        self.bubble_max = ((chat_width - 30.) * 0.74).max(160.);
+        self.composer_focused = composer_shown && self.composer.focus_handle(cx).is_focused(window);
         let full = if self.fullscreen { self.fullscreen_stage(&t, cx) } else { None };
         let picker = self.picker_overlay(&t, cx);
         let profile = self.profile_overlay(&t, cx);
@@ -308,17 +312,22 @@ impl Render for Joma {
                 .flex()
                 .flex_1()
                 .min_h(px(0.))
-                .when(chat, |d| d.child(self.chat(&t, cx)))
-                .when(!chat, |d| d.child(self.rail(&t, cx)).child(self.sidebar(&t, cx)))
+                .px(px(GAP))
+                .pb(px(GAP))
+                .when(chat, |d| d.child(tile(&t, true).flex_1().bg(t.bg).child(self.chat(&t, cx))))
+                .when(!chat, |d| d.child(self.sidebar(&t, cx)))
                 .into_any_element()
         } else if self.gate == Gate::Ready {
             div()
                 .flex()
                 .flex_1()
                 .min_h(px(0.))
+                .gap(px(GAP))
+                .px(px(GAP))
+                .pb(px(GAP))
                 // A stage that takes the window takes the sidebar's room too.
-                .when(!(self.stage && self.has_stage()), |d| d.child(self.rail(&t, cx)).child(self.sidebar(&t, cx)))
-                .child(self.chat(&t, cx))
+                .when(!(self.stage && self.has_stage()), |d| d.child(self.sidebar(&t, cx)))
+                .child(tile(&t, self.mode == Mode::Chat).flex_1().bg(t.bg).child(self.chat(&t, cx)))
                 .into_any_element()
         } else {
             self.gate_screen(&t, cx)
@@ -330,7 +339,7 @@ impl Render for Joma {
             .size_full()
             .flex()
             .flex_col()
-            .bg(t.bg)
+            .bg(t.bar)
             .text_color(t.text)
             .font_family(t.font.clone())
             .text_size(px(t.size))
@@ -338,12 +347,22 @@ impl Render for Joma {
                 this.leave();
                 cx.quit()
             }))
+            .on_action(cx.listener(|this, _: &ShowKeys, _, cx| {
+                this.keys_open = !this.keys_open;
+                cx.notify();
+            }))
             .on_action(cx.listener(|this, _: &NextConversation, _, cx| this.step(1, cx)))
             .on_action(cx.listener(|this, _: &PrevConversation, _, cx| this.step(-1, cx)))
             .on_action(cx.listener(|this, _: &NewConversation, window, cx| this.set_mode(Mode::Add, window, cx)))
             .on_action(cx.listener(|this, _: &Search, window, cx| this.set_mode(Mode::Search, window, cx)))
             .on_action(cx.listener(|this, _: &Cancel, window, cx| {
-                // Esc closes the picker or the profile, then leaves full screen.
+                // Esc closes a menu, the keys, the picker or the profile, then leaves full screen.
+                if this.menu.is_some() || this.keys_open {
+                    this.menu = None;
+                    this.keys_open = false;
+                    cx.notify();
+                    return;
+                }
                 if this.settings.is_some() {
                     this.settings = None;
                     cx.notify();
@@ -439,9 +458,11 @@ impl Render for Joma {
                 }
             }))
             .relative()
-            .when(!self.fullscreen, |d| d.child(self.top_bar(&t, cx)).children(self.setup_banner(&t, cx)))
+            .when(!self.fullscreen && self.gate == Gate::Ready, |d| d.child(self.tab_strip(&t, cx)).children(self.setup_banner(&t, cx)))
             .child(body)
-            .when(!self.fullscreen, |d| d.child(self.status_line(&t)))
+            .children(self.menu_overlay(&t, cx))
+            .children(self.keys_overlay(&t, cx))
+            .children(self.toast(&t))
             .children(picker)
             .children(profile)
             .children(settings)

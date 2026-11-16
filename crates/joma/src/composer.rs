@@ -74,6 +74,8 @@ pub struct Composer {
     placeholder: String,
     /// Enter also submits an empty text (a step that can be skipped).
     allow_empty: bool,
+    /// No frame of its own: the field around it draws the border.
+    bare: bool,
 }
 impl EventEmitter<Submit> for Composer {}
 impl EventEmitter<Edited> for Composer {}
@@ -99,7 +101,11 @@ impl Composer {
             bounds: None,
             placeholder: "Write a message…".into(),
             allow_empty: false,
+            bare: false,
         }
+    }
+    pub fn set_bare(&mut self, bare: bool) {
+        self.bare = bare;
     }
     pub fn configure(&mut self, key: String, theme: std::rc::Rc<Theme>, enabled: bool) {
         if key != self.key {
@@ -377,11 +383,9 @@ impl Render for Composer {
                     .min_h(px(theme.size * 1.6 + 14.))
                     .max_h(px(160.))
                     .overflow_y_scroll()
-                    .px(px(10.))
+                    .px(px(if self.bare { 2. } else { 10. }))
                     .py(px(7.))
-                    .border_1()
-                    .border_color(if focused { theme.accent } else { theme.border })
-                    .bg(theme.panel)
+                    .when(!self.bare, |d| d.border_1().border_color(if focused { theme.accent } else { theme.border }).bg(theme.panel).rounded(px(crate::ui::radius())))
                     .text_color(if self.text.is_empty() { theme.muted } else { theme.bright })
                     .on_mouse_down(
                         MouseButton::Left,

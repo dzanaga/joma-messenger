@@ -44,6 +44,10 @@ pub struct QuickConfig {
     pub share_fps: u32,
     /// Video calls: "auto" (Jami adapts the bitrate), or "low", "medium", "high".
     pub video_quality: String,
+    /// Rounded corners (4 px) on panels, buttons and bubbles; off: square.
+    pub rounded: bool,
+    /// Show Joma's version in the tab strip.
+    pub show_version: bool,
 }
 
 impl Default for QuickConfig {
@@ -69,6 +73,8 @@ impl Default for QuickConfig {
             account: String::new(),
             share_fps: 60,
             video_quality: "auto".into(),
+            rounded: true,
+            show_version: true,
         }
     }
 }

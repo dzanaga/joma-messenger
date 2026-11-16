@@ -77,6 +77,7 @@ fn cli(args: &[String]) -> Option<i32> {
         }
         Some("quick") if args.get(1).map(String::as_str) == Some("--json") => Request::Quick,
         Some("show") => Request::Show,
+        Some("ui") if args.len() == 2 => Request::Ui { what: args[1].clone() },
         Some("toggle") => Request::Toggle,
         Some("quit") => Request::Quit,
         Some("chat") if args.len() >= 2 => Request::Chat { to: args[1].clone(), limit: args.get(2).and_then(|n| n.parse().ok()).unwrap_or(20) },
@@ -253,6 +254,8 @@ fn main() {
     Application::new().with_assets(ui::Assets).run(move |cx: &mut App| {
         cx.bind_keys([
             KeyBinding::new("ctrl-q", Quit, None),
+            KeyBinding::new("f1", ShowKeys, None),
+            KeyBinding::new("ctrl-/", ShowKeys, None),
             KeyBinding::new("alt-j", NextConversation, None),
             KeyBinding::new("alt-k", PrevConversation, None),
             KeyBinding::new("alt-down", NextConversation, None),

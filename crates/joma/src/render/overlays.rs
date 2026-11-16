@@ -37,6 +37,17 @@ impl Joma {
             .pb(px(16.))
             .max_h(px(560.))
             .overflow_y_scroll()
+            .child(section("interface"))
+            .child(row(
+                label("corners"),
+                chips(t, cx, "round", vec![("on".into(), "rounded".into()), ("off".into(), "square".into())], if self.quick.rounded { "on" } else { "off" }, |j, x, cx| j.set_rounded(x == "on", cx)),
+            ))
+            .child(row(
+                label("version"),
+                chips(t, cx, "ver", vec![("on".into(), "shown in the tab strip".into()), ("off".into(), "hidden".into())], if self.quick.show_version { "on" } else { "off" }, |j, x, cx| {
+                    j.set_show_version(x == "on", cx)
+                }),
+            ))
             .child(section("audio"))
             .child(row(label("microphone"), chips(t, cx, "ain", devices(&v.inputs), &idx(1), |j, x, cx| j.set_audio("input", x.parse().unwrap_or(0), cx))))
             .child(row(label("speakers"), chips(t, cx, "aout", devices(&v.outputs), &idx(0), |j, x, cx| j.set_audio("output", x.parse().unwrap_or(0), cx))))
@@ -94,6 +105,7 @@ impl Joma {
                         .bg(t.bg)
                         .border_1()
                         .border_color(t.accent)
+                        .rounded(px(radius()))
                         .child(
                             div()
                                 .flex()
