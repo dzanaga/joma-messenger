@@ -211,6 +211,7 @@ impl Joma {
                             }
                         }
                         d.child(small("ink-clear", (G_ERASER).into(), "clear", false).on_click(cx.listener(|this, _, _, cx| this.clear_ink(None, cx))))
+                            .child(small("ink-shot", (G_CAMERA).into(), "screenshot", false).on_click(cx.listener(|this, _, _, cx| this.share_screenshot(cx))))
                             .child(div().w(px(1.)).h(px(16.)).mx(px(2.)).bg(t.border))
                     })
                     .child(small("z-fit", Mark::None, "fit", zoom == Zoom::Fit).on_click(cx.listener(|this, _, _, cx| this.zoom(Zoom::Fit, cx))))
@@ -282,7 +283,8 @@ impl Joma {
         };
         let state = s.sharing_label().unwrap_or_default();
         let preview = self.previews.get(key).map(|f| f.image.clone());
-        let drawn = self.desk.shared(key).is_some_and(|(sh, _)| !sh.ink.lock().unwrap().canvas.is_empty());
+        let (tool, drawn) = self.desk.shared(key).map(|(sh, _)| sh.ink_state()).unwrap_or_default();
+        let (laser, pen) = (tool == joma_desk::ink::Tool::Laser, matches!(tool, joma_desk::ink::Tool::Pen(_)));
         let bg = t.bar;
         let thumb = div()
             .flex_none()
@@ -326,13 +328,48 @@ impl Joma {
                         .gap(px(2.))
                         .child(labelled(G_BOLT, state).text_color(t.yellow))
                         .child(div().truncate().text_color(t.bright).child(format!("you share: {what}")))
-                        .child(div().text_size(px(t.size - 2.)).text_color(t.muted).child(if joma { "the picture is what they see, about once a second" } else { "Jami's share shows no preview here" })),
+                        .child(div().text_size(px(t.size - 2.)).text_color(t.muted).child(if laser || pen {
+                            "your pointer draws on the shared screen: a right click there gives it back"
+                        } else if joma {
+                            "the picture is what they see, about once a second"
+                        } else {
+                            "Jami's share shows no preview here"
+                        })),
                 )
                 .child(
                     div()
                         .flex()
                         .flex_none()
+                        .flex_wrap()
+                        .justify_end()
+                        .items_center()
+                        .max_w(px(330.))
                         .gap(px(6.))
+                        // The sharer points and draws like the viewers do.
+                        .when(joma, |d| {
+                            let (k2, k3, k4) = (key.to_owned(), key.to_owned(), key.to_owned());
+                            let color = self.ink_color;
+                            let mut d = d
+                                .child(button(SharedString::from(format!("mylaser-{key}")), G_POINTER, "laser", t, laser).on_click(cx.listener(move |this, _, _, cx| this.set_sharer_tool(&k2, joma_desk::ink::Tool::Laser, cx))))
+                                .child(button(SharedString::from(format!("mypen-{key}")), G_PENCIL, "pen", t, pen).on_click(cx.listener(move |this, _, _, cx| this.set_sharer_tool(&k3, joma_desk::ink::Tool::Pen(color), cx))));
+                            if pen {
+                                for (i, c) in [0xff3355u32, 0xffcc00, 0x33dd77, 0x33bbff].into_iter().enumerate() {
+                                    let k = k4.clone();
+                                    d = d.child(
+                                        div()
+                                            .id(SharedString::from(format!("mycolor-{key}-{i}")))
+                                            .size(px(16.))
+                                            .rounded_full()
+                                            .bg(gpui::rgb(c))
+                                            .border_2()
+                                            .border_color(if tool == joma_desk::ink::Tool::Pen(c) { t.bright } else { gpui::transparent_black() })
+                                            .cursor_pointer()
+                                            .on_click(cx.listener(move |this, _, _, cx| this.set_sharer_color(&k, c, cx))),
+                                    );
+                                }
+                            }
+                            d.child(button(SharedString::from(format!("myshot-{key}")), G_CAMERA, "screenshot", t, false).on_click(cx.listener(|this, _, _, cx| this.share_screenshot(cx))))
+                        })
                         .when(drawn, |d| {
                             let k = key.to_owned();
                             d.child(button(SharedString::from(format!("inkclr-{key}")), G_ERASER, "clear drawings", t, false).on_click(cx.listener(move |this, _, _, cx| this.clear_ink(Some(&k), cx))))

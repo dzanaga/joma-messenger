@@ -1,6 +1,8 @@
 //! Drawing on a shared screen: the viewer's laser pointer and marker strokes, shown on
 //! the viewer's stage and, on the sharer's side, in a click-through overlay over the
-//! shared screen (a layer-shell surface of our own: GPUI has none).
+//! shared screen (a layer-shell surface of our own: GPUI has none). The sharer draws
+//! there too: with a tool on, the overlay takes the pointer (a right click gives it
+//! back) and what is drawn goes to the viewers.
 //!
 //! Positions are fractions of the shared picture (0..1), so they mean the same place on
 //! both sides whatever the sizes. The messages travel as JSON lines over a second
@@ -17,6 +19,8 @@ use wayland_client::globals::GlobalListContents;
 use wayland_client::protocol::wl_buffer::{self, WlBuffer};
 use wayland_client::protocol::wl_compositor::WlCompositor;
 use wayland_client::protocol::wl_output::{self, WlOutput};
+use wayland_client::protocol::wl_pointer::{self, WlPointer};
+use wayland_client::protocol::wl_seat::WlSeat;
 use wayland_client::protocol::wl_region::WlRegion;
 use wayland_client::protocol::wl_registry::WlRegistry;
 use wayland_client::protocol::wl_shm::{self, WlShm};
@@ -208,8 +212,63 @@ fn extent(canvas: &Canvas, place: Place, w: usize, h: usize) -> Option<Rect> {
     r
 }
 
+/// What the sharer's pointer does on the overlay.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Tool {
+    /// Nothing: clicks go through to the windows below.
+    #[default]
+    Off,
+    /// The pointer shows as a laser dot.
+    Laser,
+    /// Dragging draws in this colour (0xRRGGBB).
+    Pen(u32),
+}
+
+/// What the sharer did on the overlay.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Local {
+    /// Drawn or pointed: for the viewers.
+    Ink(Ink),
+    /// A right click put the tool away.
+    ToolOff,
+}
+
+/// Called on the overlay's thread.
+pub type OnLocal = Box<dyn Fn(Local) + Send>;
+
+/// The sharer's strokes are numbered from here, apart from the viewers'.
+const LOCAL_IDS: u32 = 1 << 30;
+const BTN_LEFT: u32 = 0x110;
+const BTN_RIGHT: u32 = 0x111;
+
+/// Paint the strokes of `canvas` over a BGRA picture of `w` × `h` (a screenshot of a
+/// watched share).
+pub fn paint_over(bgra: &mut [u8], w: usize, h: usize, canvas: &Canvas) {
+    if bgra.len() < w * h * 4 {
+        return;
+    }
+    let only_strokes = Canvas { laser: None, strokes: canvas.strokes.clone() };
+    let mut p = Pixels::new(w, h);
+    render(&mut p, &only_strokes, (0., 0., w as f32, h as f32), Rect { x0: 0, y0: 0, x1: w, y1: h });
+    for (i, &argb) in p.px.iter().enumerate() {
+        let a = argb >> 24;
+        if a == 0 {
+            continue;
+        }
+        let inv = 255 - a;
+        let d = &mut bgra[i * 4..i * 4 + 4];
+        for (c, shift) in [(0usize, 0u32), (1, 8), (2, 16)] {
+            d[c] = (((argb >> shift) & 255) + (d[c] as u32 * inv + 127) / 255).min(255) as u8;
+        }
+        d[3] = 255;
+    }
+}
+
 enum Cmd {
     Draw(Canvas, Place),
+    Tool(Tool),
+    /// Everything goes, the sharer's strokes too.
+    Clear,
     Stop,
 }
 
@@ -220,12 +279,12 @@ pub struct Overlay {
 }
 
 impl Overlay {
-    pub fn start(output: &str) -> Result<Overlay> {
+    pub fn start(output: &str, on_local: OnLocal) -> Result<Overlay> {
         let (tx, rx) = calloop::channel::channel::<Cmd>();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<()>>();
         let output = output.to_owned();
         let thread = std::thread::Builder::new().name("joma-ink".into()).spawn(move || {
-            if let Err(e) = run(&output, rx, &ready_tx) {
+            if let Err(e) = run(&output, rx, &ready_tx, on_local) {
                 tracing::warn!(error = %format!("{e:#}"), "ink overlay ended");
                 let _ = ready_tx.send(Err(e));
             }
@@ -237,6 +296,16 @@ impl Overlay {
     /// Show `canvas` with the shared picture at `place` (fractions of the output).
     pub fn draw(&self, canvas: &Canvas, place: Place) {
         let _ = self.tx.send(Cmd::Draw(canvas.clone(), place));
+    }
+
+    /// Wipe what the sharer drew (the hub's canvas comes with `draw`).
+    pub fn clear(&self) {
+        let _ = self.tx.send(Cmd::Clear);
+    }
+
+    /// Give the sharer a tool on the overlay, or take it away.
+    pub fn tool(&self, tool: Tool) {
+        let _ = self.tx.send(Cmd::Tool(tool));
     }
 }
 
@@ -266,9 +335,112 @@ struct State {
     /// The last place asked for, as fractions (for a new buffer size).
     frac: Place,
     stopped: bool,
+    compositor: WlCompositor,
+    /// What the viewers drew (the hub's canvas), and what the sharer draws here.
+    remote: Canvas,
+    local: Canvas,
+    tool: Tool,
+    pointer_at: Option<(f32, f32)>,
+    stroke: Option<u32>,
+    next_stroke: u32,
+    on_local: OnLocal,
 }
 
 impl State {
+    /// Both drawings as one picture.
+    fn merged(&self) -> Canvas {
+        let mut c = self.remote.clone();
+        c.strokes.extend(self.local.strokes.iter().cloned());
+        if self.local.laser.is_some() {
+            c.laser = self.local.laser;
+        }
+        c
+    }
+
+    fn redraw(&mut self) {
+        let (c, f) = (self.merged(), self.frac);
+        self.update(c, f);
+    }
+
+    /// Draw here and tell the viewers.
+    fn emit(&mut self, ink: Ink) {
+        self.local.apply(&ink);
+        (self.on_local)(Local::Ink(ink));
+        self.redraw();
+    }
+
+    /// The pointer as a fraction of the shared picture; `None` outside it.
+    fn fraction(&self, clamp: bool) -> Option<(f32, f32)> {
+        let (x, y) = self.pointer_at?;
+        let p = self.pixels.as_ref()?;
+        let (px, py, pw, ph) = (self.frac.0 * p.w as f32, self.frac.1 * p.h as f32, self.frac.2 * p.w as f32, self.frac.3 * p.h as f32);
+        if pw < 1. || ph < 1. {
+            return None;
+        }
+        let (fx, fy) = ((x - px) / pw, (y - py) / ph);
+        if clamp {
+            return Some((fx.clamp(0., 1.), fy.clamp(0., 1.)));
+        }
+        ((0. ..=1.).contains(&fx) && (0. ..=1.).contains(&fy)).then_some((fx, fy))
+    }
+
+    /// With a tool the overlay takes the pointer over the whole output; without, an
+    /// empty input region lets clicks through.
+    fn set_tool(&mut self, tool: Tool) {
+        if self.tool == Tool::Laser && tool != Tool::Laser && self.local.laser.is_some() {
+            self.emit(Ink::LaserOff);
+        }
+        self.tool = tool;
+        self.stroke = None;
+        let Some(surface) = &self.surface else { return };
+        let region: WlRegion = self.compositor.create_region(&self.qh, ());
+        if tool != Tool::Off {
+            region.add(0, 0, i32::MAX, i32::MAX);
+        }
+        surface.set_input_region(Some(&region));
+        region.destroy();
+        surface.commit();
+    }
+
+    fn pointer_moved(&mut self) {
+        match self.tool {
+            Tool::Laser => match self.fraction(false) {
+                Some((x, y)) => self.emit(Ink::Laser { x, y }),
+                None if self.local.laser.is_some() => self.emit(Ink::LaserOff),
+                None => {}
+            },
+            Tool::Pen(color) => {
+                if let (Some(id), Some(at)) = (self.stroke, self.fraction(true)) {
+                    self.emit(Ink::Stroke { id, color, width: 5., pts: vec![at] });
+                }
+            }
+            Tool::Off => {}
+        }
+    }
+
+    fn button(&mut self, button: u32, pressed: bool) {
+        if button == BTN_RIGHT && pressed {
+            self.set_tool(Tool::Off);
+            (self.on_local)(Local::ToolOff);
+            return;
+        }
+        if button != BTN_LEFT {
+            return;
+        }
+        match (self.tool, pressed) {
+            (Tool::Pen(color), true) => {
+                if let Some(at) = self.fraction(false) {
+                    let id = LOCAL_IDS + self.next_stroke;
+                    self.next_stroke += 1;
+                    self.stroke = Some(id);
+                    self.emit(Ink::Stroke { id, color, width: 5., pts: vec![at] });
+                }
+            }
+            (_, false) => self.stroke = None,
+            _ => {}
+        }
+    }
+
     /// Mark what changed between what is shown and what is wanted, and redraw it.
     fn update(&mut self, canvas: Canvas, place: Place) {
         // From fractions of the output to the overlay's pixels.
@@ -347,8 +519,15 @@ impl hypr_wl::LoopState for State {
         match cmd {
             Cmd::Draw(c, place) => {
                 self.frac = place;
-                self.update(c, place)
+                self.remote = c;
+                self.redraw();
             }
+            Cmd::Clear => {
+                self.local = Canvas::default();
+                self.stroke = None;
+                self.redraw();
+            }
+            Cmd::Tool(tool) => self.set_tool(tool),
             Cmd::Stop => self.stopped = true,
         }
     }
@@ -362,14 +541,26 @@ impl hypr_wl::LoopState for State {
     }
 }
 
-fn run(output: &str, rx: calloop::channel::Channel<Cmd>, ready: &std::sync::mpsc::Sender<Result<()>>) -> Result<()> {
+fn run(output: &str, rx: calloop::channel::Channel<Cmd>, ready: &std::sync::mpsc::Sender<Result<()>>, on_local: OnLocal) -> Result<()> {
     let (conn, globals, mut queue) = hypr_wl::init::<State>(&hypr_wl::Target::default())?;
     let qh = queue.handle();
     let compositor: WlCompositor = globals.bind(&qh, 4..=6, ()).context("no wl_compositor")?;
     let shm: WlShm = globals.bind(&qh, 1..=1, ()).context("no wl_shm")?;
     let shell: ZwlrLayerShellV1 = globals.bind(&qh, 1..=4, ()).context("no layer shell")?;
     let outputs = hypr_wl::Outputs::bind(&globals, &qh)?;
+    // The pointer, for the sharer's own drawing (none: the overlay only shows).
+    if let Ok(seat) = globals.bind::<WlSeat, _, _>(&qh, 1..=5, ()) {
+        seat.get_pointer(&qh, ());
+    }
     let mut state = State {
+        compositor: compositor.clone(),
+        remote: Canvas::default(),
+        local: Canvas::default(),
+        tool: Tool::Off,
+        pointer_at: None,
+        stroke: None,
+        next_stroke: 0,
+        on_local,
         outputs,
         surface: None,
         layer: None,
@@ -428,15 +619,34 @@ impl Dispatch<ZwlrLayerSurfaceV1, ()> for State {
                         return;
                     }
                 }
-                let c = s.want.0.clone();
-                let f = s.frac;
-                s.update(c, f);
+                s.redraw();
                 if s.dirty.is_some() || s.shown.0.is_empty() {
                     s.dirty = Some(s.dirty.unwrap_or(Rect { x0: 0, y0: 0, x1: size.0, y1: size.1 }));
                     s.flush();
                 }
             }
             zwlr_layer_surface_v1::Event::Closed => s.stopped = true,
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<WlPointer, ()> for State {
+    fn event(s: &mut Self, _: &WlPointer, e: wl_pointer::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        match e {
+            wl_pointer::Event::Enter { surface_x, surface_y, .. } | wl_pointer::Event::Motion { surface_x, surface_y, .. } => {
+                // Surface coordinates are logical; the buffer has the same size.
+                s.pointer_at = Some((surface_x as f32, surface_y as f32));
+                s.pointer_moved();
+            }
+            wl_pointer::Event::Leave { .. } => {
+                s.pointer_at = None;
+                s.stroke = None;
+                s.pointer_moved();
+            }
+            wl_pointer::Event::Button { button, state, .. } => {
+                s.button(button, matches!(state, wayland_client::WEnum::Value(wl_pointer::ButtonState::Pressed)));
+            }
             _ => {}
         }
     }
@@ -466,6 +676,7 @@ delegate_noop!(State: ignore WlShm);
 delegate_noop!(State: ignore WlShmPool);
 delegate_noop!(State: ignore WlSurface);
 delegate_noop!(State: ignore WlRegion);
+delegate_noop!(State: ignore WlSeat);
 delegate_noop!(State: ignore ZwlrLayerShellV1);
 
 #[cfg(test)]

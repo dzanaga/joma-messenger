@@ -82,12 +82,41 @@ pub struct InkHub {
     pub canvas: crate::ink::Canvas,
     overlay: Option<(String, crate::ink::Overlay)>,
     place: Option<(Instant, String, crate::ink::Place)>,
+    /// The sharer's own tool on the overlay, and whether they drew anything.
+    pub tool: crate::ink::Tool,
+    pub drew: bool,
+    /// What the overlay calls with the sharer's drawing (set by the share).
+    on_local: Option<Arc<dyn Fn(crate::ink::Local) + Send + Sync>>,
+    /// Set from the overlay's thread: the tool was put away there; something was drawn.
+    local_flags: Option<(Arc<std::sync::atomic::AtomicBool>, Arc<std::sync::atomic::AtomicBool>)>,
 }
 
 impl InkHub {
+    /// Give the sharer a tool (or take it away): the overlay then takes the pointer on
+    /// the shared output.
+    pub fn set_tool(&mut self, tool: crate::ink::Tool, source: &Source) {
+        self.tool = tool;
+        self.place = None;
+        self.show(source);
+        if let Some((_, o)) = &self.overlay {
+            o.tool(tool);
+        }
+    }
+
     /// Apply a message and show the result over `source`.
     pub fn apply(&mut self, ink: &crate::ink::Ink, source: &Source) {
         self.canvas.apply(ink);
+        self.show(source);
+        if *ink == crate::ink::Ink::Clear {
+            self.drew = false;
+            if let Some((_, o)) = &self.overlay {
+                o.clear();
+            }
+        }
+    }
+
+    /// Put the overlay where the source is and draw the canvas there.
+    fn show(&mut self, source: &Source) {
         // The window may move: look again every second.
         if self.place.as_ref().is_none_or(|(t, _, _)| t.elapsed() > Duration::from_secs(1)) {
             let (out, place) = place_of(source);
@@ -98,8 +127,17 @@ impl InkHub {
             return;
         }
         if self.overlay.as_ref().is_none_or(|(o, _)| *o != out) {
-            self.overlay = match crate::ink::Overlay::start(&out) {
-                Ok(o) => Some((out.clone(), o)),
+            let cb = self.on_local.clone();
+            let on_local: crate::ink::OnLocal = Box::new(move |l| {
+                if let Some(cb) = &cb {
+                    cb(l)
+                }
+            });
+            self.overlay = match crate::ink::Overlay::start(&out, on_local) {
+                Ok(o) => {
+                    o.tool(self.tool);
+                    Some((out.clone(), o))
+                }
                 Err(e) => {
                     tracing::warn!(error = %format!("{e:#}"), "no ink overlay");
                     None
@@ -367,7 +405,30 @@ impl Share {
         let (switch, switch_rx) = watch::channel(source.clone());
         let (tok, scr) = (token.clone(), screen.clone());
         let ink = Arc::new(std::sync::Mutex::new(InkHub::default()));
-        let (ink_out, _) = tokio::sync::broadcast::channel(64);
+        let (ink_out, _) = tokio::sync::broadcast::channel(256);
+        let events: Arc<dyn Fn(ShareEvent) + Send + Sync> = Arc::new(events);
+        {
+            // What the sharer draws on the overlay goes to the viewers. Called on the
+            // overlay's thread: it must not take the hub's lock (whoever drops the
+            // overlay holds it and waits for that thread), hence the flags.
+            let (out, ev) = (ink_out.clone(), events.clone());
+            let tool_off = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let drew = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let (off2, drew2) = (tool_off.clone(), drew.clone());
+            let mut hub = ink.lock().unwrap();
+            hub.on_local = Some(Arc::new(move |l| {
+                match l {
+                    crate::ink::Local::Ink(i) => {
+                        drew2.store(true, std::sync::atomic::Ordering::Relaxed);
+                        let _ = out.send(i);
+                    }
+                    crate::ink::Local::ToolOff => off2.store(true, std::sync::atomic::Ordering::Relaxed),
+                }
+                ev(ShareEvent::Ink);
+            }));
+            hub.local_flags = Some((tool_off, drew));
+        }
+        let events = move |e: ShareEvent| events(e);
         let (ink2, out2) = (ink.clone(), ink_out.clone());
         let thread = std::thread::Builder::new().name("joma-share".into()).spawn(move || {
             let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio runtime");
@@ -386,6 +447,27 @@ impl Share {
         self.switch.send_replace(source);
         self.clear_ink();
         Ok(())
+    }
+
+    /// The sharer's tool, after what happened on the overlay (a right click puts it
+    /// away), and whether anything is drawn (by anyone).
+    pub fn ink_state(&self) -> (crate::ink::Tool, bool) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let mut hub = self.ink.lock().unwrap();
+        if let Some((off, drew)) = hub.local_flags.clone() {
+            if off.swap(false, Relaxed) {
+                hub.tool = crate::ink::Tool::Off;
+            }
+            if drew.swap(false, Relaxed) {
+                hub.drew = true;
+            }
+        }
+        (hub.tool, hub.drew || !hub.canvas.is_empty())
+    }
+
+    /// Give the sharer a pen or the laser on the shared screen, or take it away.
+    pub fn set_tool(&self, tool: crate::ink::Tool) {
+        self.ink.lock().unwrap().set_tool(tool, &self.source);
     }
 
     /// Wipe the drawing here and on the viewer's side.

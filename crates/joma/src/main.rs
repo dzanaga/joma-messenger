@@ -55,6 +55,8 @@ const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); -
        joma account <name>       open another account (a name, username or ID)
        joma block <to>         block a contact: no messages, calls or requests from them
        joma unblock <to>         unblock a contact
+       joma draw laser|pen|off|clear|shot
+                                 on the screen you share: point, draw, wipe, screenshot
        joma quit                 quit Joma (closing the window keeps it running)
        joma probe [--bench [--display-gpu]]
                                  the GPUs and codecs the desktop share can use
@@ -77,6 +79,7 @@ fn cli(args: &[String]) -> Option<i32> {
         }
         Some("quick") if args.get(1).map(String::as_str) == Some("--json") => Request::Quick,
         Some("show") => Request::Show,
+        Some("draw") if args.len() == 2 => Request::Draw { what: args[1].clone() },
         Some("ui") if args.len() == 2 => Request::Ui { what: args[1].clone() },
         Some("toggle") => Request::Toggle,
         Some("quit") => Request::Quit,

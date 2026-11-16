@@ -85,6 +85,8 @@ pub enum AppMsg {
     Thumb(u64, String, Picture),
     /// A recording was stopped (its file closed): send it, or throw it away.
     Recorded { conv: String, path: String, send: bool },
+    /// A screenshot of a share was saved (or not): send it to the conversation.
+    Shot { conv: Option<String>, result: Result<String, String> },
     /// The watch-together player of a conversation's session reported something.
     Watch(String, crate::watch::PlayerEvent),
     /// An `@youtube` search finished: the message to send to the conversation.
@@ -1094,6 +1096,17 @@ impl Joma {
                     self.pinned_bottom = true;
                 } else {
                     let _ = std::fs::remove_file(&path);
+                }
+                cx.notify();
+            }
+            AppMsg::Shot { conv, result } => {
+                match result {
+                    Ok(path) => {
+                        let sent = conv.as_ref().is_some_and(|c| !matches!(self.send_file(c, &path), Reply::Error { .. }));
+                        self.pinned_bottom = true;
+                        self.show_flash(format!("screenshot saved: {path}{}", if sent { " · sent to the conversation" } else { "" }), cx);
+                    }
+                    Err(e) => self.show_flash(format!("no screenshot: {e}"), cx),
                 }
                 cx.notify();
             }
@@ -2153,6 +2166,105 @@ impl Joma {
         }
         self.ink_tool = if self.ink_tool == tool { InkTool::None } else { tool };
         cx.notify();
+    }
+
+    /// The Joma share of ours that runs (the open conversation's first).
+    pub fn sharing_key(&self) -> Option<String> {
+        let mut keys: Vec<String> = self.desk.sessions.keys().filter(|k| self.desk.shared(k).is_some()).cloned().collect();
+        keys.sort();
+        let here = self.active_call().map(|c| c.id.clone());
+        keys.iter().find(|k| Some(*k) == here.as_ref()).or(keys.first()).cloned()
+    }
+
+    /// Our own tool on the screen we share: the same one again puts it away.
+    pub fn set_sharer_tool(&mut self, key: &str, tool: joma_desk::ink::Tool, cx: &mut Context<Self>) {
+        use joma_desk::ink::Tool;
+        if let Some((share, _)) = self.desk.shared(key) {
+            let (now, _) = share.ink_state();
+            let same = matches!((now, tool), (Tool::Laser, Tool::Laser) | (Tool::Pen(_), Tool::Pen(_)));
+            let next = if same { Tool::Off } else { tool };
+            share.set_tool(next);
+            if next != Tool::Off {
+                self.show_flash("drawing on the shared screen: a right click there puts the tool away", cx);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Another colour for our pen on the shared screen (and for the next strokes).
+    pub fn set_sharer_color(&mut self, key: &str, color: u32, cx: &mut Context<Self>) {
+        self.ink_color = color;
+        if let Some((share, _)) = self.desk.shared(key) {
+            share.set_tool(joma_desk::ink::Tool::Pen(color));
+        }
+        cx.notify();
+    }
+
+    /// The conversation a share belongs to.
+    fn share_conversation(&self, key: &str) -> Option<String> {
+        match crate::desk::direct_peer(key) {
+            Some(peer) => self.model.chat_with(peer).map(|c| c.id.clone()),
+            None => self.model.calls.get(key).and_then(|c| c.conversation.clone()),
+        }
+    }
+
+    /// A screenshot of the shared screen with the drawings on it (ours, or the one we
+    /// watch), saved in `~/Pictures/joma` and sent to the conversation.
+    pub fn share_screenshot(&mut self, cx: &mut Context<Self>) {
+        let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else { return };
+        let dir = home.join("Pictures/joma");
+        let path = dir.join(format!("share-{}.png", file_stamp()));
+        let tx = self.tx.clone();
+        let done = move |conv: Option<String>, r: anyhow::Result<()>, path: &std::path::Path| {
+            let _ = tx.unbounded_send(AppMsg::Shot { conv, result: r.map(|()| path.to_string_lossy().into_owned()).map_err(|e| format!("{e:#}")) });
+        };
+        if let Some(key) = self.sharing_key() {
+            let Some((share, _)) = self.desk.shared(&key) else { return };
+            let (source, conv) = (share.source.clone(), self.share_conversation(&key));
+            std::thread::spawn(move || {
+                let r = (|| -> anyhow::Result<()> {
+                    std::fs::create_dir_all(&dir)?;
+                    // The compositor's picture of the output has the overlay's drawings.
+                    let (output, place) = joma_desk::share::place_of(&source);
+                    let out = std::process::Command::new("grim").args(["-o", &output]).arg(&path).output()?;
+                    anyhow::ensure!(out.status.success(), "grim: {}", String::from_utf8_lossy(&out.stderr).trim());
+                    if place != (0., 0., 1., 1.) {
+                        let img = image::open(&path)?;
+                        let (w, h) = (img.width() as f32, img.height() as f32);
+                        let (x, y) = ((place.0 * w).max(0.) as u32, (place.1 * h).max(0.) as u32);
+                        let (cw, ch) = (((place.2 * w) as u32).min(img.width().saturating_sub(x)).max(1), ((place.3 * h) as u32).min(img.height().saturating_sub(y)).max(1));
+                        img.crop_imm(x, y, cw, ch).save(&path)?;
+                    }
+                    Ok(())
+                })();
+                done(conv, r, &path);
+            });
+        } else if let Some(key) = self.viewing_key() {
+            let (Some(frame), Some(viewer)) = (self.desk_frame.as_ref(), self.desk.viewer(&key)) else {
+                return self.show_flash("no picture of the shared screen yet", cx);
+            };
+            let size = frame.image.size(0);
+            let (w, h) = (size.width.0 as usize, size.height.0 as usize);
+            let mut bgra = frame.image.as_bytes(0).map(<[u8]>::to_vec).unwrap_or_default();
+            let canvas = viewer.state.lock().unwrap().ink.clone();
+            let conv = self.share_conversation(&key);
+            std::thread::spawn(move || {
+                let r = (|| -> anyhow::Result<()> {
+                    std::fs::create_dir_all(&dir)?;
+                    anyhow::ensure!(bgra.len() >= w * h * 4 && w > 0, "the picture is not ready");
+                    joma_desk::ink::paint_over(&mut bgra, w, h, &canvas);
+                    for p in bgra.chunks_exact_mut(4) {
+                        p.swap(0, 2);
+                        p[3] = 255;
+                    }
+                    image::RgbaImage::from_raw(w as u32, h as u32, bgra).ok_or_else(|| anyhow::anyhow!("bad picture"))?.save(&path)?;
+                    Ok(())
+                })();
+                done(conv, r, &path);
+            });
+        } else {
+            self.show_flash("no shared screen to take a picture of", cx);
+        }
     }
 
     /// Clear the drawing of the share we watch, or of ours.
@@ -3589,6 +3701,19 @@ impl Joma {
                 Reply::Done
             }
             Request::Ui { what } => self.ui(&what, cx),
+            Request::Draw { what } => {
+                let Some(key) = self.sharing_key() else { return Reply::Error { message: "no Joma share is running".into() } };
+                use joma_desk::ink::Tool;
+                match what.as_str() {
+                    "laser" => self.set_sharer_tool(&key, Tool::Laser, cx),
+                    "pen" => self.set_sharer_tool(&key, Tool::Pen(self.ink_color), cx),
+                    "off" => self.set_sharer_tool(&key, Tool::Off, cx),
+                    "clear" => self.clear_ink(Some(&key), cx),
+                    "shot" => self.share_screenshot(cx),
+                    other => return Reply::Error { message: format!("draw what? {other} (laser, pen, off, clear, shot)") },
+                }
+                Reply::Done
+            }
             Request::Quick => {
                 // The file can change outside Joma (edited by hand, or another tool).
                 let quick = QuickConfig::load();
@@ -3989,3 +4114,12 @@ mod tests {
     }
 }
 
+
+/// Local time for a file name: 20261117-031502.
+fn file_stamp() -> String {
+    let t = joma_desk::signal::now() as libc::time_t;
+    // SAFETY: `localtime_r` writes into the `tm` we own.
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    unsafe { libc::localtime_r(&t, &mut tm) };
+    format!("{:04}{:02}{:02}-{:02}{:02}{:02}", 1900 + tm.tm_year, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec)
+}

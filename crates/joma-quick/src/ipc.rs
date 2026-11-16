@@ -55,6 +55,9 @@ pub enum Request {
     WatchTogether { to: String, url: String },
     /// Set the profile picture from a file (cropped square), or remove it (`None`).
     Avatar { path: Option<String> },
+    /// On the screen we share: `laser`, `pen`, `off` (the sharer's tool), `clear` (the
+    /// drawings), `shot` (a screenshot into the conversation).
+    Draw { what: String },
     /// Open a part of the interface (`settings`, `profile`, `keys`, `menu`, `chat-menu`,
     /// `emoji`, `quick`, `close`): for scripts and screenshots.
     Ui { what: String },

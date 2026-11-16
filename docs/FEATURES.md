@@ -239,6 +239,12 @@ when mise has Joma here, since the two would compete and the launcher would star
 whichever ran last.
 
 ## Log
+- 0.5.2.dev2 (2026-11-17, built, NOT yet tested between two profiles): the person
+  sharing can use the laser and the pen too (**laser**, **pen** and colours in the
+  share strip; the pointer then draws on the shared screen, a right click there gives it
+  back); **screenshot** on both sides saves the shared screen with the drawings in
+  `~/Pictures/joma` and sends it to the conversation; `joma draw
+  laser|pen|off|clear|shot`.
 - 0.5.2.dev1 (2026-11-17): the new look, first part: tabs in a strip on top, the list
   and the conversation as tiles, bubbles, one message field with its tools inside, a
   menu on your picture and one on the conversation (⋯), no top bar or status line, F1
