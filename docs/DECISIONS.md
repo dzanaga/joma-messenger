@@ -52,6 +52,16 @@
   F11 = full screen. (User asked for zoom, full screen, the choice and a preview,
   2026-10-30.)
 
+- D-20 The interface is restyled on a foundation built first: a `ui` module with
+  tokens and components, Joma's own SVG icons (line, square ends) instead of Nerd Font
+  glyphs, `render.rs` split by view. The look: a numbered tab strip on top, tiled panels
+  with gaps (the focused one in the accent), 4 px corners, bubbles, three header actions
+  and a menu, no top bar or status line, compact, the terminal font, one colour per
+  person. Shell and conversation first, other views next. Then: updates and channels,
+  replies / reactions / edit, picture viewer, call overlay, settings page,
+  transcription, GIFs. Development versions `0.5.2.devN` until a stable release is
+  asked for. (User, 2026-11-16, `docs/discussions/2026-11-16-interface.qmd`.)
+
 ## Decided
 
 (none yet)

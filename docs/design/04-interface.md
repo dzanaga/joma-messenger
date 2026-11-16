@@ -31,3 +31,20 @@ chats below the stars follow the latest message. Jami can hold two one-to-one
 conversations with one peer (unblocking starts a new one while the old one keeps
 working): `Model::conversation_with` picks the one with the latest real message and the
 other is hidden.
+
+## Restyle (D-20, from 0.5.2.dev)
+
+Why the 0.5.1 look fails: icons are Font Awesome glyphs typed as text, so the user's
+Nerd Font sets their weight, width and baseline; the border is the background mixed 70 %
+toward `muted`, bright grey on themes with a light `muted`; every button is boxed; no
+spacing or type scale; no component layer.
+
+Target: a numbered tab strip on top (chats … agents, then settings and your picture,
+whose menu holds invisible, username and "to the tray"); the sidebar and the
+conversation as tiles with 6 px gaps and 1 px borders, the focused tile in the accent;
+4 px corners; messages as bubbles (yours right, on the accent's tint); the header
+keeps call, video, share and a menu; one composer field with attach, emoji and record
+inside; no top bar, no status line; compact rows (32 px). Tokens: spacing 4 / 8 / 12 /
+16, text 11 / 12 / 13 / 15, one radius, border = background mixed 12 % toward
+foreground. Icons: Joma's own SVGs in `assets/icons`, 24-unit grid, 1.5 stroke, square
+ends, drawn at 16 px and tinted by the theme.

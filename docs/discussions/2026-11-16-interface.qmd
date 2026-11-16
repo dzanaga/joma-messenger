@@ -1,0 +1,85 @@
+---
+title: "Joma's interface: review, style and plan"
+date: 2026-11-16
+lang: en
+---
+
+The review, the live mocks and the questions are on a page:
+<https://claude.ai/artifact/AoTBNPiQ17jM6J6p9rSovw>. The user answered there on
+2026-11-16; this file records the answers.
+
+# 1. Style (the user's mix in the builder)
+
+Tab strip on top (numbered, no rail); line icons with square ends; messages as bubbles;
+panels as tiles with gaps, the focused one bordered in the accent; corners 4 px; three
+header actions (call, video, share) and a menu; no top bar and no status line; compact
+density.
+
+- [x] A:
+
+# 2. Font
+
+The terminal font everywhere.
+
+- [x] A:
+
+# 3. Colour of people
+
+One colour per person, as now.
+
+- [x] A:
+
+# 4. How to get there
+
+Foundation first (a `ui` module, own SVG icons, `render.rs` split by view; nothing
+looks different), then the restyle.
+
+- [x] A:
+
+# 5. First restyled release
+
+The shell and the conversation first, the other views in the next one.
+
+- [x] A:
+
+# 6. Features after the restyle
+
+Chosen: update notice with one-click update and stable / dev channels; replies,
+reactions, edit and delete; a picture viewer inside Joma; an incoming-call overlay and
+a floating call bar; settings as a full page; voice message transcription; GIFs.
+Not chosen: command palette, search inside a conversation, group calls, remote control
+and clipboard.
+
+- [x] A:
+
+# 7. TODO items 1 to 3
+
+Paste and drop of pictures, the share picker with preview, zoom and resize of the
+stage: they work, only the look needs the restyle. Ticked in `TODO.md`.
+
+- [x] A:
+
+# 8. Versioning
+
+Start now: development versions `0.5.2.dev0`, `.dev1`, … until the user asks for a
+stable release (Cargo spells them `0.5.2-dev.0`).
+
+- [x] A:
+
+# 9. App icon
+
+Keep the pixel j.
+
+- [x] A:
+
+# Open after the answers
+
+1. With no status line and no command palette, the keys need a place: proposal, `?`
+   (or F1) opens an overlay with the keys of the current view.
+
+   - [ ] A:
+
+2. With no top bar, "invisible", "choose a username" and "to the tray" move to a menu on
+   your picture at the right end of the tab strip.
+
+   - [ ] A:
