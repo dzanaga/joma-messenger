@@ -48,3 +48,7 @@ inside; no top bar, no status line; compact rows (32 px). Tokens: spacing 4 / 8 
 16, text 11 / 12 / 13 / 15, one radius, border = background mixed 12 % toward
 foreground. Icons: Joma's own SVGs in `assets/icons`, 24-unit grid, 1.5 stroke, square
 ends, drawn at 16 px and tinted by the theme.
+
+Built so far (0.5.2.dev0): `ui.rs` holds the icons (`Icon`, embedded with `Assets`,
+painted in the text colour in effect and sized 1.25 × the text, so hover and "on"
+colours reach them) and `button`; the border token.

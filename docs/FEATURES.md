@@ -228,6 +228,10 @@ when mise has Joma here, since the two would compete and the launcher would star
 whichever ran last.
 
 ## Log
+- 0.5.2.dev0 (2026-11-17): Joma draws its own icons (thin lines, one grid) instead of
+  the terminal font's glyphs, so they look the same with any font and sit centred;
+  borders are hairlines on every theme. First step of the restyle
+  (`docs/discussions/2026-11-16-interface.qmd`).
 - 0.5.1 (2026-10-31): `@youtube <search>` shares five results in the conversation;
   watching together in any conversation (groups too) with a queue and votes (half of
   the participants decide; two people both command); tighter sync for streams.

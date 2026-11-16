@@ -23,6 +23,7 @@ mod tray;
 mod watch;
 mod render;
 mod theme;
+mod ui;
 
 use gpui::{px, size, App, AppContext, Application, Bounds, KeyBinding, TitlebarOptions, WindowBounds, WindowOptions};
 use joma_quick::ipc::{request, Reply, Request};
@@ -249,7 +250,7 @@ fn main() {
     }) {
         eprintln!("joma: {e}");
     }
-    Application::new().run(move |cx: &mut App| {
+    Application::new().with_assets(ui::Assets).run(move |cx: &mut App| {
         cx.bind_keys([
             KeyBinding::new("ctrl-q", Quit, None),
             KeyBinding::new("alt-j", NextConversation, None),

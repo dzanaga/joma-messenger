@@ -36,7 +36,8 @@ impl Theme {
             panel: c(p.dark_background),
             bar: c(p.darker_background),
             raised: c(p.lighter_background),
-            border: c(mix(p.background, p.muted, 0.7)),
+            // A hairline on every theme: `muted` is a text colour, bright on some.
+            border: c(mix(p.background, p.foreground, 0.16)),
             text: c(p.foreground),
             bright: c(p.bright_foreground),
             muted: c(p.dark_foreground),

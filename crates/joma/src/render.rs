@@ -15,52 +15,7 @@ use crate::app::*;
 use joma_quick::ipc::Reply;
 use crate::model::{CallState, Conversation, MsgKind};
 use crate::theme::Theme;
-
-// Nerd Font glyphs (Font Awesome range, present in every Nerd Font).
-pub const G_PHONE: &str = "\u{f095}";
-pub const G_VIDEO: &str = "\u{f03d}";
-pub const G_DESKTOP: &str = "\u{f108}";
-pub const G_MIC: &str = "\u{f130}";
-pub const G_MIC_OFF: &str = "\u{f131}";
-pub const G_STAR: &str = "\u{f005}";
-pub const G_STAR_O: &str = "\u{f006}";
-pub const G_PLUS: &str = "\u{f067}";
-pub const G_SEARCH: &str = "\u{f002}";
-pub const G_BOLT: &str = "\u{f0e7}";
-pub const G_CHECK: &str = "\u{f00c}";
-pub const G_TIMES: &str = "\u{f00d}";
-pub const G_EYE: &str = "\u{f06e}";
-pub const G_EXPAND: &str = "\u{f065}";
-pub const G_COMPRESS: &str = "\u{f066}";
-pub const G_BACK: &str = "\u{f053}";
-pub const G_CLIP: &str = "\u{f0c6}";
-pub const G_TRASH: &str = "\u{f1f8}";
-pub const G_UNDO: &str = "\u{f0e2}";
-pub const G_COMMENT: &str = "\u{f075}";
-pub const G_BAN: &str = "\u{f05e}";
-pub const G_USER_TIMES: &str = "\u{f235}";
-pub const G_GRIP: &str = "\u{f142}";
-pub const G_LAPTOP: &str = "\u{f109}";
-pub const G_LINK: &str = "\u{f0c1}";
-pub const G_PENCIL: &str = "\u{f040}";
-pub const G_COPY: &str = "\u{f0c5}";
-pub const G_USER_PLUS: &str = "\u{f234}";
-pub const G_EXCHANGE: &str = "\u{f0ec}";
-pub const G_WINDOW: &str = "\u{f2d0}";
-pub const G_CROP: &str = "\u{f125}";
-pub const G_IMAGE: &str = "\u{f03e}";
-pub const G_ERASER: &str = "\u{f12d}";
-pub const G_FILL: &str = "\u{f1fc}";
-pub const G_MIRROR: &str = "\u{f0db}";
-pub const G_USERS: &str = "\u{f0c0}";
-pub const G_COG: &str = "\u{f013}";
-pub const G_SMILE: &str = "\u{f118}";
-pub const G_YOUTUBE: &str = "\u{f16a}";
-pub const G_PLAY: &str = "\u{f04b}";
-pub const G_STOP: &str = "\u{f04d}";
-pub const G_POINTER: &str = "\u{f245}";
-pub const G_PAUSE: &str = "\u{f04c}";
-pub const G_FORWARD: &str = "\u{f051}";
+pub use crate::ui::*;
 
 /// The emoji the picker offers.
 const EMOJI: &[&str] = &[
@@ -71,12 +26,6 @@ const EMOJI: &[&str] = &[
     "🙏", "💪", "👀", "🧠", "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "💔", "💯", "🔥", "✨", "⭐", "🎉", "🎁", "🎂", "🍕", "🍔", "🍺", "☕", "🍷",
     "⚽", "🎮", "🎵", "🎬", "📷", "💻", "📱", "⌨️", "🚀", "✈️", "🚗", "🏠", "🌍", "☀️", "🌙", "🌧️", "❄️", "✅", "❌", "⚠️", "❓", "💡", "📌", "⏰",
 ];
-pub const G_USER_CIRCLE: &str = "\u{f2bd}";
-pub const G_ROBOT: &str = "\u{f06a9}";
-pub const G_CROSSHAIRS: &str = "\u{f05b}";
-pub const G_ZOOM_IN: &str = "\u{f00e}";
-pub const G_ZOOM_OUT: &str = "\u{f010}";
-
 /// Local "HH:MM" and a day key for separators.
 pub fn local_time(ts: i64) -> (String, i64, String) {
     let t = ts as libc::time_t;
@@ -122,37 +71,6 @@ pub fn fit(outer: Bounds<Pixels>, w: f32, h: f32) -> Bounds<Pixels> {
         point(outer.origin.x + px((ow - fw) / 2.), outer.origin.y + px((oh - fh) / 2.)),
         size(px(fw), px(fh)),
     )
-}
-
-/// A Nerd Font glyph in a cell of its own: glyphs differ in width, so each sits centred
-/// in a square of the line's height.
-fn glyph(g: &str, t: &Theme) -> gpui::Div {
-    div().flex_none().w(px(t.size + 4.)).h(px(t.size + 4.)).flex().items_center().justify_center().child(g.to_owned())
-}
-
-/// A flat, square button: a glyph, a label, or both; `on` marks it active. Icon-only
-/// buttons are square, all share one height.
-fn button(id: impl Into<SharedString>, glyph_str: &str, label: &str, t: &Theme, on: bool) -> gpui::Stateful<gpui::Div> {
-    let id: SharedString = id.into();
-    let icon_only = label.is_empty();
-    div()
-        .id(id)
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .gap(px(4.))
-        .h(px(t.size + 13.))
-        .when(icon_only, |d| d.w(px(t.size + 13.)))
-        .when(!icon_only, |d| d.pl(px(if glyph_str.is_empty() { 9. } else { 5. })).pr(px(9.)))
-        .border_1()
-        .border_color(if on { t.accent } else { t.border })
-        .when(on, |d| d.bg(t.accent_bg))
-        .text_color(if on { t.accent } else { t.text })
-        .cursor_pointer()
-        .hover(|d| d.bg(t.raised).text_color(t.bright).border_color(t.muted))
-        .when(!glyph_str.is_empty(), |d| d.child(glyph(glyph_str, t)))
-        .when(!icon_only, |d| d.child(div().whitespace_nowrap().child(label.to_owned())))
 }
 
 /// A person's picture, or their initial on their colour; a presence dot in the corner.
@@ -422,7 +340,7 @@ impl Joma {
                             .id("pop")
                             .cursor_pointer()
                             .hover(|d| d.text_color(t.accent))
-                            .child(if full { format!("{G_COMPRESS} to the tray") } else { format!("{G_EXPAND} full") })
+                            .child(if full { labelled(G_COMPRESS, "to the tray") } else { labelled(G_EXPAND, "full") })
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 if full {
                                     this.pop_in(cx)
@@ -911,7 +829,7 @@ impl Joma {
     fn calls_list(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let mut list = div().id("calls").flex().flex_col().flex_1().overflow_y_scroll();
         let small = |label: &str| div().px(px(10.)).pt(px(10.)).pb(px(4.)).text_size(px(t.size - 2.5)).text_color(t.muted).child(label.to_uppercase());
-        let entry = |id: SharedString, glyph_str: &str, color: Hsla, who: &str, key: &str, what: String, when: String| {
+        let entry = |id: SharedString, glyph_str: Icon, color: Hsla, who: &str, key: &str, what: String, when: String| {
             div()
                 .id(id)
                 .flex()
@@ -927,7 +845,7 @@ impl Joma {
                         .flex_1()
                         .min_w(px(0.))
                         .child(div().truncate().text_color(t.bright).child(who.to_owned()))
-                        .child(div().flex().items_center().gap(px(4.)).text_size(px(t.size - 2.)).text_color(color).child(glyph(glyph_str, t)).child(div().truncate().child(what))),
+                        .child(div().flex().items_center().gap(px(4.)).text_size(px(t.size - 2.)).text_color(color).child(glyph_str).child(div().truncate().child(what))),
                 )
                 .child(div().flex_none().text_size(px(t.size - 2.5)).text_color(t.muted).child(when))
         };
@@ -1148,7 +1066,7 @@ impl Joma {
     fn rail(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let unread: u32 = self.listed_unread();
         let live = !self.model.calls.is_empty() || !self.running_shares_empty();
-        let item = |tab: Tab, g: &str, title: &str, badge: Option<String>, dot: bool| {
+        let item = |tab: Tab, g: Icon, title: &str, badge: Option<String>, dot: bool| {
             let on = self.tab == tab;
             div()
                 .id(SharedString::from(format!("rail-{title}")))
@@ -1163,7 +1081,7 @@ impl Joma {
                 .when(on, |d| d.bg(t.accent_bg))
                 .cursor_pointer()
                 .hover(|d| d.text_color(t.bright).bg(t.raised))
-                .child(g.to_owned())
+                .child(g)
                 .when_some(badge, |d, b| {
                     d.child(
                         div()
@@ -1302,7 +1220,7 @@ impl Joma {
             list = list.child(div().px(px(10.)).py(px(8.)).text_color(t.muted).child(if self.mode == Mode::Search {
                 "no contact matches".to_owned()
             } else {
-                format!("no contacts yet · {G_PLUS} adds one")
+                "no contacts yet · + adds one".to_string()
             }));
         }
         for c in contacts {
@@ -1312,7 +1230,7 @@ impl Joma {
             let waiting = !c.confirmed && self.model.chat_with(&uri).is_none_or(|v| v.request);
             let dot = self.dot_of(&uri);
             let selected = self.model.chat_with(&uri).is_some_and(|v| self.selected.as_deref() == Some(v.id.as_str()));
-            let quick = |id: &str, glyph: &str, what: Quick| {
+            let quick = |id: &str, glyph: Icon, what: Quick| {
                 let u = uri.clone();
                 button(SharedString::from(format!("{id}-{uri}")), glyph, "", t, false)
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -1511,7 +1429,7 @@ impl Joma {
             .when(!here, |d| d.child(div().text_color(t.muted).child("(other conversation)")))
             .child(div().text_color(t.muted).child(format!("{}{elapsed}", call.state.label())))
             .child(div().px(px(4.)).border_1().border_color(t.border).text_color(if call.peer_joma { t.accent } else { t.muted }).child(joma_badge))
-            .when_some(sharing.filter(|_| !joma_sharing), |d, s| d.child(div().text_color(t.yellow).child(format!("{G_BOLT} {s}"))));
+            .when_some(sharing.filter(|_| !joma_sharing), |d, s| d.child(labelled(G_BOLT, s).text_color(t.yellow)));
 
         let mut panel = div()
             .flex()
@@ -1704,7 +1622,7 @@ impl Joma {
             let v = self.stage_view.borrow();
             (v.zoom, v.percent(), v.follow, v.zoomed())
         };
-        let small = |id: &'static str, glyph: &str, label: &str, on: bool| button(id, glyph, label, t, on);
+        let small = |id: &'static str, glyph: Mark, label: &str, on: bool| button(id, glyph, label, t, on);
         div()
             .flex()
             .flex_wrap()
@@ -1724,8 +1642,8 @@ impl Joma {
                     .when(self.viewing_key().is_some(), |d| {
                         let pen = self.ink_tool == InkTool::Pen;
                         let mut d = d
-                            .child(small("ink-laser", G_POINTER, "laser", self.ink_tool == InkTool::Laser).on_click(cx.listener(|this, _, _, cx| this.set_ink_tool(InkTool::Laser, cx))))
-                            .child(small("ink-pen", G_PENCIL, "pen", pen).on_click(cx.listener(|this, _, _, cx| this.set_ink_tool(InkTool::Pen, cx))));
+                            .child(small("ink-laser", (G_POINTER).into(), "laser", self.ink_tool == InkTool::Laser).on_click(cx.listener(|this, _, _, cx| this.set_ink_tool(InkTool::Laser, cx))))
+                            .child(small("ink-pen", (G_PENCIL).into(), "pen", pen).on_click(cx.listener(|this, _, _, cx| this.set_ink_tool(InkTool::Pen, cx))));
                         if pen {
                             for (i, c) in [0xff3355u32, 0xffcc00, 0x33dd77, 0x33bbff].into_iter().enumerate() {
                                 let on = self.ink_color == c;
@@ -1745,17 +1663,17 @@ impl Joma {
                                 );
                             }
                         }
-                        d.child(small("ink-clear", G_ERASER, "clear", false).on_click(cx.listener(|this, _, _, cx| this.clear_ink(None, cx))))
+                        d.child(small("ink-clear", (G_ERASER).into(), "clear", false).on_click(cx.listener(|this, _, _, cx| this.clear_ink(None, cx))))
                             .child(div().w(px(1.)).h(px(16.)).mx(px(2.)).bg(t.border))
                     })
-                    .child(small("z-fit", "", "fit", zoom == Zoom::Fit).on_click(cx.listener(|this, _, _, cx| this.zoom(Zoom::Fit, cx))))
-                    .child(small("z-fill", "", "fill", zoom == Zoom::Fill).on_click(cx.listener(|this, _, _, cx| this.zoom(Zoom::Fill, cx))))
-                    .child(small("z-1", "", "1:1", zoom == Zoom::Actual).on_click(cx.listener(|this, _, _, cx| this.zoom(Zoom::Actual, cx))))
-                    .child(small("z-out", G_ZOOM_OUT, "", false).on_click(cx.listener(|this, _, _, cx| this.zoom_by(1. / 1.25, cx))))
+                    .child(small("z-fit", Mark::None, "fit", zoom == Zoom::Fit).on_click(cx.listener(|this, _, _, cx| this.zoom(Zoom::Fit, cx))))
+                    .child(small("z-fill", Mark::None, "fill", zoom == Zoom::Fill).on_click(cx.listener(|this, _, _, cx| this.zoom(Zoom::Fill, cx))))
+                    .child(small("z-1", Mark::None, "1:1", zoom == Zoom::Actual).on_click(cx.listener(|this, _, _, cx| this.zoom(Zoom::Actual, cx))))
+                    .child(small("z-out", (G_ZOOM_OUT).into(), "", false).on_click(cx.listener(|this, _, _, cx| this.zoom_by(1. / 1.25, cx))))
                     .child(div().w(px(44.)).flex().justify_center().text_color(t.text).child(format!("{pct}%")))
-                    .child(small("z-in", G_ZOOM_IN, "", false).on_click(cx.listener(|this, _, _, cx| this.zoom_by(1.25, cx))))
+                    .child(small("z-in", (G_ZOOM_IN).into(), "", false).on_click(cx.listener(|this, _, _, cx| this.zoom_by(1.25, cx))))
                     .child(
-                        small("z-follow", G_CROSSHAIRS, "follow", follow && zoomed).on_click(cx.listener(|this, _, _, cx| {
+                        small("z-follow", (G_CROSSHAIRS).into(), "follow", follow && zoomed).on_click(cx.listener(|this, _, _, cx| {
                             let mut v = this.stage_view.borrow_mut();
                             v.follow = !v.follow;
                             drop(v);
@@ -1763,7 +1681,7 @@ impl Joma {
                         })),
                     )
                     .child(
-                        small("z-full", if self.fullscreen { G_COMPRESS } else { G_EXPAND }, if self.fullscreen { "exit" } else { "full screen" }, self.fullscreen)
+                        small("z-full", (if self.fullscreen { G_COMPRESS } else { G_EXPAND }).into(), if self.fullscreen { "exit" } else { "full screen" }, self.fullscreen)
                             .on_click(cx.listener(|this, _, window, cx| this.toggle_fullscreen(window, cx))),
                     ),
             )
@@ -1782,13 +1700,13 @@ impl Joma {
                 .map(|p| self.model.name_of(&p))
                 .unwrap_or_default();
             let (w, h) = st.picture.as_ref().map_or((0, 0), |p| (p.width, p.height));
-            let info = format!("{G_EYE} {who}'s screen · {w}×{h} · {} · {}→{} · {:.0} fps", st.chroma, st.remote_pipeline, st.local_pipeline, st.fps);
+            let info = format!("{who}'s screen · {w}×{h} · {} · {}→{} · {:.0} fps", st.chroma, st.remote_pipeline, st.local_pipeline, st.fps);
             let pointer = self.pointer.as_ref().map(|p| (st.pointer.clone(), p.image.clone()));
             return Some((f.image.clone(), pointer, Some(info)));
         }
         let call = self.active_call()?;
         let video = call.sinks.iter().find_map(|s| self.frames.get(s))?;
-        Some((video.image.clone(), None, Some(format!("{G_VIDEO} {}", self.model.name_of(&call.peer)))))
+        Some((video.image.clone(), None, Some(self.model.name_of(&call.peer))))
     }
 
     /// The stage alone, filling the screen, with its tools below.
@@ -2045,7 +1963,7 @@ impl Joma {
                         .flex_1()
                         .min_w(px(0.))
                         .gap(px(2.))
-                        .child(div().text_color(t.yellow).child(format!("{G_BOLT} {state}")))
+                        .child(labelled(G_BOLT, state).text_color(t.yellow))
                         .child(div().truncate().text_color(t.bright).child(format!("you share: {what}")))
                         .child(div().text_size(px(t.size - 2.)).text_color(t.muted).child(if joma { "the picture is what they see, about once a second" } else { "Jami's share shows no preview here" })),
                 )
@@ -2344,7 +2262,7 @@ impl Joma {
             }
             swatches.push(line);
         }
-        fn tool(t: &Theme, p: &ProfileEdit, cx: &mut Context<Joma>, id: &'static str, g: &str, label: &str, which: PaintTool) -> gpui::Stateful<gpui::Div> {
+        fn tool(t: &Theme, p: &ProfileEdit, cx: &mut Context<Joma>, id: &'static str, g: Icon, label: &str, which: PaintTool) -> gpui::Stateful<gpui::Div> {
             button(id, g, label, t, p.tool == which).on_click(cx.listener(move |this, _, _, cx| {
                 if let Some(p) = this.profile_edit.as_mut() {
                     p.tool = which;
@@ -2699,10 +2617,10 @@ impl Joma {
             let name = self.model.name_of(direct_peer(&key).unwrap_or_default());
             let (text, asked) = match (&s.viewing, &s.sharing) {
                 (Viewing::Asked { .. }, _) => (format!("{name} wants to show you their screen"), true),
-                (Viewing::On { .. }, _) => (format!("{G_EYE} {name}'s screen"), false),
+                (Viewing::On { .. }, _) => (format!("{name}'s screen"), false),
                 (Viewing::Querying { .. } | Viewing::Opening { .. }, _) => (format!("connecting to {name}'s screen…"), false),
                 (Viewing::Off, Sharing::Off) => continue,
-                (Viewing::Off, _) => (format!("{G_DESKTOP} sharing with {name}"), false),
+                (Viewing::Off, _) => (format!("sharing with {name}"), false),
             };
             let (k1, k2) = (key.clone(), key.clone());
             let controls = div()
@@ -2902,7 +2820,7 @@ impl Joma {
                         .justify_center()
                         .p(px(24.))
                         .text_color(t.muted)
-                        .child(format!("No conversation yet · {G_PLUS} or Ctrl+N to add a contact")),
+                        .child("No conversation yet · + or Ctrl+N to add a contact"),
                 )
                 .into_any_element();
         };

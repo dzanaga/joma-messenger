@@ -40,10 +40,8 @@
   this happened on 2026-10-25 (VA-API encode on the Radeon 550, see `crates/joma-desk/src/va.rs`).
   `joma probe --bench` skips that GPU unless given `--display-gpu`.
 - Build: `.cargo/config.toml` (local, ignored) builds into
-  `/run/media/dzanaga/builds/vetro-target`, shared with Vetro (GPUI is built once). That
-  is a btrfs volume (zstd) on the user's external Samsung T5, attached by the user unit
-  `builds-disk.path`; Vetro's `target` links to it. /home is nearly full: never build
-  there. If the volume is missing, the drive is unplugged: say so.
+  `/home/dzanaga/builds/joma-target` (since 2026-11-17: the internal disk has room;
+  before, an external T5 volume shared with Vetro). Never build inside the repository.
 - Commit after every change once tests pass (`cargo test --workspace`).
 - Docs and code in English.
 - **TODO.md** (local hotfix list, not committed): before starting any task, check it for unticked `- [ ]` items and ask the user whether to fix those first (if the user asked for the TODOs, start there directly). Only checkbox items are tasks; other lines are the user's notes, leave them alone. When an item is fixed and committed, tick it (`- [x]`) and append the commit hash. The user removes an item once verified.
