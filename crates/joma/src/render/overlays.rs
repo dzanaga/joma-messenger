@@ -89,12 +89,39 @@ impl Joma {
                 .child(note("Applies to the next Joma share. Screenshots of a share go to ~/Pictures/joma.")),
             _ => page
                 .child(title("About"))
-                .child(row(label("Joma"), div().child(div().pt(px(4.)).text_color(t.bright).child(concat!("v", env!("CARGO_PKG_VERSION"))))))
+                .child(row(
+                    label("Joma"),
+                    div().items_center().child(div().text_color(t.bright).child(format!("v{}", joma_quick::version::pretty(env!("CARGO_PKG_VERSION"))))).when(!self.update_note.is_empty(), |d| {
+                        d.child(div().text_color(if self.update.is_some() { t.accent } else { t.muted }).child(format!("· {}", self.update_note)))
+                    }),
+                ))
+                .child(row(
+                    label("updates"),
+                    div()
+                        .when_some(self.update.clone(), |d, v| {
+                            d.child(
+                                button("about-update", G_DOWNLOAD, &if self.updating { "installing…".to_owned() } else { format!("update to {} and restart", joma_quick::version::pretty(&v)) }, t, true)
+                                    .on_click(cx.listener(|this, _, _, cx| this.update_now(cx))),
+                            )
+                        })
+                        .child(button("about-check", G_UNDO, "check now", t, false).on_click(cx.listener(|this, _, _, cx| this.check_updates(true, cx)))),
+                ))
+                .child(row(
+                    label("channel"),
+                    chips(t, cx, "chan", vec![("off".into(), "stable releases only".into()), ("on".into(), "pre-releases too".into())], if self.quick.prereleases { "on" } else { "off" }, |j, x, cx| {
+                        j.set_prereleases(x == "on", cx)
+                    }),
+                ))
                 .child(row(label("account"), div().child(div().pt(px(4.)).child(format!("{} · libjami {}", if self.model.my_name.is_empty() { "jami" } else { &self.model.my_name }, self.model.account)))))
                 .child(row(label("keys"), div().child(button("about-keys", G_BOLT, "show the keys · F1", t, false).on_click(cx.listener(|this, _, _, cx| {
                     this.keys_open = true;
                     cx.notify();
                 })))))
+                .child(note(if Joma::installed_with_mise() {
+                    "Joma looks for releases on GitHub every six hours. An update is installed with mise, then Joma restarts."
+                } else {
+                    "Joma looks for releases on GitHub every six hours. This copy was not installed with mise, so it shows the command instead of updating itself."
+                }))
                 .child(note("Settings are kept in ~/.config/joma/quick.toml and in Jami's own configuration.")),
         };
         let nav_item = |i: usize, icon: Icon, name: &'static str| {

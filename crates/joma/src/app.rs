@@ -87,6 +87,10 @@ pub enum AppMsg {
     Recorded { conv: String, path: String, send: bool },
     /// A screenshot of a share was saved (or not): send it to the conversation.
     Shot { conv: Option<String>, result: Result<String, String> },
+    /// The release tags GitHub lists (or why not).
+    Releases(Result<Vec<String>, String>),
+    /// `mise` installed the update (or not).
+    Updated(Result<String, String>),
     /// The watch-together player of a conversation's session reported something.
     Watch(String, crate::watch::PlayerEvent),
     /// An `@youtube` search finished: the message to send to the conversation.
@@ -390,6 +394,14 @@ pub struct Joma {
     pub flash: Option<(String, Instant)>,
     /// The menu that is open: ours (the picture in the tab strip) or the conversation's.
     pub menu: Option<Menu>,
+    /// A newer version GitHub has, for the channel chosen.
+    pub update: Option<String>,
+    pub updating: bool,
+    update_checked: Option<Instant>,
+    booted: Instant,
+    update_told: Option<String>,
+    /// The last check failed, or found nothing newer (for the About page).
+    pub update_note: String,
     /// The overlay listing the keys (F1).
     pub keys_open: bool,
     /// The message box has the keyboard (its field shows it).
@@ -662,6 +674,12 @@ impl Joma {
             previews: HashMap::new(),
             flash: None,
             menu: None,
+            update: None,
+            updating: false,
+            update_checked: None,
+            booted: Instant::now(),
+            update_told: None,
+            update_note: String::new(),
             keys_open: false,
             composer_focused: false,
             tab_labels: true,
@@ -1039,6 +1057,10 @@ impl Joma {
             self.share_on_connect.remove(&id);
             self.share_in(&id, cx);
         }
+        // Releases: shortly after the start, then every six hours.
+        if self.gate == Gate::Ready && self.update_checked.is_none_or(|t| t.elapsed() > Duration::from_secs(6 * 3600)) && self.booted.elapsed() > Duration::from_secs(if self.update_checked.is_none() { 20 } else { 0 }) {
+            self.check_updates(false, cx);
+        }
         if self.flash.as_ref().is_some_and(|(_, t)| t.elapsed() > Duration::from_secs(5)) {
             self.flash = None;
         }
@@ -1109,6 +1131,43 @@ impl Joma {
                         self.show_flash(format!("screenshot saved: {path}{}", if sent { " · sent to the conversation" } else { "" }), cx);
                     }
                     Err(e) => self.show_flash(format!("no screenshot: {e}"), cx),
+                }
+                cx.notify();
+            }
+            AppMsg::Releases(r) => {
+                match r {
+                    Ok(tags) => {
+                        let found = joma_quick::version::newest(env!("CARGO_PKG_VERSION"), tags.iter().map(String::as_str), self.quick.prereleases);
+                        self.update_note = match &found {
+                            Some(v) => format!("{} is available", joma_quick::version::pretty(v)),
+                            None => "this is the newest".into(),
+                        };
+                        if let Some(v) = &found {
+                            if self.update_told.as_ref() != Some(v) {
+                                self.update_told = Some(v.clone());
+                                notify_desktop("Joma", &format!("Joma {} is available: update from Joma's tab strip", joma_quick::version::pretty(v)));
+                            }
+                        }
+                        self.update = found;
+                    }
+                    Err(e) => self.update_note = format!("could not check: {e}"),
+                }
+                cx.notify();
+            }
+            AppMsg::Updated(r) => {
+                self.updating = false;
+                match r {
+                    Ok(v) => {
+                        self.update = None;
+                        self.show_flash(format!("Joma {} is installed: restarting", joma_quick::version::pretty(&v)), cx);
+                        // The new version starts once this one has left Jami's data.
+                        let shim = crate::setup::exe();
+                        let hidden = if crate::hypr::hidden() { " --hidden" } else { "" };
+                        let _ = std::process::Command::new("sh").arg("-c").arg(format!("sleep 2; exec '{}'{hidden}", shim.display())).stdin(std::process::Stdio::null()).spawn();
+                        self.leave();
+                        cx.quit();
+                    }
+                    Err(e) => self.show_flash(format!("update failed: {e}"), cx),
                 }
                 cx.notify();
             }
@@ -2501,6 +2560,70 @@ impl Joma {
     pub fn set_show_version(&mut self, on: bool, cx: &mut Context<Self>) {
         self.quick.show_version = on;
         self.save_quick(cx);
+    }
+
+    /// Ask GitHub which releases exist (in the background). Test profiles only with
+    /// `JOMA_RELEASES_URL` (a file of the same JSON).
+    pub fn check_updates(&mut self, by_hand: bool, cx: &mut Context<Self>) {
+        self.update_checked = Some(Instant::now());
+        let url = match std::env::var("JOMA_RELEASES_URL") {
+            Ok(u) => u,
+            Err(_) if own_profile() => return,
+            Err(_) => "https://api.github.com/repos/dzanaga/joma-messenger/releases?per_page=30".into(),
+        };
+        if by_hand {
+            self.update_note = "checking…".into();
+            cx.notify();
+        }
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let r = (|| -> anyhow::Result<Vec<String>> {
+                let out = std::process::Command::new("curl").args(["-fsSL", "--max-time", "20", "-A", "joma", "-H", "Accept: application/vnd.github+json", &url]).output()?;
+                anyhow::ensure!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr).trim().to_owned());
+                let v: serde_json::Value = serde_json::from_slice(&out.stdout)?;
+                Ok(v.as_array().map(|a| a.iter().filter(|r| r["draft"].as_bool() != Some(true)).filter_map(|r| r["tag_name"].as_str().map(str::to_owned)).collect()).unwrap_or_default())
+            })();
+            let _ = tx.unbounded_send(AppMsg::Releases(r.map_err(|e| format!("{e:#}"))));
+        });
+    }
+
+    /// Stable releases only, or pre-releases too.
+    pub fn set_prereleases(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.quick.prereleases = on;
+        self.save_quick(cx);
+        self.check_updates(true, cx);
+    }
+
+    /// Was this Joma installed with mise (so mise can install another version)?
+    pub fn installed_with_mise() -> bool {
+        crate::setup::exe().to_string_lossy().contains("/mise/shims/")
+    }
+
+    /// Install the update with mise, then restart.
+    pub fn update_now(&mut self, cx: &mut Context<Self>) {
+        let Some(v) = self.update.clone() else { return };
+        if own_profile() {
+            return self.show_flash(format!("a test profile does not update (would install {v})"), cx);
+        }
+        if !Self::installed_with_mise() {
+            return self.show_flash(format!("this Joma was not installed with mise: mise use -g github:dzanaga/joma-messenger@{v}"), cx);
+        }
+        if self.updating {
+            return;
+        }
+        self.updating = true;
+        self.show_flash(format!("installing Joma {}…", joma_quick::version::pretty(&v)), cx);
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let out = std::process::Command::new("mise").args(["use", "-g", &format!("github:dzanaga/joma-messenger@{v}")]).output();
+            let r = match out {
+                Ok(o) if o.status.success() => Ok(v),
+                Ok(o) => Err(String::from_utf8_lossy(&o.stderr).lines().last().unwrap_or("mise failed").to_owned()),
+                Err(e) => Err(format!("mise: {e}")),
+            };
+            let _ = tx.unbounded_send(AppMsg::Updated(r));
+        });
+        cx.notify();
     }
 
     /// `joma ui <what>`: open a part of the interface from a script.

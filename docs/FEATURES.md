@@ -247,7 +247,20 @@ what starts next. `scripts/install.sh [host]` builds a release and installs
 when mise has Joma here, since the two would compete and the launcher would start
 whichever ran last.
 
+## Updates
+Joma asks GitHub for its releases shortly after it starts and every six hours. When a
+newer one exists, **update · 0.6.0** shows in the tab strip (and a desktop notification
+says so once): it opens **settings → about**, where **update and restart** installs it
+with mise and starts the new version. A Joma not installed with mise shows the command
+instead. **Channel**: stable releases only (the default), or pre-releases too
+(`prereleases` in `quick.toml`). Versions between stable releases are numbered
+`0.5.2.dev0`, `.dev1`, … (`0.5.2-dev.1` for Cargo and in the release tag); publish one
+with `scripts/release.sh "notes" --pre`.
+
 ## Log
+- 0.5.2.dev4 (2026-11-17): update notice in the tab strip, update and restart from
+  settings → about (through mise), stable or pre-release channel. Tested with a made-up
+  release list; the install itself waits for a real newer release.
 - 0.5.2.dev3 (2026-11-17): settings as a page with sections; rounded corners on every
   box; contacts rows like the chat rows; a long conversation no longer pushes the
   message field out of its panel.

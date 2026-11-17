@@ -48,6 +48,8 @@ pub struct QuickConfig {
     pub rounded: bool,
     /// Show Joma's version in the tab strip.
     pub show_version: bool,
+    /// Offer pre-releases (0.5.2.dev3, 0.6.0-rc.1) as updates too; off: stable only.
+    pub prereleases: bool,
 }
 
 impl Default for QuickConfig {
@@ -75,6 +77,78 @@ impl Default for QuickConfig {
             video_quality: "auto".into(),
             rounded: true,
             show_version: true,
+            prereleases: false,
+        }
+    }
+}
+
+pub mod version {
+    //! Joma's versions: `0.5.2` is stable; `0.5.2-dev.3` (shown as `0.5.2.dev3`) and
+    //! `0.6.0-rc.1` come before the stable release of the same number.
+
+    /// A key that orders versions; `None` when `v` is not one. A leading `v` is fine.
+    pub fn key(v: &str) -> Option<(u64, u64, u64, bool, String, u64)> {
+        let v = v.trim().trim_start_matches('v');
+        let (base, pre) = match v.split_once('-') {
+            Some((b, p)) => (b, Some(p)),
+            None => (v, None),
+        };
+        let mut n = base.split('.').map(|x| x.parse::<u64>().ok());
+        let (a, b, c) = (n.next()??, n.next()??, n.next()??);
+        if n.next().is_some() {
+            return None;
+        }
+        Some(match pre {
+            None => (a, b, c, true, String::new(), 0),
+            Some(p) => {
+                let label: String = p.chars().take_while(|ch| ch.is_ascii_alphabetic()).collect();
+                let num = p.trim_start_matches(|ch: char| !ch.is_ascii_digit()).parse().unwrap_or(0);
+                (a, b, c, false, label, num)
+            }
+        })
+    }
+
+    pub fn is_stable(v: &str) -> bool {
+        key(v).is_some_and(|k| k.3)
+    }
+
+    /// As the user writes it: `0.5.2-dev.3` → `0.5.2.dev3`.
+    pub fn pretty(v: &str) -> String {
+        let v = v.trim_start_matches('v');
+        match v.split_once('-') {
+            Some((base, pre)) => format!("{base}.{}", pre.replace('.', "")),
+            None => v.to_owned(),
+        }
+    }
+
+    /// The newest of `tags` that is newer than `current`, pre-releases only when asked.
+    pub fn newest<'a>(current: &str, tags: impl IntoIterator<Item = &'a str>, prereleases: bool) -> Option<String> {
+        let now = key(current)?;
+        tags.into_iter()
+            .filter_map(|t| key(t).map(|k| (k, t)))
+            .filter(|(k, _)| (k.3 || prereleases) && *k > now)
+            .max_by(|a, b| a.0.cmp(&b.0))
+            .map(|(_, t)| t.trim_start_matches('v').to_owned())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn orders_and_picks() {
+            assert!(key("0.5.2-dev.3") < key("0.5.2"));
+            assert!(key("0.5.2-dev.3") > key("0.5.1"));
+            assert!(key("0.5.2-dev.10") > key("0.5.2-dev.9"));
+            assert!(key("0.6.0-rc.1") > key("0.6.0-dev.4"));
+            assert_eq!(key("nonsense"), None);
+            assert_eq!(pretty("v0.5.2-dev.3"), "0.5.2.dev3");
+            assert_eq!(pretty("0.5.2"), "0.5.2");
+            let tags = ["v0.5.1", "v0.5.2-dev.4", "v0.5.2", "v0.6.0-dev.1"];
+            assert_eq!(newest("0.5.2-dev.3", tags, false).as_deref(), Some("0.5.2"));
+            assert_eq!(newest("0.5.2-dev.3", tags, true).as_deref(), Some("0.6.0-dev.1"));
+            assert_eq!(newest("0.5.2", tags, false), None);
+            assert_eq!(newest("0.5.1", ["v0.5.2-dev.4"], false), None);
         }
     }
 }

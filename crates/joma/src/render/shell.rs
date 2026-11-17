@@ -67,8 +67,22 @@ impl Joma {
                     .flex_none()
                     .items_center()
                     .gap(px(2.))
+                    .when_some(self.update.clone(), |d, v| {
+                        d.child(
+                            button("strip-update", G_DOWNLOAD, &format!("update · {}", joma_quick::version::pretty(&v)), t, true)
+                                .mr(px(S2))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    // The About page says what happens and has the button.
+                                    this.settings = None;
+                                    this.open_settings(cx);
+                                    if let Some(s) = this.settings.as_mut() {
+                                        s.section = 4;
+                                    }
+                                })),
+                        )
+                    })
                     .when(self.quick.show_version && labels, |d| {
-                        d.child(div().pr(px(S2)).text_size(px(t.size - 2.5)).text_color(t.muted).child(concat!("v", env!("CARGO_PKG_VERSION"))))
+                        d.child(div().pr(px(S2)).text_size(px(t.size - 2.5)).text_color(t.muted).child(format!("v{}", joma_quick::version::pretty(env!("CARGO_PKG_VERSION")))))
                     })
                     .child(button("strip-settings", G_COG, "", t, self.settings.is_some()).on_click(cx.listener(|this, _, _, cx| this.open_settings(cx))))
                     .child(button("strip-pop", if full { G_TRAY } else { G_EXPAND }, "", t, false).on_click(cx.listener(move |this, _, window, cx| {
