@@ -548,7 +548,7 @@ impl Joma {
                             .when_some(saved.filter(|p| is_picture(p)), |d, path| {
                                 // Sized from the file's header, so the list does not jump
                                 // when the picture loads.
-                                let (w, h) = picture_box(&path, 360., 260.);
+                                let (w, h) = picture_box(&path, inner.min(360.), 260.);
                                 d.child(div().mt(px(S1)).w(px(w)).h(px(h)).rounded(px(radius())).overflow_hidden().child(gpui::img(path).w(px(w)).h(px(h)).object_fit(ObjectFit::Contain)))
                             }),
                     )

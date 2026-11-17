@@ -61,6 +61,14 @@
   replies / reactions / edit, picture viewer, call overlay, settings page,
   transcription, GIFs. Development versions `0.5.2.devN` until a stable release is
   asked for. (User, 2026-11-16, `docs/discussions/2026-11-16-interface.qmd`.)
+- D-21 The person sharing draws too: the overlay on the shared screen takes the pointer
+  while a tool is on (a right click gives it back), strokes go to viewers on the
+  share's drawing channel; a screenshot of a share is saved in `~/Pictures/joma` and
+  sent to the conversation. (User asked, 2026-11-17.)
+- D-22 Defaults taken without an answer, open to change: updates through mise with a
+  stable channel by default; transcription on click, local (whisper.cpp), never a
+  cloud engine unless chosen; GIFs from a local folder, no online search; settings as
+  a page; rounded corners and the version in the tab strip as settings (user asked).
 
 ## Decided
 

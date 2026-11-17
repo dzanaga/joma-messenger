@@ -290,6 +290,8 @@ instead. **Channel**: stable releases only (the default), or pre-releases too
 with `scripts/release.sh "notes" --pre`.
 
 ## Log
+- 0.5.2.dev10 (2026-11-17): the panel under the bar: pictures fit their bubble, settings
+  show their sections as icons.
 - 0.5.2.dev9 (2026-11-17): a GIF picker from your own folder.
 - 0.5.2.dev8 (2026-11-17): transcribe a voice message (whisper.cpp on this machine, or
   superwhisper if chosen). The steps around the engine were tested with a stand-in:

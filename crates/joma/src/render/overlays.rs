@@ -9,7 +9,7 @@ impl Joma {
         let v = self.settings.clone()?;
         let title = |text: &str| div().pb(px(S2)).text_size(px(t.size + 2.)).text_color(t.bright).font_weight(FontWeight::BOLD).child(text.to_owned());
         let note = |text: &str| div().pt(px(10.)).text_size(px(t.size - 2.)).text_color(t.muted).child(text.to_owned());
-        let label = |text: &str| div().w(px(130.)).flex_none().pt(px(4.)).text_color(t.text).child(text.to_owned());
+        let label = |text: &str| div().w(px(if self.narrow { 96. } else { 130. })).flex_none().pt(px(4.)).text_color(t.text).child(text.to_owned());
         let row = |l: gpui::Div, chips: gpui::Div| div().flex().gap(px(10.)).py(px(3.)).child(l).child(chips.flex().flex_wrap().gap(px(4.)).flex_1().min_w(px(0.)));
         // A row of choices; `pick` runs with the chosen value.
         fn chips(t: &Theme, cx: &mut Context<Joma>, id: &str, options: Vec<(String, String)>, current: &str, pick: fn(&mut Joma, &str, &mut Context<Joma>)) -> gpui::Div {
@@ -63,7 +63,7 @@ impl Joma {
                         t,
                         cx,
                         "tr",
-                        vec![("".into(), "transcribe with whisper.cpp · local".into()), ("superwhisper".into(), "with superwhisper · its own mode".into()), ("off".into(), "no transcription".into())],
+                        vec![("".into(), "whisper.cpp · local".into()), ("superwhisper".into(), "superwhisper · its mode".into()), ("off".into(), "off".into())],
                         if self.quick.transcribe == "whisper" { "" } else { &self.quick.transcribe },
                         |j, x, cx| j.set_transcribe(x, cx),
                     ),
@@ -156,7 +156,7 @@ impl Joma {
                 .cursor_pointer()
                 .hover(|d| d.bg(t.raised))
                 .child(icon)
-                .child(name)
+                .when(!self.narrow, |d| d.child(name))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if let Some(s) = this.settings.as_mut() {
                         s.section = i;
@@ -175,9 +175,10 @@ impl Joma {
                 .child(
                     tile(t, false)
                         .flex_none()
-                        .w(px(if self.narrow { 150. } else { 220. }))
+                        .w(px(if self.narrow { 44. } else { 220. }))
                         .bg(t.panel)
-                        .child(div().flex().flex_none().items_center().h(px(38.)).pl(px(S3)).child(caption(t, "settings")))
+                        .when(!self.narrow, |d| d.child(div().flex().flex_none().items_center().h(px(38.)).pl(px(S3)).child(caption(t, "settings"))))
+                        .when(self.narrow, |d| d.pt(px(S1)))
                         .child(
                             div()
                                 .flex()
