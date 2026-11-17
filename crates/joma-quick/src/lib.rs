@@ -54,6 +54,8 @@ pub struct QuickConfig {
     /// "superwhisper" (that app, in whatever mode it is set to: it may be a cloud),
     /// "off". Empty: whisper when `whisper-cli` is installed, else off.
     pub transcribe: String,
+    /// The folder of GIFs the picker offers; empty: `~/Pictures/gifs`.
+    pub gif_dir: String,
 }
 
 impl Default for QuickConfig {
@@ -83,6 +85,7 @@ impl Default for QuickConfig {
             show_version: true,
             prereleases: false,
             transcribe: String::new(),
+            gif_dir: String::new(),
         }
     }
 }

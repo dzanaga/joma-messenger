@@ -72,7 +72,7 @@ impl Joma {
                     Some("whisper") => "Transcripts are made on this machine with whisper.cpp and kept in Joma's cache. The model (about 150 MB) is downloaded at the first one.",
                     Some(_) => "Transcripts are made by superwhisper in the mode it is set to: in a cloud mode the voice message leaves this machine.",
                     None if self.quick.transcribe == "off" => "Voice messages are not transcribed.",
-                    None => "Not installed: whisper.cpp provides whisper-cli (Arch: whisper.cpp). Until then voice messages are not transcribed.",
+                    None => "Not installed: whisper.cpp provides whisper-cli (AUR: whisper.cpp). Until then voice messages are not transcribed.",
                 }))
                 .child(note("Devices and sound processing apply to the next call.")),
             2 => page

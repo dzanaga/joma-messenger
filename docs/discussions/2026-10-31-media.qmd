@@ -92,6 +92,9 @@ with it and sends the GIF as a file (so it plays in Jami too); (b) no search, bu
 pasting or dropping a GIF already works and shows animated in the conversation;
 (c) a local collection: a folder of GIFs you keep, searchable by name.
 
+Built in 0.5.2.dev9: (c), the local folder (`~/Pictures/gifs`), since it needs no
+account. (a) can come on top if you want an online search.
+
 - [ ] A: (a) / (b) / (c)
 
 # 6. Voice messages in the test setup

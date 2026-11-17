@@ -45,3 +45,4 @@ Design notes live in `docs/design/`. Decisions are in `docs/DECISIONS.md`.
 | **U6** | Replies, reactions, edit and delete (Jami's own: `sendMessage` flags 0 with a parent, 1, 2; `ReactionAdded` / `ReactionRemoved` forwarded by the shim) | built in 0.5.2.dev5, verified in the nest on one profile (the peer was offline: not yet seen arriving on the other side) |
 | **U7** | Picture viewer; incoming-call overlay and the call bar | built in 0.5.2.dev6 / dev7; viewer, overlay and answering verified in the nest; the bar floating over video not yet seen (no camera in the nest run) |
 | **U8** | Transcription of voice messages (whisper.cpp local, superwhisper by choice) | built in 0.5.2.dev8; the flow verified with a stand-in `whisper-cli`; to try with whisper.cpp installed |
+| **U9** | GIFs from a local folder, filtered by name | built in 0.5.2.dev9, the picker verified in the nest |

@@ -396,6 +396,8 @@ pub struct Joma {
     pub flash: Option<(String, Instant)>,
     /// The menu that is open: ours (the picture in the tab strip) or the conversation's.
     pub menu: Option<Menu>,
+    /// The GIF picker: the folder's GIFs, read when it opens.
+    pub gifs: Option<Vec<std::path::PathBuf>>,
     /// Transcripts of voice messages by file id: `None` while one is being made.
     pub transcripts: HashMap<String, Option<Result<String, String>>>,
     transcripts_seen: std::collections::HashSet<String>,
@@ -686,6 +688,7 @@ impl Joma {
             previews: HashMap::new(),
             flash: None,
             menu: None,
+            gifs: None,
             transcripts: HashMap::new(),
             transcripts_seen: std::collections::HashSet::new(),
             viewer: None,
@@ -2479,6 +2482,46 @@ impl Joma {
         cx.notify();
     }
 
+    /// Where the picker's GIFs are.
+    pub fn gif_dir(&self) -> std::path::PathBuf {
+        if self.quick.gif_dir.is_empty() {
+            std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Pictures/gifs")
+        } else {
+            std::path::PathBuf::from(&self.quick.gif_dir)
+        }
+    }
+
+    /// Open or close the GIF picker (it reads the folder each time it opens).
+    pub fn toggle_gifs(&mut self, cx: &mut Context<Self>) {
+        self.gifs = match self.gifs.take() {
+            Some(_) => None,
+            None => {
+                let mut list: Vec<std::path::PathBuf> = std::fs::read_dir(self.gif_dir())
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.extension().and_then(|e| e.to_str()).is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "gif" | "webp")))
+                    .collect();
+                list.sort();
+                Some(list)
+            }
+        };
+        self.emoji_open = false;
+        cx.notify();
+    }
+
+    /// Send a GIF of the picker to the open conversation.
+    pub fn send_gif(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        self.gifs = None;
+        let Some(conv) = self.selected.clone() else { return };
+        if let Reply::Error { message } = self.send_file(&conv, &path.to_string_lossy()) {
+            self.show_flash(format!("not sent: {message}"), cx);
+        }
+        self.pinned_bottom = true;
+        cx.notify();
+    }
+
     pub fn set_transcribe(&mut self, engine: &str, cx: &mut Context<Self>) {
         self.quick.transcribe = engine.to_owned();
         self.save_quick(cx);
@@ -2777,6 +2820,7 @@ impl Joma {
             "menu" => self.menu = Some(Menu::Me),
             "chat-menu" => self.menu = Some(Menu::Chat),
             "emoji" => self.emoji_open = !self.emoji_open,
+            "gifs" => self.toggle_gifs(cx),
             "viewer" => self.viewer = self.pictures().pop().map(|(p, _)| p),
             // The actions of the newest text message of the open conversation.
             "msg" => {
@@ -2787,6 +2831,7 @@ impl Joma {
                 self.settings = None;
                 self.profile_edit = None;
                 self.viewer = None;
+                self.gifs = None;
                 self.keys_open = false;
                 self.menu = None;
                 self.emoji_open = false;

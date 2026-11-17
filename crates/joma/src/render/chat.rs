@@ -66,8 +66,10 @@ impl Joma {
                     .child(button("send-file", G_CLIP, "", t, false).on_click(cx.listener(move |this, _, _, cx| this.pick_and_send(conv.clone(), cx))))
                     .child(button("emoji", G_SMILE, "", t, self.emoji_open).on_click(cx.listener(|this, _, _, cx| {
                         this.emoji_open = !this.emoji_open;
+                        this.gifs = None;
                         cx.notify();
                     })))
+                    .child(button("gifs", G_IMAGE, "", t, self.gifs.is_some()).on_click(cx.listener(|this, _, _, cx| this.toggle_gifs(cx))))
                     // YouTube: the message box becomes the search box (`@youtube …`, then Enter).
                     .child(button("yt", G_YOUTUBE, "", t, false).on_click(cx.listener(|this, _, _, cx| {
                         this.emoji_open = false;
@@ -104,6 +106,42 @@ impl Joma {
             );
         }
         Some(div().mx(px(12.)).mt(px(6.)).p(px(6.)).border_1().border_color(t.border).rounded(px(radius())).bg(t.panel).max_h(px(200.)).child(div().id("emoji-scroll").overflow_y_scroll().max_h(px(188.)).child(grid)).into_any_element())
+    }
+
+    /// The GIF picker: the GIFs of the user's folder, filtered by what is typed in the
+    /// message field; a click sends one.
+    pub(super) fn gif_popover(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let all = self.gifs.as_ref()?;
+        let filter = self.composer.read(cx).text().trim().to_lowercase();
+        let shown: Vec<&std::path::PathBuf> = all.iter().filter(|p| filter.is_empty() || p.file_stem().is_some_and(|n| n.to_string_lossy().to_lowercase().contains(&filter))).take(36).collect();
+        let frame = div().flex_none().mx(px(S3)).mt(px(6.)).p(px(6.)).border_1().border_color(t.border).rounded(px(radius())).bg(t.panel);
+        if shown.is_empty() {
+            let dir = self.gif_dir();
+            let why = if all.is_empty() { format!("no GIFs yet: put some in {} (or drop one on the conversation)", dir.display()) } else { format!("no GIF named “{filter}”") };
+            return Some(frame.text_size(px(t.size - 2.)).text_color(t.muted).child(why).into_any_element());
+        }
+        let mut grid = div().flex().flex_wrap().gap(px(S1));
+        for (i, p) in shown.into_iter().enumerate() {
+            let path = p.clone();
+            grid = grid.child(
+                div()
+                    .id(SharedString::from(format!("gif-{i}")))
+                    .w(px(104.))
+                    .h(px(78.))
+                    .rounded(px(radius()))
+                    .overflow_hidden()
+                    .cursor_pointer()
+                    .hover(|d| d.opacity(0.8))
+                    .child(gpui::img(p.clone()).w(px(104.)).h(px(78.)).object_fit(ObjectFit::Cover))
+                    .on_click(cx.listener(move |this, _, _, cx| this.send_gif(&path, cx))),
+            );
+        }
+        Some(
+            frame
+                .child(div().pb(px(S1)).text_size(px(t.size - 2.5)).text_color(t.muted).child("your GIFs · type in the message field to filter by name · a click sends one"))
+                .child(div().id("gif-scroll").max_h(px(250.)).overflow_y_scroll().child(grid))
+                .into_any_element(),
+        )
     }
 
     /// A YouTube link's card: thumbnail, title and channel; a click opens it.
@@ -743,7 +781,7 @@ impl Joma {
                 d.child(body)
                     .when_some(quick, |d, q| d.child(q))
                     .when(!conv.request, |d| {
-                        d.children(self.emoji_popover(t, cx))
+                        d.children(self.emoji_popover(t, cx)).children(self.gif_popover(t, cx))
                             .children(self.attachment_strip(t, &conv.id, cx))
                             .children(self.reply_strip(t, &conv, cx))
                             .child(self.composer_row(t, cx))

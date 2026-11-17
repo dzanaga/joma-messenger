@@ -130,6 +130,10 @@ Beside the message box:
   the link in the box. A YouTube link in a conversation shows its thumbnail, title and
   channel (fetched once from YouTube and kept in `~/.cache/joma/youtube`); a click opens
   it in the browser.
+- **GIFs** (the picture icon): the GIFs you keep in `~/Pictures/gifs` (`gif_dir` in
+  `quick.toml` names another folder); typing in the message field filters them by
+  name, a click sends one as a file, so it plays in the Jami app too. No online search:
+  that needs an account and a key with Giphy or Tenor.
 - 🎤 **voice message** and 🎥 **video message** (from the camera): record, then send
   or ✕. They go as files (`.ogg`, `.webm`); received ones have **play** (mpv: sound
   only for voice, a window for video), click again to stop.
@@ -138,7 +142,7 @@ Beside the message box:
 A voice message that is here has **transcribe**: its words appear under it and stay in
 Joma's cache (`~/.cache/joma/transcripts`); nothing is sent into the conversation.
 **Settings → audio → voice messages** chooses the engine:
-- **whisper.cpp, local** (the default when `whisper-cli` is installed; Arch package
+- **whisper.cpp, local** (the default when `whisper-cli` is installed; AUR package
   `whisper.cpp`): on this machine, on the CPU, language detected. The model (`base`,
   about 150 MB) is downloaded at the first transcription into
   `~/.local/share/joma/models`;
@@ -286,6 +290,7 @@ instead. **Channel**: stable releases only (the default), or pre-releases too
 with `scripts/release.sh "notes" --pre`.
 
 ## Log
+- 0.5.2.dev9 (2026-11-17): a GIF picker from your own folder.
 - 0.5.2.dev8 (2026-11-17): transcribe a voice message (whisper.cpp on this machine, or
   superwhisper if chosen). The steps around the engine were tested with a stand-in:
   whisper.cpp is not installed on this machine, and superwhisper was not called.
