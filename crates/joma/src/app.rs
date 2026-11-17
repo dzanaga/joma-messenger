@@ -3768,6 +3768,15 @@ impl Joma {
         cx.notify();
     }
 
+    /// Refuse the call that is ringing (not the one we may be in).
+    pub fn decline_incoming(&mut self, cx: &mut Context<Self>) {
+        let Some(call) = self.model.calls.values().find(|c| c.state == CallState::Incoming).cloned() else { return };
+        if let Err(e) = joma_jami::refuse_call(&self.model.account, &call.id) {
+            self.show_flash(e.to_string(), cx);
+        }
+        cx.notify();
+    }
+
     pub fn hang_up(&mut self, cx: &mut Context<Self>) {
         let Some(call) = self.active_call().cloned() else { return };
         let acc = self.model.account.clone();

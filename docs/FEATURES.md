@@ -199,8 +199,10 @@ the Jami app opens while Joma runs, Joma pauses (a notification says so) and com
 by itself when the Jami app quits.
 
 ## Calls
-Audio or video calls (Ctrl+Shift+C / V), answer (Ctrl+Shift+A), hang up (Ctrl+Shift+E),
-mute, camera. Remote video in the call panel; Ctrl+Shift+Enter gives it the whole
+Audio or video calls (Ctrl+Shift+C / V). A call coming in is asked about over the whole
+window: **answer** (Ctrl+Shift+A), **with video**, **decline**. In a call: mute, camera,
+share and hang up (Ctrl+Shift+E) are one bar, in the call's line or floating over the
+picture when there is one. Remote video in the call panel; Ctrl+Shift+Enter gives it the whole
 window, F11 the whole screen (as for a shared desktop, below).
 
 ## Desktop share
@@ -272,6 +274,9 @@ instead. **Channel**: stable releases only (the default), or pre-releases too
 with `scripts/release.sh "notes" --pre`.
 
 ## Log
+- 0.5.2.dev7 (2026-11-17): an incoming call is asked about over the window; the call's
+  buttons are one bar (floating over the picture when there is one: that part is not
+  yet seen with a real video).
 - 0.5.2.dev6 (2026-11-17): a picture viewer inside Joma.
 - 0.5.2.dev5 (2026-11-17): reply to a message, react to it, edit and delete your own.
   Fixed: an edited message showed its old text (also messages edited in the Jami app).

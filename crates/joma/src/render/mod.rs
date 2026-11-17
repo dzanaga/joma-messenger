@@ -474,6 +474,7 @@ impl Render for Joma {
             .children(self.menu_overlay(&t, cx))
             .children(self.keys_overlay(&t, cx))
             .children(self.viewer_overlay(&t, cx))
+            .children(self.incoming_overlay(&t, cx))
             .children(self.toast(&t))
             .children(picker)
             .children(profile)

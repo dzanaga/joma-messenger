@@ -167,48 +167,23 @@ impl Joma {
         let joma_sharing = self.desk.shared(&call.id).is_some();
         let joma_badge = if call.peer_joma { "joma" } else { "jami" };
 
+        // An incoming call is asked about over the whole window (`incoming_overlay`).
         if call.state == CallState::Incoming {
-            return Some(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .px(px(12.))
-                    .py(px(10.))
-                    .bg(t.accent_bg)
-                    .border_b_1()
-                    .border_color(t.accent)
-                    .child(
-                        div()
-                            .flex()
-                            .gap(px(8.))
-                            .child(div().text_color(t.accent).child(G_PHONE))
-                            .child(div().text_color(t.bright).child(format!(
-                                "{name} is calling{}",
-                                if call.video { " (video)" } else { "" }
-                            ))),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .gap(px(6.))
-                            .child(button("acc-audio", G_PHONE, "answer", t, true).on_click(cx.listener(|this, _, _, cx| this.accept_call(false, cx))))
-                            .when(call.video, |d| {
-                                d.child(button("acc-video", G_VIDEO, "with video", t, false).on_click(cx.listener(|this, _, _, cx| this.accept_call(true, cx))))
-                            })
-                            .child(
-                                button("refuse", G_TIMES, "decline", t, false)
-                                    .text_color(t.red)
-                                    .on_click(cx.listener(|this, _, _, cx| this.hang_up(cx))),
-                            ),
-                    )
-                    .into_any_element(),
-            );
+            return None;
         }
 
+        // The call's buttons as one bar: over the picture when there is one, else in
+        // the panel's first line.
         let controls = div()
             .flex()
-            .gap(px(6.))
+            .flex_none()
+            .items_center()
+            .gap(px(2.))
+            .p(px(3.))
+            .bg(t.bar.opacity(0.92))
+            .border_1()
+            .border_color(t.border)
+            .rounded(px(radius() + 4.))
             .child(
                 button("mute", if call.muted_audio { G_MIC_OFF } else { G_MIC }, "", t, call.muted_audio)
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_mute(false, cx))),
@@ -245,21 +220,28 @@ impl Joma {
             .child(div().px(px(4.)).border_1().border_color(t.border).rounded(px(radius())).text_color(if call.peer_joma { t.accent } else { t.muted }).child(joma_badge))
             .when_some(sharing.filter(|_| !joma_sharing), |d, s| d.child(labelled(G_BOLT, s).text_color(t.yellow)));
 
+        let stage = self.stage_source().filter(|_| self.viewing_key().is_none_or(|k| k == call.id));
+        let floating = stage.is_some();
+        let mut controls = Some(controls);
         let mut panel = div()
             .flex()
             .flex_col()
             .border_b_1()
             .border_color(t.border)
             .bg(t.panel)
-            .child(div().flex().flex_wrap().items_center().justify_between().gap(px(6.)).px(px(12.)).py(px(6.)).child(status).child(controls));
+            .child(div().flex().flex_wrap().items_center().justify_between().gap(px(6.)).px(px(12.)).py(px(6.)).min_h(px(44.)).child(status).children(controls.take_if(|_| !floating)));
         if let Some(strip) = self.share_strip(t, &call.id, cx) {
             panel = panel.child(strip);
         }
         // The stage: the peer's desktop (Joma), else their video. A share without a call
         // has its own panel.
-        let stage = self.stage_source().filter(|_| self.viewing_key().is_none_or(|k| k == call.id));
         if let Some((image, pointer, info)) = stage {
-            let stage = self.stage_canvas(t, image, pointer, cx);
+            let stage = div()
+                .relative()
+                .size_full()
+                .child(self.stage_canvas(t, image, pointer, cx))
+                .child(div().absolute().bottom(px(12.)).left_0().right_0().flex().justify_center().children(controls.take()))
+                .into_any_element();
             panel = panel
                 .when(self.stage, |d| d.flex_1())
                 .child(self.stage_box(t, stage, cx))
@@ -268,5 +250,73 @@ impl Joma {
             panel = panel.child(div().px(px(12.)).pb(px(6.)).text_size(px(t.size - 2.)).text_color(t.yellow).child(note));
         }
         Some(panel.into_any_element())
+    }
+
+    /// Someone is calling: asked over the whole window, whatever it shows.
+    pub(super) fn incoming_overlay(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let call = self.model.calls.values().find(|c| c.state == CallState::Incoming)?.clone();
+        let name = self.model.name_of(&call.peer);
+        let key = crate::model::bare_uri(&call.peer).to_owned();
+        let picture = self.model.avatars.get(&key).cloned();
+        let big = |id: &'static str, icon: Icon, label: &'static str, color: Hsla| {
+            div()
+                .id(id)
+                .flex()
+                .items_center()
+                .gap(px(S2))
+                .h(px(36.))
+                .px(px(S3))
+                .rounded(px(radius()))
+                .border_1()
+                .border_color(color.opacity(0.6))
+                .bg(color.opacity(0.14))
+                .text_color(color)
+                .cursor_pointer()
+                .hover(|d| d.bg(color.opacity(0.28)))
+                .child(icon)
+                .child(label)
+        };
+        Some(
+            div()
+                .id("incoming")
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(gpui::black().opacity(0.6))
+                .occlude()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap(px(S3))
+                        .w(px(380.))
+                        .max_w_full()
+                        .m(px(S3))
+                        .p(px(24.))
+                        .bg(t.panel)
+                        .border_1()
+                        .border_color(t.accent)
+                        .rounded(px(radius()))
+                        .shadow_lg()
+                        .child(avatar(t, picture, &key, &name, 72., None))
+                        .child(div().text_size(px(t.size + 4.)).font_weight(FontWeight::BOLD).text_color(t.bright).child(name))
+                        .child(div().text_color(t.muted).child(if call.video { "video call · ctrl+shift+a answers" } else { "is calling · ctrl+shift+a answers" }))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_wrap()
+                                .justify_center()
+                                .gap(px(S2))
+                                .pt(px(S2))
+                                .child(big("in-answer", G_PHONE, "answer", t.green).on_click(cx.listener(|this, _, _, cx| this.accept_call(false, cx))))
+                                .when(call.video, |d| d.child(big("in-video", G_VIDEO, "with video", t.accent).on_click(cx.listener(|this, _, _, cx| this.accept_call(true, cx)))))
+                                .child(big("in-decline", G_TIMES, "decline", t.red).on_click(cx.listener(|this, _, _, cx| this.decline_incoming(cx)))),
+                        ),
+                )
+                .into_any_element(),
+        )
     }
 }
