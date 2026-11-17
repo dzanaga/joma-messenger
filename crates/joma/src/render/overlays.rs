@@ -197,6 +197,55 @@ impl Joma {
         )
     }
 
+    /// A picture of the conversation, as large as the window allows: before and after,
+    /// the system's viewer, close (Esc, or a click beside it).
+    pub(super) fn viewer_overlay(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let path = self.viewer.clone()?;
+        let all = self.pictures();
+        let at = all.iter().position(|(p, _)| *p == path);
+        let name = at.map(|i| all[i].1.clone()).unwrap_or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+        let count = match at {
+            Some(i) if all.len() > 1 => format!("{} of {} · {name}", i + 1, all.len()),
+            _ => name,
+        };
+        let outside = path.clone();
+        let close = |this: &mut Joma, cx: &mut Context<Joma>| {
+            this.viewer = None;
+            cx.notify();
+        };
+        Some(
+            div()
+                .id("viewer")
+                .absolute()
+                .inset_0()
+                .flex()
+                .flex_col()
+                .bg(gpui::black().opacity(0.88))
+                .occlude()
+                .on_click(cx.listener(move |this, _, _, cx| close(this, cx)))
+                .child(
+                    div()
+                        .id("viewer-bar")
+                        .flex()
+                        .flex_none()
+                        .items_center()
+                        .gap(px(S1))
+                        .h(px(40.))
+                        .px(px(S3))
+                        .on_click(|_, _, cx| cx.stop_propagation())
+                        .child(div().flex_1().min_w(px(0.)).truncate().text_color(t.text).child(count))
+                        .when(all.len() > 1, |d| {
+                            d.child(button("viewer-prev", G_BACK, "", t, false).on_click(cx.listener(|this, _, _, cx| this.viewer_step(-1, cx))))
+                                .child(button("viewer-next", G_FORWARD, "", t, false).on_click(cx.listener(|this, _, _, cx| this.viewer_step(1, cx))))
+                        })
+                        .child(button("viewer-out", G_EXPAND, "open outside", t, false).on_click(move |_, _, _| Joma::open_outside(&outside)))
+                        .child(button("viewer-close", G_TIMES, "", t, false).on_click(cx.listener(move |this, _, _, cx| close(this, cx)))),
+                )
+                .child(div().flex_1().min_h(px(0.)).p(px(S3)).child(gpui::img(path).size_full().object_fit(ObjectFit::Contain)))
+                .into_any_element(),
+        )
+    }
+
     /// Our picture: choose one, draw one in pixels, or remove it.
     pub(super) fn profile_overlay(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
         let p = self.profile_edit.as_ref()?;

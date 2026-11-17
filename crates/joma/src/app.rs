@@ -394,6 +394,8 @@ pub struct Joma {
     pub flash: Option<(String, Instant)>,
     /// The menu that is open: ours (the picture in the tab strip) or the conversation's.
     pub menu: Option<Menu>,
+    /// The picture shown large, over the window.
+    pub viewer: Option<std::path::PathBuf>,
     /// The message whose actions show (reply, react, edit, delete).
     pub msg_actions: Option<String>,
     /// The message the next one answers, or the one being edited.
@@ -679,6 +681,7 @@ impl Joma {
             previews: HashMap::new(),
             flash: None,
             menu: None,
+            viewer: None,
             msg_actions: None,
             replying: None,
             editing: None,
@@ -2722,6 +2725,7 @@ impl Joma {
             "menu" => self.menu = Some(Menu::Me),
             "chat-menu" => self.menu = Some(Menu::Chat),
             "emoji" => self.emoji_open = !self.emoji_open,
+            "viewer" => self.viewer = self.pictures().pop().map(|(p, _)| p),
             // The actions of the newest text message of the open conversation.
             "msg" => {
                 self.msg_actions = self.selected.as_ref().and_then(|c| self.model.conversations.get(c)).and_then(|c| c.messages.iter().rev().find(|m| m.kind == crate::model::MsgKind::Text)).map(|m| m.id.clone());
@@ -2730,6 +2734,7 @@ impl Joma {
             "close" => {
                 self.settings = None;
                 self.profile_edit = None;
+                self.viewer = None;
                 self.keys_open = false;
                 self.menu = None;
                 self.emoji_open = false;
@@ -4275,7 +4280,37 @@ impl Joma {
     }
 
     /// A file message was clicked: open what was downloaded, or download it.
+    /// The pictures of the open conversation that are on disk, oldest first.
+    pub fn pictures(&self) -> Vec<(std::path::PathBuf, String)> {
+        let Some(conv) = self.selected.as_ref().and_then(|c| self.model.conversations.get(c)) else { return Vec::new() };
+        conv.messages
+            .iter()
+            .filter_map(|m| m.file.as_ref())
+            .filter_map(|f| self.saved_file(&conv.id, &f.id).map(|p| (p, f.name.clone())))
+            .filter(|(p, _)| crate::render::is_picture(p))
+            .collect()
+    }
+
+    /// Show the picture before or after the one in the viewer.
+    pub fn viewer_step(&mut self, by: isize, cx: &mut Context<Self>) {
+        let all = self.pictures();
+        let Some(i) = self.viewer.as_ref().and_then(|v| all.iter().position(|(p, _)| p == v)) else { return };
+        let j = (i as isize + by).clamp(0, all.len() as isize - 1) as usize;
+        self.viewer = Some(all[j].0.clone());
+        cx.notify();
+    }
+
+    pub fn open_outside(path: &std::path::Path) {
+        let _ = std::process::Command::new("xdg-open").arg(path).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+    }
+
     pub fn file_clicked(&mut self, conv: &str, interaction: &str, file: &FileRef, cx: &mut Context<Self>) {
+        // A picture opens in Joma's own viewer.
+        if let Some(p) = self.saved_file(conv, &file.id).filter(|p| crate::render::is_picture(p)) {
+            self.viewer = Some(p);
+            cx.notify();
+            return;
+        }
         if let Some(p) = self.saved_file(conv, &file.id) {
             let _ = std::process::Command::new("xdg-open")
                 .arg(p)

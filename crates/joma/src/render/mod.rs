@@ -359,6 +359,10 @@ impl Render for Joma {
             .on_action(cx.listener(|this, _: &Search, window, cx| this.set_mode(Mode::Search, window, cx)))
             .on_action(cx.listener(|this, _: &Cancel, window, cx| {
                 // Esc closes a menu, the keys, the picker or the profile, then leaves full screen.
+                if this.viewer.take().is_some() {
+                    cx.notify();
+                    return;
+                }
                 if this.menu.is_some() || this.keys_open {
                     this.menu = None;
                     this.keys_open = false;
@@ -469,6 +473,7 @@ impl Render for Joma {
             .child(body)
             .children(self.menu_overlay(&t, cx))
             .children(self.keys_overlay(&t, cx))
+            .children(self.viewer_overlay(&t, cx))
             .children(self.toast(&t))
             .children(picker)
             .children(profile)
@@ -521,7 +526,7 @@ fn picture_box(path: &std::path::Path, max_w: f32, max_h: f32) -> (f32, f32) {
 }
 
 /// A file Joma shows as a picture.
-fn is_picture(path: &std::path::Path) -> bool {
+pub fn is_picture(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"))

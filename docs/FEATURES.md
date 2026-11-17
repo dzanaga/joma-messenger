@@ -156,7 +156,8 @@ goes on. `joma watch-together <to> <url>` starts one from the command line.
 Paste a picture (Ctrl+V), paste files copied in the file manager, or drop files on the
 conversation: they wait above the composer (✕ removes one) and Enter sends them, after
 the text if any. Pictures (png, jpg, gif, webp, bmp) show in the conversation once here;
-a click opens them. Pasted pictures are kept in `~/.cache/joma/pasted` (Jami sends files
+a click shows one large inside Joma, with before / after through the conversation's
+pictures, **open outside** (the system's viewer) and Esc to close. Pasted pictures are kept in `~/.cache/joma/pasted` (Jami sends files
 from where they are).
 Send with the clip button in a conversation or `joma send-file`. Received files up to 20 MB download by
 themselves into `~/Downloads/joma/` (a desktop notification says when); larger ones show
@@ -271,6 +272,7 @@ instead. **Channel**: stable releases only (the default), or pre-releases too
 with `scripts/release.sh "notes" --pre`.
 
 ## Log
+- 0.5.2.dev6 (2026-11-17): a picture viewer inside Joma.
 - 0.5.2.dev5 (2026-11-17): reply to a message, react to it, edit and delete your own.
   Fixed: an edited message showed its old text (also messages edited in the Jami app).
 - 0.5.2.dev4 (2026-11-17): update notice in the tab strip, update and restart from
