@@ -24,6 +24,9 @@ pub enum Event {
     SwarmLoaded { request: u32, account: String, conversation: String, messages: Vec<SwarmMessage> },
     MessageReceived { account: String, conversation: String, message: SwarmMessage },
     MessageUpdated { account: String, conversation: String, message: SwarmMessage },
+    /// An emoji was put on `message` (`reaction`: id, author, body), or taken back.
+    ReactionAdded { account: String, conversation: String, message: String, reaction: Details },
+    ReactionRemoved { account: String, conversation: String, message: String, reaction: String },
     ConversationReady { account: String, conversation: String },
     ConversationRemoved { account: String, conversation: String },
     ConversationRequest { account: String, conversation: String, metadata: Details },
@@ -128,6 +131,8 @@ impl Event {
             "SwarmMessageUpdated" => {
                 Event::MessageUpdated { account: s(a, 0), conversation: s(a, 1), message: de(a, 2) }
             }
+            "ReactionAdded" => Event::ReactionAdded { account: s(a, 0), conversation: s(a, 1), message: s(a, 2), reaction: de(a, 3) },
+            "ReactionRemoved" => Event::ReactionRemoved { account: s(a, 0), conversation: s(a, 1), message: s(a, 2), reaction: s(a, 3) },
             "ConversationReady" => Event::ConversationReady { account: s(a, 0), conversation: s(a, 1) },
             "ConversationRemoved" => Event::ConversationRemoved { account: s(a, 0), conversation: s(a, 1) },
             "ConversationRequestReceived" => {

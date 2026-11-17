@@ -248,6 +248,8 @@ registerHandlers()
     FORWARD(ConversationSignal::SwarmLoaded);
     FORWARD(ConversationSignal::SwarmMessageReceived);
     FORWARD(ConversationSignal::SwarmMessageUpdated);
+    FORWARD(ConversationSignal::ReactionAdded);
+    FORWARD(ConversationSignal::ReactionRemoved);
     FORWARD(ConversationSignal::ConversationReady);
     FORWARD(ConversationSignal::ConversationRemoved);
     FORWARD(ConversationSignal::ConversationRequestReceived);

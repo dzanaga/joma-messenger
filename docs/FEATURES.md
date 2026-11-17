@@ -110,6 +110,19 @@ Jami username or ID (Ctrl+N). History, typing indicator, unread counts, desktop
 notifications when the window is not active. Names come from peers' profiles and the
 name server.
 
+## Replies, reactions, edits
+Click a message (right click a file or picture) for what can be done with it:
+- **reply**: the message field shows what you answer (✕ or Esc stops); your message
+  carries a quote of it;
+- **👍 ❤️ 😂 😮 😢 🙏**: a reaction, shown under the message with a count; a click on
+  yours takes it back;
+- **edit** (your own): the text returns to the message field; Enter replaces it, and
+  the message says "edited";
+- **delete** (your own, click twice): gone for everyone; its place says "message
+  deleted".
+
+These are Jami's own, so the Jami app shows them too.
+
 ## Voice and video messages, emoji, YouTube
 Beside the message box:
 - ☺ **emoji**: a grid; a click types one at the cursor.
@@ -258,6 +271,8 @@ instead. **Channel**: stable releases only (the default), or pre-releases too
 with `scripts/release.sh "notes" --pre`.
 
 ## Log
+- 0.5.2.dev5 (2026-11-17): reply to a message, react to it, edit and delete your own.
+  Fixed: an edited message showed its old text (also messages edited in the Jami app).
 - 0.5.2.dev4 (2026-11-17): update notice in the tab strip, update and restart from
   settings → about (through mise), stable or pre-release channel. Tested with a made-up
   release list; the install itself waits for a real newer release.

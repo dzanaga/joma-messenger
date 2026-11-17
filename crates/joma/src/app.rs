@@ -394,6 +394,11 @@ pub struct Joma {
     pub flash: Option<(String, Instant)>,
     /// The menu that is open: ours (the picture in the tab strip) or the conversation's.
     pub menu: Option<Menu>,
+    /// The message whose actions show (reply, react, edit, delete).
+    pub msg_actions: Option<String>,
+    /// The message the next one answers, or the one being edited.
+    pub replying: Option<String>,
+    pub editing: Option<String>,
     /// A newer version GitHub has, for the channel chosen.
     pub update: Option<String>,
     pub updating: bool,
@@ -674,6 +679,9 @@ impl Joma {
             previews: HashMap::new(),
             flash: None,
             menu: None,
+            msg_actions: None,
+            replying: None,
+            editing: None,
             update: None,
             updating: false,
             update_checked: None,
@@ -2626,6 +2634,75 @@ impl Joma {
         cx.notify();
     }
 
+    // ---- Replies, reactions, edits ---------------------------------------------------
+
+    pub fn toggle_msg_actions(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.msg_actions = if self.msg_actions.as_deref() == Some(id) { None } else { Some(id.to_owned()) };
+        cx.notify();
+    }
+
+    pub fn reply_to(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.replying = Some(id.to_owned());
+        self.editing = None;
+        self.msg_actions = None;
+        self.focus_composer = true;
+        cx.notify();
+    }
+
+    /// Put our message back in the message field to change it.
+    pub fn edit_message(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(text) = self.selected.as_ref().and_then(|c| self.model.conversations.get(c)).and_then(|c| c.messages.iter().find(|m| m.id == id)).map(|m| m.text.clone()) else { return };
+        self.editing = Some(id.to_owned());
+        self.replying = None;
+        self.msg_actions = None;
+        self.composer.update(cx, |c, cx| c.set_text(&text, cx));
+        self.focus_composer = true;
+        cx.notify();
+    }
+
+    /// Take our message back, for everyone (click twice).
+    pub fn delete_message(&mut self, id: &str, cx: &mut Context<Self>) {
+        if !self.armed(&format!("msg:{id}"), "click again to delete the message for everyone", cx) {
+            return;
+        }
+        let Some(conv) = self.selected.clone() else { return };
+        if let Err(e) = joma_jami::edit_message(&self.model.account, &conv, id, "") {
+            self.show_flash(format!("not deleted: {e}"), cx);
+        }
+        self.msg_actions = None;
+        cx.notify();
+    }
+
+    /// Put an emoji on a message, or take ours back when it is there already.
+    pub fn react(&mut self, id: &str, emoji: &str, cx: &mut Context<Self>) {
+        let Some(conv) = self.selected.clone() else { return };
+        let mine = self
+            .model
+            .conversations
+            .get(&conv)
+            .and_then(|c| c.messages.iter().find(|m| m.id == id))
+            .and_then(|m| m.reactions.iter().find(|r| r.emoji == emoji && crate::model::bare_uri(&r.author) == self.model.me))
+            .map(|r| r.id.clone());
+        let r = match mine {
+            Some(reaction) => joma_jami::edit_message(&self.model.account, &conv, &reaction, ""),
+            None => joma_jami::react(&self.model.account, &conv, id, emoji),
+        };
+        if let Err(e) = r {
+            self.show_flash(format!("no reaction: {e}"), cx);
+        }
+        self.msg_actions = None;
+        cx.notify();
+    }
+
+    /// Stop answering or editing.
+    pub fn cancel_reply(&mut self, cx: &mut Context<Self>) {
+        if self.editing.take().is_some() {
+            self.composer.update(cx, |c, cx| c.clear(cx));
+        }
+        self.replying = None;
+        cx.notify();
+    }
+
     /// `joma ui <what>`: open a part of the interface from a script.
     fn ui(&mut self, what: &str, cx: &mut Context<Self>) -> Reply {
         match what {
@@ -2645,6 +2722,10 @@ impl Joma {
             "menu" => self.menu = Some(Menu::Me),
             "chat-menu" => self.menu = Some(Menu::Chat),
             "emoji" => self.emoji_open = !self.emoji_open,
+            // The actions of the newest text message of the open conversation.
+            "msg" => {
+                self.msg_actions = self.selected.as_ref().and_then(|c| self.model.conversations.get(c)).and_then(|c| c.messages.iter().rev().find(|m| m.kind == crate::model::MsgKind::Text)).map(|m| m.id.clone());
+            }
             "quick" => self.quick_open = !self.quick_open,
             "close" => {
                 self.settings = None;
@@ -2963,7 +3044,17 @@ impl Joma {
 
     fn send_text(&mut self, conv: &str, text: &str, cx: &mut Context<Self>) {
         let conv = conv.to_owned();
-        match joma_jami::send_message(&self.model.account, &conv, text.trim_end(), "") {
+        // An edit replaces the message; a reply names the one it answers.
+        if let Some(id) = self.editing.take() {
+            match joma_jami::edit_message(&self.model.account, &conv, &id, text.trim_end()) {
+                Ok(()) => self.composer.update(cx, |c, cx| c.clear(cx)),
+                Err(e) => self.show_flash(format!("not changed: {e}"), cx),
+            }
+            cx.notify();
+            return;
+        }
+        let reply = self.replying.take().unwrap_or_default();
+        match joma_jami::send_message(&self.model.account, &conv, text.trim_end(), &reply) {
             Ok(()) => {
                 self.model.sent(&conv, text.trim_end(), Instant::now());
                 self.composer.update(cx, |c, cx| c.clear(cx));

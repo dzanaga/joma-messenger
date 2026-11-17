@@ -365,6 +365,11 @@ impl Render for Joma {
                     cx.notify();
                     return;
                 }
+                if this.replying.is_some() || this.editing.is_some() || this.msg_actions.is_some() {
+                    this.msg_actions = None;
+                    this.cancel_reply(cx);
+                    return;
+                }
                 if this.settings.is_some() {
                     this.settings = None;
                     cx.notify();

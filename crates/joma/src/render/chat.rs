@@ -3,6 +3,34 @@
 use super::*;
 
 impl Joma {
+    /// Above the message field while answering or editing: what, and a way out.
+    pub(super) fn reply_strip(&self, t: &Theme, conv: &Conversation, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (id, editing) = match (&self.editing, &self.replying) {
+            (Some(id), _) => (id, true),
+            (None, Some(id)) => (id, false),
+            _ => return None,
+        };
+        let m = conv.messages.iter().find(|m| m.id == *id)?;
+        let whom = if crate::model::bare_uri(&m.author) == self.model.me { "yourself".to_owned() } else { self.model.name_of(&m.author) };
+        let line: String = m.text.lines().next().unwrap_or("").chars().take(90).collect();
+        Some(
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(px(S2))
+                .mx(px(S3))
+                .pl(px(S2))
+                .border_l_2()
+                .border_color(t.accent)
+                .text_size(px(t.size - 2.))
+                .child(div().flex_none().text_color(t.accent).child(if editing { "editing".to_owned() } else { format!("replying to {whom}") }))
+                .child(div().flex_1().min_w(px(0.)).truncate().text_color(t.muted).child(line))
+                .child(button("reply-cancel", G_TIMES, "", t, false).on_click(cx.listener(|this, _, _, cx| this.cancel_reply(cx))))
+                .into_any_element(),
+        )
+    }
+
     /// The message field: the text, then attach, emoji, YouTube, voice and video messages
     /// inside it; while recording, the recording's time with send and cancel.
     pub(super) fn composer_row(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
@@ -365,11 +393,41 @@ impl Joma {
             let cells = m.text.lines().map(|l| l.chars().map(|c| if c.is_ascii() { 1. } else { 1.8 }).sum::<f32>()).fold(0., f32::max);
             let inner = self.bubble_max - 22.;
             let wraps = cells * t.size * 0.6 > inner - 8.;
+            let (id_click, id_right) = (m.id.clone(), m.id.clone());
+            let is_text = file.is_none();
             let bubble = div()
+                .id(SharedString::from(format!("bubble-{}", m.id)))
                 .flex()
                 .flex_col()
                 .flex_none()
                 .max_w(px(self.bubble_max))
+                // A click on a text (a right click on anything) shows what can be done
+                // with it: reply, react, edit, delete.
+                .when(is_text && !m.deleted, |d| d.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| this.toggle_msg_actions(&id_click, cx))))
+                .on_mouse_down(MouseButton::Right, cx.listener(move |this, _, _, cx| this.toggle_msg_actions(&id_right, cx)))
+                // What it answers, quoted.
+                .when_some(m.reply_to.clone(), |d, parent| {
+                    let quoted = conv.messages.iter().find(|o| o.id == parent);
+                    let (whom, what) = match quoted {
+                        Some(o) => (
+                            if crate::model::bare_uri(&o.author) == self.model.me { "you".to_owned() } else { self.model.name_of(&o.author) },
+                            if o.deleted { "message deleted".to_owned() } else { o.text.lines().next().unwrap_or("").chars().take(80).collect() },
+                        ),
+                        None => (String::new(), "an earlier message".to_owned()),
+                    };
+                    d.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .mb(px(S1))
+                            .pl(px(S2))
+                            .border_l_2()
+                            .border_color(t.accent.opacity(0.6))
+                            .text_size(px(t.size - 2.))
+                            .when(!whom.is_empty(), |d| d.child(div().text_color(t.accent).child(whom)))
+                            .child(div().max_w(px(self.bubble_max - 40.)).truncate().text_color(t.muted).child(what)),
+                    )
+                })
                 .when(wraps, |d| d.w(px(self.bubble_max)))
                 .px(px(10.))
                 .py(px(5.))
@@ -383,6 +441,7 @@ impl Joma {
                     let yt = if results.is_some() { None } else { crate::media::youtube_id(&m.text) };
                     match results {
                         Some((query, found)) => bubble.child(self.youtube_results(t, &m.id, &query, found, cx)),
+                        None if m.deleted => bubble.child(div().text_color(t.muted).italic().child("message deleted")),
                         None => bubble.child(div().text_color(t.bright).when(wraps, |d| d.w(px(inner))).child(m.text.clone())).when_some(yt, |d, id| d.child(self.youtube_card(t, &id, &m.id, cx))),
                     }
                 }
@@ -436,8 +495,76 @@ impl Joma {
                     )
                 }
             };
-            let bubble = bubble.child(div().flex().justify_end().text_size(px(t.size - 3.5)).text_color(t.muted).child(hm));
-            list = list.child(div().flex().flex_none().w_full().mt(px(if repeat { 3. } else { S2 })).when(me, |d| d.justify_end()).child(bubble));
+            let bubble = bubble.child(div().flex().justify_end().text_size(px(t.size - 3.5)).text_color(t.muted).child(if m.edited { format!("edited · {hm}") } else { hm }));
+            // Reactions under it, one chip per emoji; ours in the accent, a click toggles ours.
+            let mut chips: Vec<(String, usize, bool)> = Vec::new();
+            for r in &m.reactions {
+                let ours = crate::model::bare_uri(&r.author) == self.model.me;
+                match chips.iter_mut().find(|(e, _, _)| *e == r.emoji) {
+                    Some(c) => {
+                        c.1 += 1;
+                        c.2 |= ours;
+                    }
+                    None => chips.push((r.emoji.clone(), 1, ours)),
+                }
+            }
+            let reactions = (!chips.is_empty()).then(|| {
+                let mut row = div().flex().flex_wrap().gap(px(S1));
+                for (i, (emoji, n, ours)) in chips.into_iter().enumerate() {
+                    let (mid, e) = (m.id.clone(), emoji.clone());
+                    row = row.child(
+                        div()
+                            .id(SharedString::from(format!("react-{}-{i}", m.id)))
+                            .flex()
+                            .items_center()
+                            .gap(px(3.))
+                            .h(px(20.))
+                            .px(px(6.))
+                            .rounded(px(radius()))
+                            .border_1()
+                            .border_color(if ours { t.accent.opacity(0.5) } else { t.border })
+                            .when(ours, |d| d.bg(t.accent_bg))
+                            .text_size(px(t.size - 2.))
+                            .cursor_pointer()
+                            .hover(|d| d.bg(t.raised))
+                            .child(emoji)
+                            .when(n > 1, |d| d.child(div().text_color(t.muted).child(n.to_string())))
+                            .on_click(cx.listener(move |this, _, _, cx| this.react(&mid, &e, cx))),
+                    );
+                }
+                row
+            });
+            let actions = (self.msg_actions.as_deref() == Some(m.id.as_str())).then(|| {
+                let mut row = div().flex().flex_wrap().items_center().gap(px(2.)).p(px(2.)).bg(t.panel).border_1().border_color(t.border).rounded(px(radius()));
+                let mid = m.id.clone();
+                row = row.child(button(SharedString::from(format!("act-reply-{}", m.id)), G_REPLY, "reply", t, false).on_click(cx.listener(move |this, _, _, cx| this.reply_to(&mid, cx))));
+                for (i, e) in ["👍", "❤️", "😂", "😮", "😢", "🙏"].into_iter().enumerate() {
+                    let mid = m.id.clone();
+                    row = row.child(
+                        div()
+                            .id(SharedString::from(format!("act-e{i}-{}", m.id)))
+                            .size(px(t.size + 13.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(radius()))
+                            .cursor_pointer()
+                            .hover(|d| d.bg(t.raised))
+                            .child(e)
+                            .on_click(cx.listener(move |this, _, _, cx| this.react(&mid, e, cx))),
+                    );
+                }
+                if me && is_text && !m.deleted {
+                    let (m1, m2) = (m.id.clone(), m.id.clone());
+                    let armed = self.is_armed(&format!("msg:{}", m.id));
+                    row = row
+                        .child(button(SharedString::from(format!("act-edit-{}", m.id)), G_PENCIL, "edit", t, false).on_click(cx.listener(move |this, _, _, cx| this.edit_message(&m1, cx))))
+                        .child(button(SharedString::from(format!("act-del-{}", m.id)), G_TRASH, if armed { "sure?" } else { "delete" }, t, armed).on_click(cx.listener(move |this, _, _, cx| this.delete_message(&m2, cx))));
+                }
+                row
+            });
+            let col = div().flex().flex_col().gap(px(3.)).when(me, |d| d.items_end()).child(bubble).children(reactions).children(actions);
+            list = list.child(div().flex().flex_none().w_full().mt(px(if repeat { 3. } else { S2 })).when(me, |d| d.justify_end()).child(col));
         }
         if conv.composing {
             list = list.child(div().pt(px(S1)).text_size(px(t.size - 2.)).text_color(t.muted).child("typing…"));
@@ -597,6 +724,7 @@ impl Joma {
                     .when(!conv.request, |d| {
                         d.children(self.emoji_popover(t, cx))
                             .children(self.attachment_strip(t, &conv.id, cx))
+                            .children(self.reply_strip(t, &conv, cx))
                             .child(self.composer_row(t, cx))
                     })
             })

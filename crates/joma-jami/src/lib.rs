@@ -339,6 +339,17 @@ pub fn send_message(account: &str, conversation: &str, text: &str, reply_to: &st
     call("sendMessage", json!([account, conversation, text, reply_to, 0])).map(drop)
 }
 
+/// Replace the text of our message `message` (an empty text deletes it; the same on a
+/// reaction takes it back).
+pub fn edit_message(account: &str, conversation: &str, message: &str, text: &str) -> Result<()> {
+    call("sendMessage", json!([account, conversation, text, message, 1])).map(drop)
+}
+
+/// React to `message` with an emoji.
+pub fn react(account: &str, conversation: &str, message: &str, emoji: &str) -> Result<()> {
+    call("sendMessage", json!([account, conversation, emoji, message, 2])).map(drop)
+}
+
 pub fn set_displayed(account: &str, conversation: &str, message: &str) -> Result<bool> {
     typed("setMessageDisplayed", json!([account, format!("swarm:{conversation}"), message, 3]))
 }

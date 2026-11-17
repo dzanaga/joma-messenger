@@ -16,6 +16,20 @@ pub struct Msg {
     pub kind: MsgKind,
     /// The file a data-transfer message offers.
     pub file: Option<FileRef>,
+    /// The message this one answers.
+    pub reply_to: Option<String>,
+    pub reactions: Vec<Reaction>,
+    pub edited: bool,
+    /// Its author took it back: the place stays, the text is gone.
+    pub deleted: bool,
+}
+
+/// An emoji someone put on a message; `id` is what takes it back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reaction {
+    pub id: String,
+    pub author: String,
+    pub emoji: String,
 }
 
 /// A file sent into a conversation; `id` is what the daemon downloads it by.
@@ -41,9 +55,14 @@ impl Msg {
         let mut file = None;
         let (text, kind) = match m.kind.as_str() {
             "text/plain" => {
-                // An edited or deleted message keeps its id; the newest edition wins.
-                let text = m.editions.first().and_then(|e| e.get("body")).map(String::as_str).unwrap_or(m.text());
+                // An edited or deleted message keeps its id. Its body is the current text
+                // (empty once deleted); `editions` holds the texts it replaced.
+                let text = m.text();
                 if text.is_empty() && m.body.contains_key("edit") {
+                    return None;
+                }
+                // A reaction is a message of its own on the one it is put on.
+                if m.body.get("react-to").is_some_and(|r| !r.is_empty()) {
                     return None;
                 }
                 (text.to_owned(), MsgKind::Text)
@@ -79,7 +98,24 @@ impl Msg {
             "initial" => ("conversation started".to_owned(), MsgKind::Event),
             _ => return None,
         };
-        Some(Msg { id: m.id.clone(), author: m.author().to_owned(), text, ts: m.timestamp(), kind, file })
+        let reactions = m
+            .reactions
+            .iter()
+            .filter_map(|r| Some(Reaction { id: r.get("id")?.clone(), author: r.get("author").cloned().unwrap_or_default(), emoji: r.get("body").filter(|b| !b.is_empty())?.clone() }))
+            .collect();
+        let deleted = kind == MsgKind::Text && text.is_empty();
+        Some(Msg {
+            id: m.id.clone(),
+            author: m.author().to_owned(),
+            text,
+            ts: m.timestamp(),
+            kind,
+            file,
+            reply_to: m.body.get("reply-to").filter(|r| !r.is_empty()).cloned(),
+            reactions,
+            edited: !m.editions.is_empty() && !deleted,
+            deleted,
+        })
     }
 }
 
@@ -447,6 +483,22 @@ impl Model {
                     ch.any = true;
                 }
             }
+            Event::ReactionAdded { account, conversation, message, reaction } if *account == self.account => {
+                if let Some(m) = self.conversations.get_mut(conversation).and_then(|c| c.messages.iter_mut().find(|m| m.id == *message)) {
+                    if let (Some(id), Some(emoji)) = (reaction.get("id"), reaction.get("body").filter(|b| !b.is_empty())) {
+                        if !m.reactions.iter().any(|r| r.id == *id) {
+                            m.reactions.push(Reaction { id: id.clone(), author: reaction.get("author").cloned().unwrap_or_default(), emoji: emoji.clone() });
+                        }
+                        ch.any = true;
+                    }
+                }
+            }
+            Event::ReactionRemoved { account, conversation, message, reaction } if *account == self.account => {
+                if let Some(m) = self.conversations.get_mut(conversation).and_then(|c| c.messages.iter_mut().find(|m| m.id == *message)) {
+                    m.reactions.retain(|r| r.id != *reaction);
+                    ch.any = true;
+                }
+            }
             Event::MessageReceived { account, conversation, message } | Event::MessageUpdated { account, conversation, message }
                 if *account == self.account =>
             {
@@ -641,7 +693,7 @@ mod tests {
         m.apply(&Event::MessageReceived { account: "acc".into(), conversation: "c1".into(), message: swarm("1", "bob", "hi", 5) });
         // Unblocking made a new, empty one-to-one with bob, newer than c1's message.
         m.set_conversation("c2", &Details::new(), &[[("uri".to_string(), "bob".to_string())].into()], false);
-        m.conversations.get_mut("c2").unwrap().messages.push(Msg { id: "e".into(), author: "me".into(), text: "joined".into(), ts: 9, kind: MsgKind::Event, file: None });
+        m.conversations.get_mut("c2").unwrap().messages.push(Msg { id: "e".into(), author: "me".into(), text: "joined".into(), ts: 9, kind: MsgKind::Event, file: None, reply_to: None, reactions: Vec::new(), edited: false, deleted: false });
         assert_eq!(m.conversation_with("bob").unwrap().id, "c1");
         assert!(m.is_duplicate(&m.conversations["c2"]) && !m.is_duplicate(&m.conversations["c1"]));
         assert_eq!(m.resolve("bob").unwrap().id, "c1");
