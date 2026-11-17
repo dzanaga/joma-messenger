@@ -136,7 +136,7 @@ impl Joma {
                 .my(px(4.))
                 .p(px(6.))
                 .border_1()
-                .border_color(t.yellow)
+                .border_color(t.yellow).rounded(px(radius()))
                 .child(div().text_color(t.bright).child(format!("A device at {} asks for your account.", if d.peer.is_empty() { "?" } else { &d.peer })))
                 .child(div().text_color(t.muted).text_size(px(t.size - 2.)).child("Send it only if it is yours: it gets your account and history."))
                 .child(
@@ -166,7 +166,7 @@ impl Joma {
                 .flex()
                 .items_center()
                 .gap(px(6.))
-                .child(div().flex_1().min_w(px(0.)).px(px(6.)).py(px(3.)).bg(t.bar).border_1().border_color(t.border).text_color(t.bright).truncate().child(text.to_owned()))
+                .child(div().flex_1().min_w(px(0.)).px(px(6.)).py(px(3.)).bg(t.bar).border_1().border_color(t.border).rounded(px(radius())).text_color(t.bright).truncate().child(text.to_owned()))
                 .child(button(id, G_COPY, "", t, false).on_click(cx.listener(move |this, _, _, cx| {
                     cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.clone()));
                     this.show_flash("copied", cx);
@@ -187,7 +187,7 @@ impl Joma {
             .my(px(8.))
             .p(px(10.))
             .border_1()
-            .border_color(t.border)
+            .border_color(t.border).rounded(px(radius()))
             .bg(t.bg)
             .child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child("Add a device"))
             .child(step("1", "On the new device, install Joma and run (or open Joma and choose “link to your account”):"))
@@ -253,9 +253,9 @@ impl Joma {
                 .my(px(4.))
                 .p(px(8.))
                 .border_1()
-                .border_color(t.border)
+                .border_color(t.border).rounded(px(radius()))
                 .opacity(0.6)
-                .child(div().size(px(32.)).rounded(px(3.)).bg(t.accent_bg).text_color(t.accent).flex().items_center().justify_center().child(G_ROBOT))
+                .child(div().size(px(32.)).rounded(px(radius())).bg(t.accent_bg).text_color(t.accent).flex().items_center().justify_center().child(G_ROBOT))
                 .child(
                     div()
                         .flex()
@@ -372,10 +372,10 @@ impl Joma {
                 .flex()
                 .flex_col()
                 .gap(px(3.))
-                .px(px(10.))
+                .mx(px(S1))
+                .px(px(S2))
                 .py(px(6.))
-                .border_l_2()
-                .border_color(if selected { t.accent } else { gpui::transparent_black() })
+                .rounded(px(radius()))
                 .when(selected, |d| d.bg(t.accent_bg))
                 .hover(|d| d.bg(t.raised))
                 .cursor_pointer()

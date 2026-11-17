@@ -91,7 +91,7 @@ pub fn avatar(t: &Theme, picture: Option<std::path::PathBuf>, key: &str, name: &
                 .justify_center()
                 .bg(color.opacity(0.22))
                 .border_1()
-                .border_color(color.opacity(0.5))
+                .border_color(color.opacity(0.5)).rounded(px(radius()))
                 .text_color(color)
                 .text_size(px((side * 0.48).max(9.)))
                 .font_weight(FontWeight::BOLD)
@@ -126,7 +126,7 @@ pub struct DragPreview {
 
 impl Render for DragPreview {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div().px(px(10.)).py(px(4.)).bg(self.bg).border_1().border_color(self.border).text_color(self.fg).child(self.title.clone())
+        div().px(px(10.)).py(px(4.)).bg(self.bg).border_1().border_color(self.border).rounded(px(radius())).text_color(self.fg).child(self.title.clone())
     }
 }
 
@@ -303,9 +303,11 @@ impl Render for Joma {
         let full = if self.fullscreen { self.fullscreen_stage(&t, cx) } else { None };
         let picker = self.picker_overlay(&t, cx);
         let profile = self.profile_overlay(&t, cx);
-        let settings = self.settings_overlay(&t, cx);
+        let settings = if self.gate == Gate::Ready && !self.fullscreen { self.settings_page(&t, cx) } else { None };
         let body = if let Some(full) = full {
             full
+        } else if let Some(page) = settings {
+            page
         } else if self.gate == Gate::Ready && self.narrow {
             let chat = self.narrow_chat && self.selected.is_some();
             div()
@@ -465,7 +467,6 @@ impl Render for Joma {
             .children(self.toast(&t))
             .children(picker)
             .children(profile)
-            .children(settings)
     }
 }
 

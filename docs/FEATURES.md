@@ -32,8 +32,10 @@ account from this machine: two clicks when your other devices keep it, else typi
 `delete`, since an account no other device has is lost for good.
 
 ## Settings
-The sliders icon in the tab strip: rounded or square corners; the version shown or
-hidden; microphone, speakers and the device that rings;
+The sliders icon in the tab strip opens a page in place of the list and the
+conversation (the icon again, ✕ or Esc closes it), with sections on the left:
+**interface** (rounded or square corners; the version shown or hidden), **audio**,
+**video**, **desktop share**, **about** (version, account, keys). Audio and video: microphone, speakers and the device that rings;
 noise and echo removal (auto, Jami's, the system's, off) and automatic gain; the camera,
 its resolution and frame rate; call quality (auto lets Jami adapt; low, medium, high
 fix the video bitrate at 0.5, 1.5 or 4 Mb/s, applied again at every start since the
@@ -246,6 +248,9 @@ when mise has Joma here, since the two would compete and the launcher would star
 whichever ran last.
 
 ## Log
+- 0.5.2.dev3 (2026-11-17): settings as a page with sections; rounded corners on every
+  box; contacts rows like the chat rows; a long conversation no longer pushes the
+  message field out of its panel.
 - 0.5.2.dev2 (2026-11-17): the person
   sharing can use the laser and the pen too (**laser**, **pen** and colours in the
   share strip; the pointer then draws on the shared screen, a right click there gives it

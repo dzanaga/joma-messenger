@@ -68,14 +68,14 @@ impl Joma {
                     .items_center()
                     .justify_center()
                     .text_size(px(t.size + 5.))
-                    .rounded(px(3.))
+                    .rounded(px(radius()))
                     .cursor_pointer()
                     .hover(|d| d.bg(t.raised))
                     .child(e2)
                     .on_click(cx.listener(move |this, _, _, cx| this.insert_emoji(e2, cx))),
             );
         }
-        Some(div().mx(px(12.)).mt(px(6.)).p(px(6.)).border_1().border_color(t.border).bg(t.panel).max_h(px(200.)).child(div().id("emoji-scroll").overflow_y_scroll().max_h(px(188.)).child(grid)).into_any_element())
+        Some(div().mx(px(12.)).mt(px(6.)).p(px(6.)).border_1().border_color(t.border).rounded(px(radius())).bg(t.panel).max_h(px(200.)).child(div().id("emoji-scroll").overflow_y_scroll().max_h(px(188.)).child(grid)).into_any_element())
     }
 
     /// A YouTube link's card: thumbnail, title and channel; a click opens it.
@@ -92,7 +92,7 @@ impl Joma {
             .max_w_full()
             .p(px(6.))
             .border_1()
-            .border_color(t.border)
+            .border_color(t.border).rounded(px(radius()))
             .border_l_2()
             .bg(t.panel)
             .cursor_pointer()
@@ -164,7 +164,7 @@ impl Joma {
                 .gap(px(6.))
                 .p(px(4.))
                 .border_1()
-                .border_color(t.border)
+                .border_color(t.border).rounded(px(radius()))
                 .bg(t.panel)
                 .child(if is_picture(path) {
                     div().size(px(56.)).child(gpui::img(path.clone()).size(px(56.)).object_fit(ObjectFit::Contain)).into_any_element()
@@ -289,7 +289,7 @@ impl Joma {
                     .gap(px(8.))
                     .p(px(4.))
                     .border_1()
-                    .border_color(t.border)
+                    .border_color(t.border).rounded(px(radius()))
                     .bg(t.panel)
                     .child(
                         div()
@@ -336,7 +336,7 @@ impl Joma {
     /// The conversation as bubbles: ours on the right on the accent's tint, the others'
     /// on the left; what happened (joined, a call) as a quiet centred line.
     pub(super) fn messages(&self, t: &Theme, conv: &Conversation, cx: &mut Context<Self>) -> AnyElement {
-        let mut list = div().id("messages").flex().flex_col().flex_1().overflow_y_scroll().track_scroll(&self.messages_scroll).px(px(14.)).py(px(S2));
+        let mut list = div().id("messages").flex().flex_col().flex_1().min_h(px(0.)).overflow_y_scroll().track_scroll(&self.messages_scroll).px(px(14.)).py(px(S2));
         let group = conv.peers.len() > 1;
         let mut last_day = None;
         let mut last_author = String::new();
@@ -455,6 +455,7 @@ impl Joma {
                 .flex()
                 .flex_col()
                 .flex_1()
+                .min_h(px(0.))
                 .when_some(call_panel, |d, p| d.child(p))
                 .children(direct)
                 .children(watch)
@@ -582,6 +583,7 @@ impl Joma {
             .flex_col()
             .flex_1()
             .min_w(px(0.))
+            .min_h(px(0.))
             // Files dropped on the conversation wait beside the composer.
             .drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(accent_bg))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach(paths.paths().to_vec(), cx)))

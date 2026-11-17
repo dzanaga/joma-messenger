@@ -291,7 +291,7 @@ impl Joma {
             .w(px(160.))
             .h(px(90.))
             .border_1()
-            .border_color(t.yellow)
+            .border_color(t.yellow).rounded(px(radius()))
             .bg(t.bar)
             .when_some(preview, |d, image| {
                 d.child(
@@ -407,7 +407,7 @@ impl Joma {
                 .p(px(6.))
                 .gap(px(4.))
                 .border_1()
-                .border_color(accent)
+                .border_color(accent).rounded(px(radius()))
                 .bg(t.panel)
                 .cursor_pointer()
                 .hover(|d| d.border_color(t.accent).bg(t.raised))
@@ -469,7 +469,7 @@ impl Joma {
                         .m(px(16.))
                         .bg(t.bg)
                         .border_1()
-                        .border_color(t.accent)
+                        .border_color(t.accent).rounded(px(radius()))
                         .child(
                             div()
                                 .flex()

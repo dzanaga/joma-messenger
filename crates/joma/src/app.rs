@@ -123,6 +123,8 @@ pub struct SettingsView {
     /// The default camera's sizes (largest first) and, per size, its rates.
     pub sizes: Vec<(String, Vec<String>)>,
     pub camera_settings: joma_jami::Details,
+    /// The section shown: interface, audio, video, desktop share, about.
+    pub section: usize,
 }
 
 /// Video bitrates for the quality presets, in kbit/s.
@@ -2381,6 +2383,11 @@ impl Joma {
     // ---- Settings -----------------------------------------------------------------
 
     pub fn open_settings(&mut self, cx: &mut Context<Self>) {
+        // The same button closes the page.
+        if self.settings.take().is_some() {
+            cx.notify();
+            return;
+        }
         let (inputs, outputs, current) = joma_jami::audio_devices().unwrap_or_default();
         let (noise, echo, agc) = joma_jami::audio_processing().unwrap_or_default();
         let cameras = joma_jami::video_devices().unwrap_or_default();
@@ -2499,7 +2506,17 @@ impl Joma {
     /// `joma ui <what>`: open a part of the interface from a script.
     fn ui(&mut self, what: &str, cx: &mut Context<Self>) -> Reply {
         match what {
-            "settings" => self.open_settings(cx),
+            "settings" => {
+                self.settings = None;
+                self.open_settings(cx)
+            }
+            s if s.starts_with("settings:") => {
+                self.settings = None;
+                self.open_settings(cx);
+                if let (Some(v), Ok(n)) = (self.settings.as_mut(), s[9..].parse()) {
+                    v.section = n;
+                }
+            }
             "profile" => self.open_profile(cx),
             "keys" => self.keys_open = true,
             "menu" => self.menu = Some(Menu::Me),

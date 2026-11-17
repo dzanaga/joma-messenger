@@ -242,7 +242,7 @@ impl Joma {
             .child(div().text_color(t.bright).child(name.clone()))
             .when(!here, |d| d.child(div().text_color(t.muted).child("(other conversation)")))
             .child(div().text_color(t.muted).child(format!("{}{elapsed}", call.state.label())))
-            .child(div().px(px(4.)).border_1().border_color(t.border).text_color(if call.peer_joma { t.accent } else { t.muted }).child(joma_badge))
+            .child(div().px(px(4.)).border_1().border_color(t.border).rounded(px(radius())).text_color(if call.peer_joma { t.accent } else { t.muted }).child(joma_badge))
             .when_some(sharing.filter(|_| !joma_sharing), |d, s| d.child(labelled(G_BOLT, s).text_color(t.yellow)));
 
         let mut panel = div()

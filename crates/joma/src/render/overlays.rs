@@ -3,11 +3,13 @@
 use super::*;
 
 impl Joma {
-    /// Settings: audio and video devices, sound processing, video quality, the share.
-    pub(super) fn settings_overlay(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// Settings, as a page in place of the list and the conversation: sections on the
+    /// left (interface, audio, video, desktop share, about), the chosen one on the right.
+    pub(super) fn settings_page(&self, t: &Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
         let v = self.settings.clone()?;
-        let section = |title: &str| div().pt(px(12.)).pb(px(4.)).text_size(px(t.size - 2.5)).text_color(t.muted).child(title.to_uppercase());
-        let label = |text: &str| div().w(px(120.)).flex_none().pt(px(4.)).text_color(t.text).child(text.to_owned());
+        let title = |text: &str| div().pb(px(S2)).text_size(px(t.size + 2.)).text_color(t.bright).font_weight(FontWeight::BOLD).child(text.to_owned());
+        let note = |text: &str| div().pt(px(10.)).text_size(px(t.size - 2.)).text_color(t.muted).child(text.to_owned());
+        let label = |text: &str| div().w(px(130.)).flex_none().pt(px(4.)).text_color(t.text).child(text.to_owned());
         let row = |l: gpui::Div, chips: gpui::Div| div().flex().gap(px(10.)).py(px(3.)).child(l).child(chips.flex().flex_wrap().gap(px(4.)).flex_1().min_w(px(0.)));
         // A row of choices; `pick` runs with the chosen value.
         fn chips(t: &Theme, cx: &mut Context<Joma>, id: &str, options: Vec<(String, String)>, current: &str, pick: fn(&mut Joma, &str, &mut Context<Joma>)) -> gpui::Div {
@@ -29,99 +31,140 @@ impl Joma {
             .find(|(s, _)| *s == size_now)
             .map(|(_, r)| r.iter().map(|x| (x.clone(), format!("{} fps", x.split('.').next().unwrap_or(x)))).collect())
             .unwrap_or_default();
-        let body = div()
-            .id("settings-body")
-            .flex()
-            .flex_col()
-            .px(px(16.))
-            .pb(px(16.))
-            .max_h(px(560.))
-            .overflow_y_scroll()
-            .child(section("interface"))
-            .child(row(
-                label("corners"),
-                chips(t, cx, "round", vec![("on".into(), "rounded".into()), ("off".into(), "square".into())], if self.quick.rounded { "on" } else { "off" }, |j, x, cx| j.set_rounded(x == "on", cx)),
-            ))
-            .child(row(
-                label("version"),
-                chips(t, cx, "ver", vec![("on".into(), "shown in the tab strip".into()), ("off".into(), "hidden".into())], if self.quick.show_version { "on" } else { "off" }, |j, x, cx| {
-                    j.set_show_version(x == "on", cx)
-                }),
-            ))
-            .child(section("audio"))
-            .child(row(label("microphone"), chips(t, cx, "ain", devices(&v.inputs), &idx(1), |j, x, cx| j.set_audio("input", x.parse().unwrap_or(0), cx))))
-            .child(row(label("speakers"), chips(t, cx, "aout", devices(&v.outputs), &idx(0), |j, x, cx| j.set_audio("output", x.parse().unwrap_or(0), cx))))
-            .child(row(label("ringtone on"), chips(t, cx, "aring", devices(&v.outputs), &idx(2), |j, x, cx| j.set_audio("ringtone", x.parse().unwrap_or(0), cx))))
-            .child(row(label("noise removal"), chips(t, cx, "ns", processing.clone(), &v.noise, |j, x, cx| j.set_processing("noise", x, cx))))
-            .child(row(label("echo removal"), chips(t, cx, "ec", processing, &v.echo, |j, x, cx| j.set_processing("echo", x, cx))))
-            .child(row(
-                label("auto gain"),
-                chips(t, cx, "agc", vec![("on".into(), "on".into()), ("off".into(), "off".into())], if v.agc { "on" } else { "off" }, |j, x, cx| j.set_processing("agc", x, cx)),
-            ))
-            .child(section("video"))
-            .when(v.cameras.is_empty(), |d| d.child(div().py(px(3.)).text_color(t.muted).child("no camera found")))
-            .when(!v.cameras.is_empty(), |d| {
-                d.child(row(label("camera"), chips(t, cx, "cam", v.cameras.iter().map(|c| (c.clone(), c.clone())).collect(), &v.camera, |j, x, cx| j.set_camera(x, cx))))
-                    .child(row(label("resolution"), chips(t, cx, "size", v.sizes.iter().take(8).map(|(s, _)| (s.clone(), s.clone())).collect(), &size_now, |j, x, cx| j.set_camera_mode(Some(x), None, cx))))
-                    .child(row(label("frame rate"), chips(t, cx, "rate", rates, &rate_now, |j, x, cx| j.set_camera_mode(None, Some(x), cx))))
-            })
-            .child(row(
-                label("call quality"),
-                chips(
-                    t,
-                    cx,
-                    "vq",
-                    vec![("auto".into(), "auto".into()), ("low".into(), "low · 0.5 Mb/s".into()), ("medium".into(), "medium · 1.5".into()), ("high".into(), "high · 4".into())],
-                    &self.quick.video_quality,
-                    |j, x, cx| j.set_video_quality(x, cx),
-                ),
-            ))
-            .child(section("desktop share (Joma)"))
-            .child(row(
-                label("frame rate"),
-                chips(t, cx, "sfps", vec![("30".into(), "30 fps · lighter".into()), ("60".into(), "60 fps · smoother".into())], &self.quick.share_fps.to_string(), |j, x, cx| {
-                    j.set_share_fps(x.parse().unwrap_or(60), cx)
-                }),
-            ))
-            .child(div().pt(px(10.)).text_size(px(t.size - 2.)).text_color(t.muted).child("Devices and sound apply to the next call; the share's frame rate to the next share."));
-        Some(
+        let page = div().flex().flex_col();
+        let content = match v.section {
+            0 => page
+                .child(title("Interface"))
+                .child(row(
+                    label("corners"),
+                    chips(t, cx, "round", vec![("on".into(), "rounded".into()), ("off".into(), "square".into())], if self.quick.rounded { "on" } else { "off" }, |j, x, cx| j.set_rounded(x == "on", cx)),
+                ))
+                .child(row(
+                    label("version"),
+                    chips(t, cx, "ver", vec![("on".into(), "shown in the tab strip".into()), ("off".into(), "hidden".into())], if self.quick.show_version { "on" } else { "off" }, |j, x, cx| {
+                        j.set_show_version(x == "on", cx)
+                    }),
+                ))
+                .child(note("Colours and the font follow your Omarchy theme and terminal.")),
+            1 => page
+                .child(title("Audio"))
+                .child(row(label("microphone"), chips(t, cx, "ain", devices(&v.inputs), &idx(1), |j, x, cx| j.set_audio("input", x.parse().unwrap_or(0), cx))))
+                .child(row(label("speakers"), chips(t, cx, "aout", devices(&v.outputs), &idx(0), |j, x, cx| j.set_audio("output", x.parse().unwrap_or(0), cx))))
+                .child(row(label("ringtone on"), chips(t, cx, "aring", devices(&v.outputs), &idx(2), |j, x, cx| j.set_audio("ringtone", x.parse().unwrap_or(0), cx))))
+                .child(row(label("noise removal"), chips(t, cx, "ns", processing.clone(), &v.noise, |j, x, cx| j.set_processing("noise", x, cx))))
+                .child(row(label("echo removal"), chips(t, cx, "ec", processing, &v.echo, |j, x, cx| j.set_processing("echo", x, cx))))
+                .child(row(
+                    label("auto gain"),
+                    chips(t, cx, "agc", vec![("on".into(), "on".into()), ("off".into(), "off".into())], if v.agc { "on" } else { "off" }, |j, x, cx| j.set_processing("agc", x, cx)),
+                ))
+                .child(note("Devices and sound processing apply to the next call.")),
+            2 => page
+                .child(title("Video"))
+                .when(v.cameras.is_empty(), |d| d.child(div().py(px(3.)).text_color(t.muted).child("no camera found")))
+                .when(!v.cameras.is_empty(), |d| {
+                    d.child(row(label("camera"), chips(t, cx, "cam", v.cameras.iter().map(|c| (c.clone(), c.clone())).collect(), &v.camera, |j, x, cx| j.set_camera(x, cx))))
+                        .child(row(label("resolution"), chips(t, cx, "size", v.sizes.iter().take(8).map(|(s, _)| (s.clone(), s.clone())).collect(), &size_now, |j, x, cx| j.set_camera_mode(Some(x), None, cx))))
+                        .child(row(label("frame rate"), chips(t, cx, "rate", rates, &rate_now, |j, x, cx| j.set_camera_mode(None, Some(x), cx))))
+                })
+                .child(row(
+                    label("call quality"),
+                    chips(
+                        t,
+                        cx,
+                        "vq",
+                        vec![("auto".into(), "auto".into()), ("low".into(), "low · 0.5 Mb/s".into()), ("medium".into(), "medium · 1.5".into()), ("high".into(), "high · 4".into())],
+                        &self.quick.video_quality,
+                        |j, x, cx| j.set_video_quality(x, cx),
+                    ),
+                ))
+                .child(note("Auto lets Jami adapt the bitrate; the others fix it.")),
+            3 => page
+                .child(title("Desktop share"))
+                .child(row(
+                    label("frame rate"),
+                    chips(t, cx, "sfps", vec![("30".into(), "30 fps · lighter".into()), ("60".into(), "60 fps · smoother".into())], &self.quick.share_fps.to_string(), |j, x, cx| {
+                        j.set_share_fps(x.parse().unwrap_or(60), cx)
+                    }),
+                ))
+                .child(note("Applies to the next Joma share. Screenshots of a share go to ~/Pictures/joma.")),
+            _ => page
+                .child(title("About"))
+                .child(row(label("Joma"), div().child(div().pt(px(4.)).text_color(t.bright).child(concat!("v", env!("CARGO_PKG_VERSION"))))))
+                .child(row(label("account"), div().child(div().pt(px(4.)).child(format!("{} · libjami {}", if self.model.my_name.is_empty() { "jami" } else { &self.model.my_name }, self.model.account)))))
+                .child(row(label("keys"), div().child(button("about-keys", G_BOLT, "show the keys · F1", t, false).on_click(cx.listener(|this, _, _, cx| {
+                    this.keys_open = true;
+                    cx.notify();
+                })))))
+                .child(note("Settings are kept in ~/.config/joma/quick.toml and in Jami's own configuration.")),
+        };
+        let nav_item = |i: usize, icon: Icon, name: &'static str| {
+            let on = v.section == i;
             div()
-                .id("settings-overlay")
-                .absolute()
-                .inset_0()
+                .id(SharedString::from(format!("set-nav-{i}")))
                 .flex()
                 .items_center()
-                .justify_center()
-                .bg(gpui::black().opacity(0.55))
-                .occlude()
+                .gap(px(S2))
+                .h(px(30.))
+                .px(px(S2))
+                .rounded(px(radius()))
+                .text_color(if on { t.accent } else { t.text })
+                .when(on, |d| d.bg(t.accent_bg))
+                .cursor_pointer()
+                .hover(|d| d.bg(t.raised))
+                .child(icon)
+                .child(name)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if let Some(s) = this.settings.as_mut() {
+                        s.section = i;
+                    }
+                    cx.notify();
+                }))
+        };
+        Some(
+            div()
+                .flex()
+                .flex_1()
+                .min_h(px(0.))
+                .gap(px(GAP))
+                .px(px(GAP))
+                .pb(px(GAP))
                 .child(
-                    div()
-                        .id("settings-box")
-                        .flex()
-                        .flex_col()
-                        .w(px(640.))
-                        .max_w_full()
-                        .m(px(16.))
-                        .bg(t.bg)
-                        .border_1()
-                        .border_color(t.accent)
-                        .rounded(px(radius()))
+                    tile(t, false)
+                        .flex_none()
+                        .w(px(if self.narrow { 150. } else { 220. }))
+                        .bg(t.panel)
+                        .child(div().flex().flex_none().items_center().h(px(38.)).pl(px(S3)).child(caption(t, "settings")))
                         .child(
                             div()
                                 .flex()
+                                .flex_col()
+                                .gap(px(2.))
+                                .px(px(S1))
+                                .child(nav_item(0, G_COG, "interface"))
+                                .child(nav_item(1, G_MIC, "audio"))
+                                .child(nav_item(2, G_VIDEO, "video"))
+                                .child(nav_item(3, G_DESKTOP, "desktop share"))
+                                .child(nav_item(4, G_BOLT, "about")),
+                        ),
+                )
+                .child(
+                    tile(t, true)
+                        .flex_1()
+                        .bg(t.bg)
+                        .child(
+                            div()
+                                .flex()
+                                .flex_none()
                                 .items_center()
-                                .justify_between()
-                                .px(px(12.))
-                                .py(px(8.))
-                                .border_b_1()
-                                .border_color(t.border)
-                                .child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child("Settings"))
+                                .justify_end()
+                                .h(px(38.))
+                                .pr(px(S1))
                                 .child(button("set-close", G_TIMES, "", t, false).on_click(cx.listener(|this, _, _, cx| {
                                     this.settings = None;
                                     cx.notify();
                                 }))),
                         )
-                        .child(body),
+                        .child(div().id("settings-body").flex().flex_col().flex_1().min_h(px(0.)).overflow_y_scroll().px(px(20.)).pb(px(20.)).child(content)),
                 )
                 .into_any_element(),
         )
@@ -179,7 +222,7 @@ impl Joma {
                         .m(px(16.))
                         .bg(t.bg)
                         .border_1()
-                        .border_color(t.accent)
+                        .border_color(t.accent).rounded(px(radius()))
                         .child(
                             div()
                                 .flex()
@@ -266,7 +309,7 @@ impl Joma {
                         .size(px(20.))
                         .bg(gpui::rgb(c))
                         .border_1()
-                        .border_color(if c == p.color { t.bright } else { gpui::black().opacity(0.25) })
+                        .border_color(if c == p.color { t.bright } else { gpui::black().opacity(0.25) }).rounded(px(radius()))
                         .cursor_pointer()
                         .hover(|d| d.border_color(gpui::white()))
                         .on_click(cx.listener(move |this, e: &gpui::ClickEvent, _, cx| {
@@ -299,7 +342,7 @@ impl Joma {
         }
         let preview = div()
             .size(px(64.))
-            .rounded(px(3.))
+            .rounded(px(radius()))
             .overflow_hidden()
             .child({
                 let a = art.clone();
@@ -352,7 +395,7 @@ impl Joma {
                                 cx.notify();
                             }))),
                     )
-                    .child(div().flex().items_center().gap(px(8.)).child(div().size(px(22.)).bg(gpui::rgb(p.color)).border_1().border_color(t.bright)).child(div().text_size(px(t.size - 2.)).text_color(t.muted).child(format!("#{:06x} · shift+click: background", p.color))))
+                    .child(div().flex().items_center().gap(px(8.)).child(div().size(px(22.)).bg(gpui::rgb(p.color)).border_1().border_color(t.bright).rounded(px(radius()))).child(div().text_size(px(t.size - 2.)).text_color(t.muted).child(format!("#{:06x} · shift+click: background", p.color))))
                     .child(div().flex().flex_col().children(swatches))
                     .child(
                         div()
