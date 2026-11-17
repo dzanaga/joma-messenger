@@ -78,3 +78,16 @@ the Intel HD 530 passes. The VA-API-only tier (`va.rs`: CPU colour conversion, h
 H.264) was written for such GPUs, but its first encode on the Radeon hung the VCE ring;
 the GPU reset failed and Hyprland went down. That tier is now opt-in (`JOMA_VIDEO=va`),
 and the benchmark leaves the display GPU alone unless asked.
+
+## The sharer's own drawing (0.5.2.dev2)
+
+The overlay also takes input: with a tool (`ink::Tool`), its input region covers the
+output and `wl_pointer` events become `Ink` messages (laser on motion, a stroke while
+the left button is down, ids from 2^30 so they never meet a viewer's); a right click
+empties the region again. The overlay keeps the sharer's strokes itself and draws them
+with the hub's canvas; they go to the viewers through the share's broadcast (the
+channel that carried only `clear`). Its callback runs on the overlay thread and must
+not lock the hub (whoever drops the overlay holds that lock and joins the thread):
+it sets two flags the UI reads with `Share::ink_state`. A screenshot is `grim -o` of
+the output cropped to the source on the sharer (the compositor's picture has the
+overlay), and the last frame with `ink::paint_over` on the viewer.

@@ -212,6 +212,13 @@ colours); **clear** wipes the drawing on both sides. The sharer sees it on their
 screen, over every window and without catching clicks, and has **clear drawings** in
 their share strip; drawings go when the viewer leaves or the source changes.
 
+**The sharer draws too.** The share strip has **laser** and **pen** (four colours):
+with one on, your pointer draws on the shared screen instead of clicking, and viewers
+see it; a right click on that screen gives the pointer back. **screenshot** (in the
+strip, and under the stage for viewers) saves the shared screen with the drawings in
+`~/Pictures/joma` and sends it to the conversation. `joma draw laser|pen|off|clear|shot`
+does the same from a key binding.
+
 **Watching.** The bar under the stage drags to share the height between the stage and
 the chat (double click: the stage takes the window, the contact list steps aside too).
 The shared screen fills the stage, fitted; below it: **fit** (all of it),
@@ -239,7 +246,7 @@ when mise has Joma here, since the two would compete and the launcher would star
 whichever ran last.
 
 ## Log
-- 0.5.2.dev2 (2026-11-17, built, NOT yet tested between two profiles): the person
+- 0.5.2.dev2 (2026-11-17): the person
   sharing can use the laser and the pen too (**laser**, **pen** and colours in the
   share strip; the pointer then draws on the shared screen, a right click there gives it
   back); **screenshot** on both sides saves the shared screen with the drawings in

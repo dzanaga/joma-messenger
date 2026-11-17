@@ -3702,7 +3702,12 @@ impl Joma {
             }
             Request::Ui { what } => self.ui(&what, cx),
             Request::Draw { what } => {
-                let Some(key) = self.sharing_key() else { return Reply::Error { message: "no Joma share is running".into() } };
+                // A screenshot also works on the watching side.
+                if what == "shot" && (self.sharing_key().is_some() || self.viewing_key().is_some()) {
+                    self.share_screenshot(cx);
+                    return Reply::Done;
+                }
+                let Some(key) = self.sharing_key() else { return Reply::Error { message: "no Joma share of yours is running".into() } };
                 use joma_desk::ink::Tool;
                 match what.as_str() {
                     "laser" => self.set_sharer_tool(&key, Tool::Laser, cx),

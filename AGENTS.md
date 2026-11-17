@@ -42,6 +42,14 @@
 - Build: `.cargo/config.toml` (local, ignored) builds into
   `/home/dzanaga/builds/joma-target` (since 2026-11-17: the internal disk has room;
   before, an external T5 volume shared with Vetro). Never build inside the repository.
+- **Stop test instances with `scripts/stop-tests.sh`** (it matches `JOMA_PROFILE` in the
+  process environment), never by binary path or name: on 2026-11-17 the user's launcher
+  pointed at the dev build (`~/.local/bin/joma` → the target folder) and a cleanup by
+  path stopped their own Joma. For the same reason a `cargo build` changes what the
+  user's launcher starts next.
+- Clicks and drags in the nest: `cargo run -p joma-desk --example pointer -- <w> <h>
+  move:x,y down up right sleep:ms` (a virtual pointer over the whole layout; `wtype`
+  only types). `joma ui <part>` opens overlays; `scripts/shots.sh` screenshots every tab.
 - Commit after every change once tests pass (`cargo test --workspace`).
 - Docs and code in English.
 - **TODO.md** (local hotfix list, not committed): before starting any task, check it for unticked `- [ ]` items and ask the user whether to fix those first (if the user asked for the TODOs, start there directly). Only checkbox items are tasks; other lines are the user's notes, leave them alone. When an item is fixed and committed, tick it (`- [x]`) and append the commit hash. The user removes an item once verified.
