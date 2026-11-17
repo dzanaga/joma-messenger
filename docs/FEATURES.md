@@ -134,6 +134,18 @@ Beside the message box:
   or ✕. They go as files (`.ogg`, `.webm`); received ones have **play** (mpv: sound
   only for voice, a window for video), click again to stop.
 
+## Transcribing voice messages
+A voice message that is here has **transcribe**: its words appear under it and stay in
+Joma's cache (`~/.cache/joma/transcripts`); nothing is sent into the conversation.
+**Settings → audio → voice messages** chooses the engine:
+- **whisper.cpp, local** (the default when `whisper-cli` is installed; Arch package
+  `whisper.cpp`): on this machine, on the CPU, language detected. The model (`base`,
+  about 150 MB) is downloaded at the first transcription into
+  `~/.local/share/joma/models`;
+- **superwhisper**: that app does it, in the mode it is set to. In a cloud mode the
+  voice message leaves this machine, so Joma never picks it by itself;
+- **no transcription**.
+
 ## Watching together
 Type `@youtube epic fails` (the YouTube button beside the message box writes `@youtube `
 for you) and Enter: Joma searches and sends the first five results to the conversation
@@ -274,6 +286,9 @@ instead. **Channel**: stable releases only (the default), or pre-releases too
 with `scripts/release.sh "notes" --pre`.
 
 ## Log
+- 0.5.2.dev8 (2026-11-17): transcribe a voice message (whisper.cpp on this machine, or
+  superwhisper if chosen). The steps around the engine were tested with a stand-in:
+  whisper.cpp is not installed on this machine, and superwhisper was not called.
 - 0.5.2.dev7 (2026-11-17): an incoming call is asked about over the window; the call's
   buttons are one bar (floating over the picture when there is one: that part is not
   yet seen with a real video).

@@ -161,3 +161,84 @@ mod tests {
         assert!(is_audio(Path::new("a/voice.OGG")) && is_video(Path::new("v.webm")));
     }
 }
+
+// ---- Transcription of voice messages -------------------------------------------------
+
+/// Is `program` on the PATH?
+pub fn installed(program: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(program).is_file()))
+}
+
+/// The engine to use: the setting, or whisper.cpp when it is here. `None`: off.
+pub fn transcriber(setting: &str) -> Option<&'static str> {
+    match setting {
+        "off" => None,
+        "superwhisper" => installed("superwhisper").then_some("superwhisper"),
+        _ => installed("whisper-cli").then_some("whisper"),
+    }
+}
+
+/// whisper.cpp's multilingual `base` model (about 150 MB), kept with Joma's data.
+pub fn whisper_model() -> PathBuf {
+    let data = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share"));
+    data.join("joma/models/ggml-base.bin")
+}
+
+pub const WHISPER_MODEL_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin";
+
+/// Download the model (once, when the user asks for a first transcription).
+pub fn fetch_whisper_model() -> anyhow::Result<()> {
+    let path = whisper_model();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let part = path.with_extension("part");
+    let out = Command::new("curl").args(["-fsSL", "--max-time", "900", "-o"]).arg(&part).arg(WHISPER_MODEL_URL).output()?;
+    anyhow::ensure!(out.status.success(), "download failed: {}", String::from_utf8_lossy(&out.stderr).trim().to_owned());
+    std::fs::rename(part, path)?;
+    Ok(())
+}
+
+fn transcript_path(file_id: &str) -> Option<PathBuf> {
+    let safe: String = file_id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' }).collect();
+    let cache = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
+    Some(cache.join("joma/transcripts").join(format!("{safe}.txt")))
+}
+
+/// A transcript made earlier.
+pub fn cached_transcript(file_id: &str) -> Option<String> {
+    std::fs::read_to_string(transcript_path(file_id)?).ok()
+}
+
+/// Transcribe a voice message with `engine` and keep the text in Joma's cache (it is
+/// not sent anywhere by Joma; "superwhisper" works in that app's own mode).
+pub fn transcribe(engine: &str, file_id: &str, audio: &Path) -> anyhow::Result<String> {
+    let text = match engine {
+        "superwhisper" => {
+            let out = Command::new("superwhisper").arg("transcribe").arg(audio).output()?;
+            anyhow::ensure!(out.status.success(), "superwhisper: {}", String::from_utf8_lossy(&out.stderr).trim().to_owned());
+            let raw = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+            // It may answer with JSON: take its text.
+            serde_json::from_str::<serde_json::Value>(&raw).ok().and_then(|v| v.get("text").and_then(|t| t.as_str()).map(str::to_owned)).unwrap_or(raw)
+        }
+        _ => {
+            // whisper.cpp reads 16 kHz mono WAV.
+            let wav = std::env::temp_dir().join(format!("joma-transcribe-{}.wav", std::process::id()));
+            let conv = Command::new("ffmpeg").args(["-y", "-loglevel", "error", "-i"]).arg(audio).args(["-ar", "16000", "-ac", "1", "-f", "wav"]).arg(&wav).output()?;
+            anyhow::ensure!(conv.status.success(), "ffmpeg: {}", String::from_utf8_lossy(&conv.stderr).trim().to_owned());
+            let out = Command::new("whisper-cli").arg("-m").arg(whisper_model()).arg("-f").arg(&wav).args(["-l", "auto", "-nt", "-np"]).output();
+            let _ = std::fs::remove_file(&wav);
+            let out = out?;
+            anyhow::ensure!(out.status.success(), "whisper-cli: {}", String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("failed").to_owned());
+            String::from_utf8_lossy(&out.stdout).split_whitespace().collect::<Vec<_>>().join(" ")
+        }
+    };
+    anyhow::ensure!(!text.is_empty(), "nothing was heard");
+    if let Some(p) = transcript_path(file_id) {
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(p, &text);
+    }
+    Ok(text)
+}

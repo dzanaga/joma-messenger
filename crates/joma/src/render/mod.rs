@@ -259,6 +259,11 @@ impl Joma {
         for id in ids {
             self.want_youtube_preview(&id);
         }
+        // Transcripts of its voice messages made earlier.
+        let voices: Vec<String> = self.selected.as_ref().and_then(|s| self.model.conversations.get(s)).map(|c| c.messages.iter().filter_map(|m| m.file.as_ref()).filter(|f| crate::media::is_audio(std::path::Path::new(&f.name))).map(|f| f.id.clone()).collect()).unwrap_or_default();
+        for id in voices {
+            self.want_transcript(&id);
+        }
         let gone: Vec<String> = self.previews.keys().filter(|k| self.desk.shared(k).is_none()).cloned().collect();
         for k in gone {
             if let Some(old) = self.previews.remove(&k) {

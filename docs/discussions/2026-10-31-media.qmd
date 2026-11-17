@@ -74,6 +74,10 @@ first use after asking. A voice message gets **transcribe**; the text appears un
 and is kept in Joma's cache (not sent into the conversation). Runs on the CPU (the
 display GPU stays alone); a one-minute message takes a few seconds with `base`.
 
+Built in 0.5.2.dev8 with the defaults that need no answer: on click, language
+detected, the transcript kept local; the engine is a setting (whisper.cpp, superwhisper
+in its own mode, off). Not yet run with a real engine.
+
 Questions: automatic for every received message, or on click? Which language by
 default (auto-detect works, Italian is forced better)? Send the transcript to the
 conversation as well (useful for the other side), or keep it local?

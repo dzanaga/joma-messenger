@@ -91,6 +91,8 @@ pub enum AppMsg {
     Releases(Result<Vec<String>, String>),
     /// `mise` installed the update (or not).
     Updated(Result<String, String>),
+    /// A voice message was transcribed (file id, the text or why not).
+    Transcribed(String, Result<String, String>),
     /// The watch-together player of a conversation's session reported something.
     Watch(String, crate::watch::PlayerEvent),
     /// An `@youtube` search finished: the message to send to the conversation.
@@ -394,6 +396,9 @@ pub struct Joma {
     pub flash: Option<(String, Instant)>,
     /// The menu that is open: ours (the picture in the tab strip) or the conversation's.
     pub menu: Option<Menu>,
+    /// Transcripts of voice messages by file id: `None` while one is being made.
+    pub transcripts: HashMap<String, Option<Result<String, String>>>,
+    transcripts_seen: std::collections::HashSet<String>,
     /// The picture shown large, over the window.
     pub viewer: Option<std::path::PathBuf>,
     /// The message whose actions show (reply, react, edit, delete).
@@ -681,6 +686,8 @@ impl Joma {
             previews: HashMap::new(),
             flash: None,
             menu: None,
+            transcripts: HashMap::new(),
+            transcripts_seen: std::collections::HashSet::new(),
             viewer: None,
             msg_actions: None,
             replying: None,
@@ -1180,6 +1187,10 @@ impl Joma {
                     }
                     Err(e) => self.show_flash(format!("update failed: {e}"), cx),
                 }
+                cx.notify();
+            }
+            AppMsg::Transcribed(id, r) => {
+                self.transcripts.insert(id, Some(r));
                 cx.notify();
             }
             AppMsg::Preview(id) => {
@@ -2430,6 +2441,47 @@ impl Joma {
             return p.clone();
         }
         crate::media::cached(id)
+    }
+
+    /// Load a transcript made earlier (looked for once per message).
+    pub fn want_transcript(&mut self, file_id: &str) {
+        if self.transcripts_seen.insert(file_id.to_owned()) {
+            if let Some(text) = crate::media::cached_transcript(file_id) {
+                self.transcripts.insert(file_id.to_owned(), Some(Ok(text)));
+            }
+        }
+    }
+
+    /// Transcribe a voice message, in the background. The first time with whisper.cpp
+    /// its model is downloaded (about 150 MB).
+    pub fn transcribe(&mut self, file_id: &str, path: &std::path::Path, cx: &mut Context<Self>) {
+        let Some(engine) = crate::media::transcriber(&self.quick.transcribe) else {
+            return self.show_flash("no transcription: install whisper.cpp (whisper-cli), or choose an engine in settings → audio", cx);
+        };
+        if matches!(self.transcripts.get(file_id), Some(None)) {
+            return;
+        }
+        let model_missing = engine == "whisper" && !crate::media::whisper_model().is_file();
+        if model_missing {
+            self.show_flash("downloading the speech model (about 150 MB, once)…", cx);
+        }
+        self.transcripts.insert(file_id.to_owned(), None);
+        let (tx, id, path) = (self.tx.clone(), file_id.to_owned(), path.to_owned());
+        std::thread::spawn(move || {
+            let r = (|| -> anyhow::Result<String> {
+                if model_missing {
+                    crate::media::fetch_whisper_model()?;
+                }
+                crate::media::transcribe(engine, &id, &path)
+            })();
+            let _ = tx.unbounded_send(AppMsg::Transcribed(id, r.map_err(|e| format!("{e:#}"))));
+        });
+        cx.notify();
+    }
+
+    pub fn set_transcribe(&mut self, engine: &str, cx: &mut Context<Self>) {
+        self.quick.transcribe = engine.to_owned();
+        self.save_quick(cx);
     }
 
     pub fn want_youtube_preview(&mut self, id: &str) {

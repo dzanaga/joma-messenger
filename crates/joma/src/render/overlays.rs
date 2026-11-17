@@ -57,6 +57,23 @@ impl Joma {
                     label("auto gain"),
                     chips(t, cx, "agc", vec![("on".into(), "on".into()), ("off".into(), "off".into())], if v.agc { "on" } else { "off" }, |j, x, cx| j.set_processing("agc", x, cx)),
                 ))
+                .child(row(
+                    label("voice messages"),
+                    chips(
+                        t,
+                        cx,
+                        "tr",
+                        vec![("".into(), "transcribe with whisper.cpp · local".into()), ("superwhisper".into(), "with superwhisper · its own mode".into()), ("off".into(), "no transcription".into())],
+                        if self.quick.transcribe == "whisper" { "" } else { &self.quick.transcribe },
+                        |j, x, cx| j.set_transcribe(x, cx),
+                    ),
+                ))
+                .child(note(match crate::media::transcriber(&self.quick.transcribe) {
+                    Some("whisper") => "Transcripts are made on this machine with whisper.cpp and kept in Joma's cache. The model (about 150 MB) is downloaded at the first one.",
+                    Some(_) => "Transcripts are made by superwhisper in the mode it is set to: in a cloud mode the voice message leaves this machine.",
+                    None if self.quick.transcribe == "off" => "Voice messages are not transcribed.",
+                    None => "Not installed: whisper.cpp provides whisper-cli (Arch: whisper.cpp). Until then voice messages are not transcribed.",
+                }))
                 .child(note("Devices and sound processing apply to the next call.")),
             2 => page
                 .child(title("Video"))

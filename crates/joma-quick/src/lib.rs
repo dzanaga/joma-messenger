@@ -50,6 +50,10 @@ pub struct QuickConfig {
     pub show_version: bool,
     /// Offer pre-releases (0.5.2.dev3, 0.6.0-rc.1) as updates too; off: stable only.
     pub prereleases: bool,
+    /// What transcribes voice messages: "whisper" (whisper.cpp, on this machine),
+    /// "superwhisper" (that app, in whatever mode it is set to: it may be a cloud),
+    /// "off". Empty: whisper when `whisper-cli` is installed, else off.
+    pub transcribe: String,
 }
 
 impl Default for QuickConfig {
@@ -78,6 +82,7 @@ impl Default for QuickConfig {
             rounded: true,
             show_version: true,
             prereleases: false,
+            transcribe: String::new(),
         }
     }
 }

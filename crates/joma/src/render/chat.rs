@@ -475,15 +475,36 @@ impl Joma {
                                 let fid = file_id.clone();
                                 let playing = self.playing.as_ref().is_some_and(|(id, _)| *id == file_id);
                                 let voice = crate::media::is_audio(&path) || path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("voice"));
+                                let (tid, tpath) = (file_id.clone(), path.clone());
+                                let transcript = self.transcripts.get(&file_id).cloned();
+                                let can = voice && crate::media::is_audio(&path);
                                 d.child(
-                                    div().mt(px(S1)).flex().child(
-                                        button(SharedString::from(format!("play-{}", m.id)), if playing { G_STOP } else { G_PLAY }, if playing { "stop" } else if voice { "play voice message" } else { "play video" }, t, playing)
-                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                    div()
+                                        .mt(px(S1))
+                                        .flex()
+                                        .gap(px(S1))
+                                        .child(
+                                            button(SharedString::from(format!("play-{}", m.id)), if playing { G_STOP } else { G_PLAY }, if playing { "stop" } else if voice { "play voice message" } else { "play video" }, t, playing)
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    cx.stop_propagation();
+                                                    this.toggle_play(&fid, &path, cx);
+                                                })),
+                                        )
+                                        // The words of a voice message, made on this machine.
+                                        .when(can && !matches!(transcript, Some(Some(Ok(_)))), |d| {
+                                            let busy = matches!(transcript, Some(None));
+                                            d.child(button(SharedString::from(format!("tr-{}", m.id)), G_COMMENT, if busy { "transcribing…" } else { "transcribe" }, t, busy).on_click(cx.listener(move |this, _, _, cx| {
                                                 cx.stop_propagation();
-                                                this.toggle_play(&fid, &path, cx);
-                                            })),
-                                    ),
+                                                this.transcribe(&tid, &tpath, cx);
+                                            })))
+                                        }),
                                 )
+                                .when_some(transcript.flatten(), |d, r| {
+                                    d.child(match r {
+                                        Ok(text) => div().mt(px(S1)).w(px(inner.min(420.))).text_color(t.bright).child(text),
+                                        Err(e) => div().mt(px(S1)).w(px(inner.min(420.))).text_size(px(t.size - 2.)).text_color(t.red).child(format!("not transcribed: {e}")),
+                                    })
+                                })
                             })
                             // A picture shows itself once it is here.
                             .when_some(saved.filter(|p| is_picture(p)), |d, path| {
