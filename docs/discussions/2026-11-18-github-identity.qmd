@@ -1,0 +1,117 @@
+---
+title: "GitHub identity for Joma contacts"
+date: 2026-11-18
+lang: en
+---
+
+Mocks of every screen, the badge styles and what was checked in libjami are on a page:
+<https://claude.ai/artifact/LjmK3ewEgtoqeJS1XiMg5y>.
+
+GitHub only (decided in conversation). No signing and no keys: the badge needs two
+claims that name each other. A public gist `joma.json` in the GitHub account names the
+Jami ID, and only that GitHub account can publish it (written once through the OAuth
+device flow, scope `gist`, token thrown away). An `X-JOMA-GITHUB:<login>` line in the
+Jami profile (vCard) names the GitHub account, and only that Jami account can send it.
+Matching uses the numeric `github_id`, not the login.
+
+Checked in `upstream/jami-daemon`:
+
+- The profile is sent and stored as the file it is (`sendProfile`, `data_transfer.cpp:945`).
+- `updateProfile` keeps unknown lines (`vcard.cpp` parses and writes every key). The key
+  must not start with `FN` or `PHOTO` (`removeByKey` matches by prefix).
+- Joma writes the line, then calls `updateProfile` to resend it to every contact.
+- `sendTrustRequest` carries a payload (under 64 KB) that arrives with
+  `IncomingTrustRequest`. Joma uses `addContact` today.
+- Linking a new device rebuilds the profile from the name and photo only
+  (`jamiaccount.cpp:1479`), so the line is dropped there.
+
+# 1. The OAuth App
+
+The device flow needs a GitHub OAuth App with device flow on. Its client ID ships in the
+binary, and nothing else is secret. Proposal: you register "Joma" under your account.
+Until then, only the by-hand path works (Joma copies the JSON and opens
+gist.github.com).
+
+- [ ] A:
+
+# 2. Where setup lives
+
+Proposal: a "verify with GitHub" button on the account row in the accounts tab, because
+the proof belongs to one account. The steps run in the conversation tile: explain
+(the gist is public), the code, publish. The alternative is a new "identity" section in
+settings.
+
+- [ ] A:
+
+# 3. Badge style
+
+A: check and `github.com/alice` in muted text. B: an accent pill "✓ GitHub".
+C: a check on the avatar's corner. Proposal: A in the header and on the account row,
+C in the lists.
+
+- [ ] A:
+
+# 4. Where it shows
+
+Proposal: conversation header, chats and contacts lists, incoming requests, the add
+card, the account row. The compact bar panel and the incoming-call overlay are optional.
+
+- [ ] A:
+
+# 5. Badge on incoming requests
+
+Joma sends its vCard as the request payload (`sendTrustRequest`), so the receiver can
+check before accepting. Proposal: yes. The Jami app sends profiles with requests too.
+
+- [ ] A:
+
+# 6. Adding by GitHub name
+
+Proposal: a two-way switch above the add input (Jami name or ID / github, Tab flips),
+plus `gh:alice` in the Jami field as a shortcut. A card shows what was found. Nothing is
+sent before you confirm it. The alternative is two separate fields.
+
+- [ ] A:
+
+# 7. Several accounts
+
+Proposal: one `joma.json` listing every account with a label. Verifying a second
+account adds to the list. When adding, you pick from the list.
+
+- [ ] A:
+
+# 8. Re-checking
+
+Proposal: every 3 days and whenever a profile arrives, with results cached (GitHub
+allows 60 calls an hour without a login). A missing gist removes the badge with one
+system line.
+
+- [ ] A:
+
+# 9. When the pinned pair changes
+
+Proposal: a red banner in that conversation, no badge until you choose "trust the new
+one", and nothing blocked.
+
+- [ ] A:
+
+# 10. Linked devices
+
+Proposal: a new device puts the line back by itself when your gist already names this
+account, with no new GitHub login.
+
+- [ ] A:
+
+# 11. Removing
+
+Proposal: remove clears the profile line right away, then offers a second GitHub
+approval to delete the gist. If you skip that, Joma opens the gist so you can delete it
+yourself.
+
+- [ ] A:
+
+# 12. GitHub avatar on the add card
+
+Proposal: no. Keep the Jami picture and link to the GitHub profile.
+
+- [ ] A:
