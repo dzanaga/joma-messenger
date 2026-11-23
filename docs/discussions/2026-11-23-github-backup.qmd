@@ -50,12 +50,14 @@ its own login.
 
 # 3. The passphrase
 
-Anyone who gets the file can guess passphrases offline. Proposal: Joma suggests a
-generated one (6 random words), accepts your own only if it is long enough, and says
-plainly that a lost passphrase makes the backup useless (keep it in your password
-manager). One passphrase for all accounts, or one each?
+Anyone who gets the file can guess passwords offline, but getting it already needs your
+GitHub account (the repo is private). Proposal: a normal password you choose and can
+remember; the key comes from a slow derivation (scrypt or Argon2), so each guess is
+costly; Joma refuses only obviously weak ones (short or common) and says plainly that a
+lost password makes the backup useless. One password for all accounts, or one each?
 
-- [ ] A:
+- [ ] A: (User, 2026-11-23: a normal secure password, no word lists; private repo plus
+  a good password is enough. One for all or one each still open.)
 
 # 4. The agent
 
