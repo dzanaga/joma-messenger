@@ -4,6 +4,10 @@ date: 2026-11-23
 lang: en
 ---
 
+A step-by-step simulation of six situations (setup, everything lost, restore with the
+agent, adding a machine, a forgotten password, a leaked backup):
+<https://claude.ai/artifact/DrMUQ2mQoNwUtjggqDQjfe>.
+
 The problem: every device of a Jami account is lost, or the OS is reinstalled. Today the
 account is then gone: Jami can only bring it back by linking from a device that still has
 it. Joma users on Omarchy are logged into GitHub and often run an agent, so GitHub can
@@ -56,8 +60,8 @@ remember; the key comes from a slow derivation (scrypt or Argon2), so each guess
 costly; Joma refuses only obviously weak ones (short or common) and says plainly that a
 lost password makes the backup useless. One password for all accounts, or one each?
 
-- [ ] A: (User, 2026-11-23: a normal secure password, no word lists; private repo plus
-  a good password is enough. One for all or one each still open.)
+- [x] A: (User, 2026-11-23: a normal secure password, no word lists; private repo plus
+  a good password is enough. One password for all accounts.)
 
 # 4. The agent
 
@@ -102,9 +106,25 @@ line.
 
 # 9. Logging in on a new machine while the old one still works
 
-That is Jami's normal linking. An agent on the old machine could help (`joma link
-<code>`), but a file on GitHub should not approve a link by itself: write access to the
-repo would then be enough to add a device to your account. Proposal: keep linking as it
-is; the backup is for when every device is gone.
+Two ways. Jami's normal linking (a code shown on the new machine, approved on the old
+one), which needs both machines. Or restoring from the backup, which needs neither: the
+archive holds the account key, and importing it signs a new device certificate
+(`onArchiveLoaded`, `archive_account_manager.cpp:1259`), the same path linking takes.
+The old machine is not asked. Afterwards both devices sync as usual, and contacts added
+after the backup arrive from the old machine. (A link code should still never be
+approved by a file on GitHub.)
+
+- [ ] A:
+
+# 10. Adding a machine from the backup
+
+The user asked (2026-11-23) to add a new machine from the backup, without linking
+between two devices. That works (see 9). Since GitHub access plus the password is then
+enough to add a device, the other devices should say so. Proposal: "add this machine
+from your GitHub backup" on the first-start screen, and on every other device a
+notification "new device *desktop* joined Bob from the backup · keep / revoke"
+(`KnownDevicesChanged`). Limit to state plainly: whoever opens the backup holds the
+account key; revoking stops that device, but they can make another, so a leaked backup
+plus password means moving to a new account.
 
 - [ ] A:
