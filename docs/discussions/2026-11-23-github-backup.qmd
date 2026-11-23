@@ -1,0 +1,108 @@
+---
+title: "Account backup and restore through GitHub"
+date: 2026-11-23
+lang: en
+---
+
+The problem: every device of a Jami account is lost, or the OS is reinstalled. Today the
+account is then gone: Jami can only bring it back by linking from a device that still has
+it. Joma users on Omarchy are logged into GitHub and often run an agent, so GitHub can
+hold an encrypted backup, and Joma (or the agent) can restore from it on a fresh machine.
+It goes with the identity check (`2026-11-18-github-identity.qmd`): the restored account
+has the same Jami ID, so contacts and the GitHub badge stay valid.
+
+Checked in `upstream/jami-daemon`:
+
+- `exportToFile(account, path, scheme, password)` writes the account archive: account
+  key, contacts, username, device list, config. `password` is the account's own Jami
+  password (it reads and re-saves the archive with it, `archive_account_manager.cpp:1523`),
+  not a new passphrase. Joma creates accounts without one, so the exported file is
+  **not encrypted**. Joma must encrypt it itself.
+- Import is `addAccount` with `Account.archivePath` (and the archive's password, empty
+  here). The stock Jami app can import the same decrypted file.
+- Conversation history is not in the archive: it lives in the conversations' git
+  repositories and comes back from contacts (and other devices) when they are online.
+
+Sketch: Joma exports the archive, encrypts it with a passphrase (`age` with scrypt, or
+the same in Rust), and pushes it to a private repo `joma-backup`, one file per account
+plus an `index.json` (names, Jami IDs, dates; no secrets). Restoring decrypts the file
+and calls `addAccount`. This machine becomes a new device of the account; the devices
+tab then offers to revoke the lost ones.
+
+# 1. Where the backup lives
+
+A private repo `joma-backup` (getting it needs your GitHub login, opening it needs the
+passphrase), or a secret gist (unlisted, but anyone with its URL can download it, so the
+passphrase is the only lock). Proposal: the private repo. Joma refuses to write into a
+repo that is public.
+
+- [ ] A:
+
+# 2. How Joma talks to GitHub
+
+An OAuth App can only ask for `repo`, which reaches every private repo you have. A GitHub
+App can be limited to the one `joma-backup` repo (contents read and write) and also hold
+the gists permission for the identity check. Proposal: one GitHub App "Joma", registered
+by you, with the device flow; when `gh` is logged in, Joma can use it instead and skip
+its own login.
+
+- [ ] A:
+
+# 3. The passphrase
+
+Anyone who gets the file can guess passphrases offline. Proposal: Joma suggests a
+generated one (6 random words), accepts your own only if it is long enough, and says
+plainly that a lost passphrase makes the backup useless (keep it in your password
+manager). One passphrase for all accounts, or one each?
+
+- [ ] A:
+
+# 4. The agent
+
+Proposal: the agent may fetch files and run `joma backup` / `joma restore <file>`, but
+the passphrase is always typed into Joma's own window, never passed on the command line
+or through the agent (transcripts and logs keep it). Is there more the agent should do,
+for example check that the backup is recent, or run it on a schedule?
+
+- [ ] A:
+
+# 5. Keeping the backup current
+
+The archive changes when you add contacts or devices. Options: a "back up now" button
+and a reminder when the backup is older than the last contact change; or automatic
+backups, which keep a token on the machine (acceptable with a one-repo GitHub App).
+Proposal: automatic, with the token in the system keyring, and off until you turn it on.
+
+- [ ] A:
+
+# 6. Conversation history
+
+Not in the archive. It comes back from contacts when they are online, and only for the
+conversations they still have. Backing up the conversations too is possible (much
+bigger, holds message contents and received files). Proposal: not in the first version;
+accounts only.
+
+- [ ] A:
+
+# 7. Which accounts
+
+Proposal: you choose per account; agent accounts are listed too, off by default.
+
+- [ ] A:
+
+# 8. Where restore starts
+
+Proposal: on the first-start screen ("restore from GitHub" next to create and link),
+in the accounts tab ("add → restore from GitHub"), and `joma restore` on the command
+line.
+
+- [ ] A:
+
+# 9. Logging in on a new machine while the old one still works
+
+That is Jami's normal linking. An agent on the old machine could help (`joma link
+<code>`), but a file on GitHub should not approve a link by itself: write access to the
+repo would then be enough to add a device to your account. Proposal: keep linking as it
+is; the backup is for when every device is gone.
+
+- [ ] A:
