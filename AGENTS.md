@@ -5,8 +5,13 @@
 - [docs/FEATURES.md](docs/FEATURES.md) is the manual and the log: a change a user can see
   updates it in the same commit. Decisions go in [docs/DECISIONS.md](docs/DECISIONS.md),
   one line each; only the user moves an item to **Decided**.
-- Discussions with the user: `docs/discussions/YYYY-MM-DD-topic.qmd`, numbered questions
-  with `- [ ] A:` answer lines, as in Vetro.
+- Discussions with the user live on the dev board (below), since 2026-11-24: an item of
+  kind `discussion` with `intro` and `outro` (markdown), `date`, `file`, and `questions`
+  (`n`, `title`, `group`, `text` in markdown, `answer`, `done` = ticked, i.e. agreed). The
+  user reads and answers there. `docs/discussions/YYYY-MM-DD-topic.qmd` is the record in
+  the repo: numbered questions with `- [ ] A:` lines (ticked = agreed), written when the
+  discussion starts and brought up to date with the board's answers at every review.
+  Pictures go to the board's assets and to `docs/discussions/img/`.
 - **Dev board** (experiment since 2026-11-24): <https://claude.ai/artifact/29FwBMrCPy8fhseivVL5Zs>,
   read and written with the `ArtifactData` tool. Collections: `items` (features, todos,
   ideas, designs, discussions with their `questions`), `decisions`, `scratch` (the user's
@@ -17,7 +22,8 @@
   notes into items (and TODO.md entries when they are tasks) and mark them `read` with a
   `result`, answer notes with a `claude` note; set `lastReview` and a one-line
   `reviewNote`; commit. When the repo changes (a new discussion, a feature built or
-  verified), update the board in the same step.
+  verified), update the board in the same step. A new discussion is created on the board
+  and in `docs/discussions/` in the same step.
 - `upstream/` holds read-only clones of jami-daemon, jami-client-qt and gliff for
   reference (ignored by git). gliff's crates are used as git dependencies pinned to a
   reviewed revision; `crates/joma-desk/src/rate.rs` is vendored from gliff (MIT), and so
