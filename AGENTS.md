@@ -7,6 +7,17 @@
   one line each; only the user moves an item to **Decided**.
 - Discussions with the user: `docs/discussions/YYYY-MM-DD-topic.qmd`, numbered questions
   with `- [ ] A:` answer lines, as in Vetro.
+- **Dev board** (experiment since 2026-11-24): <https://claude.ai/artifact/29FwBMrCPy8fhseivVL5Zs>,
+  read and written with the `ArtifactData` tool. Collections: `items` (features, todos,
+  ideas, designs, discussions with their `questions`), `decisions`, `scratch` (the user's
+  quick ideas), `notes` (per item, `by: "you" | "claude"`), `meta/state` (`lastReview`).
+  When the user says "review the dev board": read new scratch notes, notes from the user
+  and items or decisions changed since `lastReview`; copy answers into the discussion
+  files' `A:` lines, move decisions the user marked decided into **Decided**, turn scratch
+  notes into items (and TODO.md entries when they are tasks) and mark them `read` with a
+  `result`, answer notes with a `claude` note; set `lastReview` and a one-line
+  `reviewNote`; commit. When the repo changes (a new discussion, a feature built or
+  verified), update the board in the same step.
 - `upstream/` holds read-only clones of jami-daemon, jami-client-qt and gliff for
   reference (ignored by git). gliff's crates are used as git dependencies pinned to a
   reviewed revision; `crates/joma-desk/src/rate.rs` is vendored from gliff (MIT), and so
