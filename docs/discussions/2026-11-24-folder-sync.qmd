@@ -1,0 +1,84 @@
+---
+title: "Folder sync between your devices and with contacts"
+date: 2026-11-24
+lang: en
+---
+
+The idea (user, 2026-11-24): use the Jami network and Joma to keep folders in sync
+across your own devices and with other users.
+
+What Joma already has: libjami exposes a local TCP service to chosen peers
+(`exposed_services`) and opens a tunnel to a peer device's service (`open_tunnel`): a
+local port that comes out on the other device, through Jami's NAT traversal and
+encryption, between authenticated devices. The desktop share runs on it
+(`crates/joma-desk`). It reaches your own devices and contacts' devices.
+
+Sketch: Syncthing does the syncing (conflicts, deletions, partial transfers, watching,
+ignore patterns, versions; in the Arch repos). Jami does the pairing and the transport.
+Joma sends the Syncthing device ID as a Joma message; each side exposes Syncthing's port
+as a Jami service and reaches the other through a tunnel. Revoking a device or blocking
+a contact cuts the tunnel.
+
+Limits: no server, so two machines sync only while both are online (a third device that
+is on passes changes along). A relayed connection (Jami's public TURN) is slow and not
+meant for gigabytes. Only Joma machines take part (not the Jami app or phones).
+
+# 1. The engine
+
+Syncthing over Jami tunnels, or Joma's own sync engine over the tunnel. Proposal:
+Syncthing. A sync engine is years of edge cases (two edits at once, renames, deletions
+that come back).
+
+- [ ] A:
+
+# 2. Order
+
+Proposal: your own devices first (one account, every device), contacts next.
+
+- [ ] A:
+
+# 3. Traffic
+
+Only through Jami tunnels (Syncthing's own discovery and relays off), or let Syncthing
+also connect directly and through its relays when that is faster. Proposal: Jami only
+by default, Syncthing's direct connections allowed as an option on a local network.
+
+- [ ] A:
+
+# 4. Folders and conversations
+
+Proposal: a folder shared in a conversation syncs with every member; joining or
+leaving the group adds or removes them. With your own devices, a "you" folder appears
+on every device of the account. Read-only or read-write per person.
+
+- [ ] A:
+
+# 5. Where it lives in Joma
+
+A "folders" tab, a section in each conversation's menu, or both. Proposal: a list of
+synced folders in the devices tab for your own, and a "shared folders" entry in the
+conversation menu for contacts.
+
+- [ ] A:
+
+# 6. Syncthing as a dependency
+
+Joma starts its own Syncthing (its own config under Joma's data, not the user's
+Syncthing), or uses the user's running one. Proposal: Joma's own instance, started and
+stopped with Joma, so it never touches the user's Syncthing setup.
+
+- [ ] A:
+
+# 7. Agents
+
+An agent account shares its output folder with you (and you share a task folder with
+it). In the first version, or later?
+
+- [ ] A:
+
+# 8. After a restore from the GitHub backup
+
+Proposal: the list of synced folders is part of what Joma backs up, so a restored
+machine offers to set them up again.
+
+- [ ] A:
