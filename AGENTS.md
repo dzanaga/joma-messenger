@@ -7,7 +7,9 @@
   one line each; only the user moves an item to **Decided**.
 - Discussions with the user live on the dev board (below), since 2026-11-24: an item of
   kind `discussion` with `intro` and `outro` (markdown), `date`, `file`, and `questions`
-  (`n`, `title`, `group`, `text` in markdown, `answer`, `done` = ticked, i.e. agreed). The
+  (`n`, `title`, `group`, `text` in markdown, `answer`, `done` = ticked, i.e. agreed,
+  `settled` = made moot by later work; in the file: `- [ ] A: (settled by later work)`);
+  closing one sets `status: closed` and an optional `closeNote` for the file. The
   user reads and answers there. `docs/discussions/YYYY-MM-DD-topic.qmd` is the record in
   the repo: numbered questions with `- [ ] A:` lines (ticked = agreed), written when the
   discussion starts and brought up to date with the board's answers at every review.
@@ -18,7 +20,8 @@
   quick ideas), `notes` (per item, `by: "you" | "claude"`), `meta/state` (`lastReview`).
   When the user says "review the dev board": read new scratch notes, notes from the user
   and items or decisions changed since `lastReview`; copy answers into the discussion
-  files' `A:` lines, move decisions the user marked decided into **Decided**, turn scratch
+  files' `A:` lines, move decisions the user marked decided into **Decided**, rewrite
+  decisions the user corrected (`original` holds the old text) in DECISIONS.md, turn scratch
   notes into items (and TODO.md entries when they are tasks) and mark them `read` with a
   `result`, answer notes with a `claude` note; set `lastReview` and a one-line
   `reviewNote`; commit. When the repo changes (a new discussion, a feature built or
