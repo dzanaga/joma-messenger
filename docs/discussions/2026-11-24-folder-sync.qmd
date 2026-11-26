@@ -39,9 +39,28 @@ Proposal: your own devices first (one account, every device), contacts next.
 
 # 3. Traffic
 
-Only through Jami tunnels (Syncthing's own discovery and relays off), or let Syncthing
-also connect directly and through its relays when that is faster. Proposal: Jami only
-by default, Syncthing's direct connections allowed as an option on a local network.
+Your rule (2026-11-26): through a relay only small files; over Tailscale, any size.
+
+Joma can tell which path a connection takes: libjami's `getConnectionList` gives each
+connection's `remoteAddress` (the Jami app shows it in its connection info). Joma sorts
+it into four kinds:
+
+- **relayed:** the address is the account's TURN server (turn.jami.net by default), a
+  public community relay;
+- **Tailscale:** 100.64.0.0/10 or fd7a:115c:a1e0::/48;
+- **local network:** a private address;
+- **direct:** a public address, peer to peer.
+
+Tailscale can relay too (DERP) when it can't connect directly. `tailscale status --json`
+says which; a Tailscale relay counts as relayed.
+
+Proposal:
+
+- Syncthing's own discovery and relays stay off. It connects only through Jami tunnels,
+  or straight to the other device's Tailscale address when both are on the same tailnet
+  (sent with the Syncthing device ID; faster, no tunnel).
+- Direct, local network and Tailscale: no limit.
+- Relayed: only files up to a limit, see 9.
 
 - [ ] A:
 
@@ -80,5 +99,23 @@ it). In the first version, or later?
 
 Proposal: the list of synced folders is part of what Joma backs up, so a restored
 machine offers to set them up again.
+
+- [ ] A:
+
+# 9. The limit on relayed paths
+
+Syncthing has no "largest file" setting, so the limit has to come from Joma. Options:
+
+- (a) Joma watches what Syncthing still needs (its REST API lists the files with their
+  sizes). While the path is relayed, Joma adds the larger ones to the ignore list, and
+  takes them off once a direct path appears. Exact, but more moving parts.
+- (b) Each folder is marked "small files" (notes, configs: always syncs) or "large
+  files" (photos, videos: waits for a direct path). Simple, but coarse.
+- (c) A speed limit while relayed (Syncthing supports one per device), with no size
+  limit.
+
+Proposal: (b) now, (a) later if (b) proves too coarse, and (c) in both cases so a
+relayed path never floods the relay. Default limit for (a): 20 MB per file. The folder
+row shows "waiting for a direct connection · 3 files, 1.2 GB".
 
 - [ ] A:
