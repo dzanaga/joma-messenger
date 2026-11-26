@@ -4,6 +4,9 @@ date: 2026-11-18
 lang: en
 ---
 
+> Closed 2026-11-26: merged with the backup discussion into
+> [2026-11-26-github.qmd](2026-11-26-github.qmd), one GitHub App for both.
+
 Mocks of every screen, the badge styles and what was checked in libjami are on a page:
 <https://claude.ai/artifact/LjmK3ewEgtoqeJS1XiMg5y>.
 

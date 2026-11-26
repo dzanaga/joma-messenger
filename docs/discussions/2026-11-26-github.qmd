@@ -1,0 +1,255 @@
+---
+title: "GitHub in Joma: one app for identity, backup and new machines"
+date: 2026-11-26
+lang: en
+---
+
+This joins two earlier discussions, which disagreed on the main point: the identity check
+(2026-11-18) proposed a GitHub *OAuth App* with the `gist` scope, the backup (2026-11-23)
+a *GitHub App*. Here it is one GitHub App for everything, and the pieces are designed
+together. The answer already given (one normal password for all accounts) is carried
+over. Earlier pages still apply: the [mock-ups of every screen](https://claude.ai/artifact/LjmK3ewEgtoqeJS1XiMg5y)
+and the [backup simulation](https://claude.ai/artifact/DrMUQ2mQoNwUtjggqDQjfe).
+
+**The idea in one line.** One "sign in with GitHub" gives three things: a badge that shows
+contacts which GitHub account is behind a Jami account, an encrypted backup of your
+accounts in a private repo, and a way to get your accounts onto a new or reinstalled
+machine without the old one.
+
+**What lives where.**
+
+- A public gist `joma.json` in your GitHub account: `{"joma":1, "github_id":<n>, "accounts":[{"jami":"<id>", "label":"…"}]}`.
+  Only you can write it. It says which Jami accounts are yours. No secrets.
+- A line `X-JOMA-GITHUB:<login>` in each verified account's Jami profile (vCard). Only
+  that Jami account can send it. Contacts' Joma matches it against the gist by the
+  numeric `github_id`, so a renamed or re-registered login does not fool it. No signing,
+  no keys: the two claims name each other.
+- A private repo `joma-backup`: one encrypted file per account (Jami's own account
+  archive from `exportToFile`, which Joma accounts write *unencrypted*, so Joma encrypts
+  it: age-style, scrypt or Argon2 from your password) and an `index.json` (labels, Jami
+  IDs, dates; no secrets).
+- On the machine: nothing, unless you turn on automatic backups (then a refresh token in
+  the system keyring).
+
+**Checked in libjami** (`upstream/jami-daemon`):
+
+- The profile travels as the file it is (`sendProfile`, `data_transfer.cpp:945`);
+  `updateProfile` keeps unknown lines and resends to every contact. The key must not
+  start with `FN` or `PHOTO` (`removeByKey` matches by prefix).
+- Linking a device rebuilds the profile from name and photo only (`jamiaccount.cpp:1479`):
+  the line is dropped there, so Joma puts it back.
+- Import is `addAccount` with `Account.archivePath`; importing signs a new device
+  certificate (`onArchiveLoaded`, `archive_account_manager.cpp:1259`), the same path
+  linking takes. So the backup can add a machine while the old one still works.
+- Conversation history is not in the archive; it comes back from contacts and your other
+  devices.
+- `sendTrustRequest` carries a payload (under 64 KB) that arrives with the request.
+
+**Checked in GitHub's docs** (2026-11-26):
+
+- GitHub Apps support the device flow once it is enabled in the app's settings, with the
+  client ID only (no client secret, so no server and nothing secret in the binary).
+- A user access token has only the permissions both you and the app have, and reaches
+  only the repos the app was given.
+- Gists are an account permission of GitHub Apps ("Gists", write: create and delete).
+  Read from a summary of the docs page, so to confirm when the app exists.
+- Tokens expire after 8 hours by default, with a 6-month refresh token; with the device
+  flow, refreshing needs no client secret. Expiry can be turned off (not proposed).
+- You can revoke the app's authorization from your GitHub settings at any time.
+- Not settled by the docs: whether the app's token may *create* the `joma-backup` repo,
+  and whether a repo it creates joins the app's "selected repositories". To test (see 3).
+
+## A. The GitHub App
+
+# 1. The app itself
+
+Proposal: one GitHub App "Joma", registered by you under your account, public (anyone
+can sign in with it). Device flow on, no webhook, no server; the client ID ships in the
+binary. Permissions:
+
+- account: **Gists** read and write (the identity gist);
+- repository: **Contents** read and write, plus the required **Metadata** read, on
+  *only* `joma-backup` (you pick that one repo when installing).
+
+Nothing else: no email, no other repos, no organizations.
+
+- [ ] A:
+
+# 2. When `gh` is already logged in
+
+Omarchy users often have `gh`. Its token usually has the `repo` and `gist` scopes, which
+cover everything here without the app, but reach every repo you have. Proposal: if `gh`
+is logged in, Joma offers it ("use your gh login") and otherwise uses the app. Joma never
+copies the `gh` token anywhere; it runs `gh api` each time. The alternative is the app
+always, so Joma's own access stays narrow.
+
+- [ ] A:
+
+# 3. Creating the backup repo
+
+GitHub's docs don't say whether a GitHub App token may create a repo, or whether a repo
+it creates is added to the app's selected repos. Proposal: with `gh`, Joma creates the
+private repo itself. Without it, Joma opens `github.com/new` filled in (`joma-backup`,
+private), then the app's install page to pick that repo. I test the shorter path when the
+app exists and keep it if it works.
+
+- [ ] A:
+
+# 4. Tokens
+
+Proposal: by default Joma keeps no token. It signs in, does the job (publish the gist,
+push a backup, restore) and drops the token. Only automatic backups (see 9) keep a
+refresh token, in the system keyring, refreshed without a secret; turning them off
+deletes it. Revoking the app on GitHub stops everything; Joma then shows "GitHub access
+was removed" once.
+
+- [ ] A:
+
+## B. Identity
+
+# 5. Setup, in one go with the backup
+
+Proposal: one "Connect GitHub" on the account row in the accounts tab (and on the
+first-start screen). One sign-in, then two switches, both explained: *show a ✓ GitHub
+badge to contacts* (makes the link between your GitHub and this Jami account public) and
+*back up this account* (private). Either can be on alone. The earlier proposal was a
+separate "verify with GitHub" button.
+
+- [ ] A:
+
+# 6. The badge: style, where it shows, requests
+
+Proposal, as in the mock-ups: a check and `github.com/alice` in muted text in the
+conversation header and on the account row; a check on the avatar's corner in the chats
+and contacts lists, incoming requests and the add card. Joma sends its profile with
+contact requests (`sendTrustRequest` payload), so the badge shows before you accept. The
+compact bar panel and the call overlay: optional. Keep the Jami picture, link to the
+GitHub profile; no GitHub avatar.
+
+- [ ] A:
+
+# 7. Adding contacts by GitHub name
+
+Proposal: a switch above the add input (Jami name or ID / GitHub, Tab flips) plus
+`gh:alice` as a shortcut. Joma reads alice's public `joma.json`; with several accounts
+listed you pick one by its label. A card shows what was found; nothing is sent until you
+confirm.
+
+- [ ] A:
+
+# 8. Re-checking, changes and removal
+
+Proposal: re-check every 3 days and whenever a profile arrives, cached (GitHub allows 60
+calls an hour without a login). A missing gist removes the badge with one system line.
+If a GitHub account later names a different Jami ID than the one pinned, a red banner
+in that conversation and no badge until you choose "trust the new one"; nothing is
+blocked. Removing clears the profile line at once and offers to delete the gist (one
+more sign-in, or Joma opens the gist for you).
+
+- [ ] A:
+
+## C. Backup
+
+# 9. Keeping it current
+
+The archive changes when you add contacts or devices. Proposal: "back up now" always,
+plus automatic backups when you turn them on (a push after each such change, with the
+refresh token from 4). With them off, a reminder when the backup is older than the last
+change.
+
+- [ ] A:
+
+# 10. The password
+
+Already answered. One normal password for all accounts, no word lists. The key comes
+from a slow derivation, Joma refuses only obviously weak passwords, and it says plainly
+that a forgotten password makes the backup useless.
+
+- [x] A: (User, 2026-11-23: a normal secure password, no word lists; private repo plus a
+  good password is enough. One password for all accounts.)
+
+# 11. What is in it, and which accounts
+
+Proposal: accounts only (key, contacts, username, devices, settings), not the
+conversation history, which is much bigger and comes back from contacts anyway. You
+choose per account; agent accounts are listed too, off by default. Joma refuses to write
+into a repo that is public.
+
+- [ ] A:
+
+## D. New machines
+
+# 12. One screen for a fresh install
+
+Proposal: the first-start screen offers *create*, *link from another device*, and
+*restore from GitHub*. Restore: sign in → Joma lists the accounts in `index.json` → you
+tick which ones → you type the password once → the accounts come back with the same Jami
+IDs, so contacts, usernames and badges stay valid. Also in the accounts tab ("add →
+restore from GitHub") and as `joma restore`.
+
+- [ ] A:
+
+# 13. Adding a machine while the old one works
+
+Restoring signs a new device certificate, so the backup also adds a machine without the
+two-device link code; both machines then sync as usual. Proposal: the same restore flow,
+worded "add this machine from your backup" when the account still has devices. Every
+other device then shows "new device *desktop* joined from the backup · keep / revoke"
+(`KnownDevicesChanged`). A link code is never approved from GitHub.
+
+- [ ] A:
+
+# 14. After a restore or a new device
+
+Linking drops the profile line (see above). Proposal: whenever a device starts on an
+account that your `joma.json` already lists, Joma puts the line back by itself, with no
+new GitHub sign-in. Folder sync (its own discussion) picks up from there too.
+
+- [ ] A:
+
+## E. Agent
+
+# 15. What the agent may do
+
+Proposal: the agent can run `joma backup`, `joma restore` and `joma github status`
+(last backup, which accounts, badge state), and fetch files with `gh`. The password is
+always typed into Joma's own window, never on a command line or through the agent,
+because transcripts and logs keep it. Should the agent also warn when a backup is old,
+or run backups on a schedule?
+
+- [ ] A:
+
+## F. Safety
+
+# 16. What each thing protects, stated plainly
+
+Proposal for the help text and the setup screen:
+
+- The gist is public: anyone can see that your GitHub account owns these Jami accounts.
+  That is the point of the badge; leave the badge off for an account you keep separate.
+- Someone with your GitHub account can change the gist. Contacts who already trust you
+  see the red banner (pinning) rather than a silent switch.
+- Someone with your GitHub account gets the encrypted backup, and needs the password too.
+  Whoever has both holds the account key. Revoking stops one device, but they can make
+  another, so a leaked backup plus password means moving to a new Jami account.
+- Turning it all off: revoke the app on GitHub, delete the gist and the repo. Joma offers
+  each step.
+
+- [ ] A:
+
+## G. Order
+
+# 17. Order of building
+
+Proposal:
+
+1. `joma backup` / `joma restore` with `gh` and an encrypted file: no app needed, and the
+   agent path works from day one.
+2. Restore and "add this machine" on the first-start screen, the keep / revoke notice.
+3. The badge and adding by GitHub name, with `gh` or by hand (Joma copies `joma.json`
+   and opens gist.github.com).
+4. The GitHub App with the device flow, for people without `gh`.
+5. Automatic backups.
+
+- [ ] A:
+

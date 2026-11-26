@@ -4,6 +4,9 @@ date: 2026-11-23
 lang: en
 ---
 
+> Closed 2026-11-26: merged with the identity discussion into
+> [2026-11-26-github.qmd](2026-11-26-github.qmd), one GitHub App for both.
+
 A step-by-step simulation of six situations (setup, everything lost, restore with the
 agent, adding a machine, a forgotten password, a leaked backup):
 <https://claude.ai/artifact/DrMUQ2mQoNwUtjggqDQjfe>.
