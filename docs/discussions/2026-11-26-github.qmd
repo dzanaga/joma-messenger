@@ -4,17 +4,19 @@ date: 2026-11-26
 lang: en
 ---
 
-This joins two earlier discussions, which disagreed on the main point: the identity check
-(2026-11-18) proposed a GitHub *OAuth App* with the `gist` scope, the backup (2026-11-23)
-a *GitHub App*. Here it is one GitHub App for everything, and the pieces are designed
-together. The answer already given (one normal password for all accounts) is carried
-over. Earlier pages still apply: the [mock-ups of every screen](https://claude.ai/artifact/LjmK3ewEgtoqeJS1XiMg5y)
+This replaces two earlier discussions (identity, 2026-11-18; backup, 2026-11-23), which
+disagreed on the main point: an *OAuth App* with the `gist` scope against a *GitHub App*.
+Here it is one GitHub App for everything, and the pieces are designed together. The
+answer already given (one normal password for all accounts) is carried over. Earlier pages still apply: the [mock-ups of every screen](https://claude.ai/artifact/LjmK3ewEgtoqeJS1XiMg5y)
 and the [backup simulation](https://claude.ai/artifact/DrMUQ2mQoNwUtjggqDQjfe).
 
 **The idea in one line.** One "sign in with GitHub" gives three things: a badge that shows
 contacts which GitHub account is behind a Jami account, an encrypted backup of your
 accounts in a private repo, and a way to get your accounts onto a new or reinstalled
 machine without the old one.
+
+**Everything also from the command line** (user, 2026-11-26): an agent should be able to
+do all of it, so each piece ships with its `joma` command in the same change (section E).
 
 **What lives where.**
 
@@ -207,21 +209,61 @@ new GitHub sign-in. Folder sync (its own discussion) picks up from there too.
 
 - [ ] A:
 
-## E. Agent
+## E. Agent and command line
 
-# 15. What the agent may do
+# 15. The commands
 
-Proposal: the agent can run `joma backup`, `joma restore` and `joma github status`
-(last backup, which accounts, badge state), and fetch files with `gh`. The password is
-always typed into Joma's own window, never on a command line or through the agent,
-because transcripts and logs keep it. Should the agent also warn when a backup is old,
-or run backups on a schedule?
+Each step lands together with its command, so the agent can do everything the window
+does. The commands talk to the running Joma over its socket, like `joma send` today; if
+Joma isn't running (a fresh install), the command starts it hidden. All take `--json`
+and exit non-zero on failure.
+
+```
+joma github connect [--gh]       sign in: prints the code and github.com/login/device,
+                                 waits for your approval (or uses gh's login)
+joma github status               signed in, badge per account, last backup, automatic on/off
+joma github badge on|off [ACCT]  publish or withdraw the gist entry and the profile line
+joma github disconnect           drop the token; offers to delete the gist and the repo
+joma backup [ACCT…|--all]        push now
+joma backup auto on|off
+joma backup list                 what joma-backup holds (from index.json)
+joma restore [ACCT…|--all] [--file PATH]
+                                 restore, or add this machine; from GitHub or a file
+joma lookup gh:alice             read alice's joma.json: logins, labels, Jami IDs
+joma add gh:alice[/label]        check, then send the contact request
+joma devices                     this account's devices; joma devices revoke ID
+```
+
+Proposal: these names, `ACCT` being a label, a username or a Jami ID as in
+`joma account`. Missing anything?
+
+- [ ] A:
+
+# 16. Secrets and approvals stay with you
+
+An agent runs the commands, but two things never go through it. **The password:**
+`joma backup` and `joma restore` ask for it in Joma's own window, never on a command line,
+in an environment variable or through a pipe, because transcripts and logs keep it. The
+command waits and reports only "done" or "wrong password". **The GitHub approval:**
+`joma github connect` prints the code; you approve it in your browser. Proposal: that,
+plus a terminal prompt instead of the window when you run the command yourself in a
+terminal (Joma can tell: a real tty and no agent environment). Or always the window?
+
+- [ ] A:
+
+# 17. What the agent may do on its own
+
+Proposal: the agent may run every command above without asking, except `restore` on a
+machine that already has accounts, `github disconnect` and `devices revoke`, which it
+should confirm with you first (this goes in the agent's instructions, which Joma can
+install with the agent account; see the agents discussion). Should it also warn when a
+backup is old, or check `joma github status` from time to time?
 
 - [ ] A:
 
 ## F. Safety
 
-# 16. What each thing protects, stated plainly
+# 18. What each thing protects, stated plainly
 
 Proposal for the help text and the setup screen:
 
@@ -239,17 +281,19 @@ Proposal for the help text and the setup screen:
 
 ## G. Order
 
-# 17. Order of building
+# 19. Order of building
 
 Proposal:
 
-1. `joma backup` / `joma restore` with `gh` and an encrypted file: no app needed, and the
-   agent path works from day one.
+1. `joma backup` / `joma restore` with `gh` and an encrypted file, and `joma github status`:
+   no app needed, and the agent path works from day one.
 2. Restore and "add this machine" on the first-start screen, the keep / revoke notice.
 3. The badge and adding by GitHub name, with `gh` or by hand (Joma copies `joma.json`
    and opens gist.github.com).
 4. The GitHub App with the device flow, for people without `gh`.
 5. Automatic backups.
+
+Each step with its commands from section E and their tests.
 
 - [ ] A:
 

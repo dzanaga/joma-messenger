@@ -5,6 +5,10 @@
 - [docs/FEATURES.md](docs/FEATURES.md) is the manual and the log: a change a user can see
   updates it in the same commit. Decisions go in [docs/DECISIONS.md](docs/DECISIONS.md),
   one line each; only the user moves an item to **Decided**.
+- Agents can drive Joma (user, 2026-11-26): a feature a user can trigger also gets its
+  `joma` command in the same change (through the socket like `joma send`, with `--json`
+  and a non-zero exit on failure), with a test. Passwords and approvals are never taken on
+  the command line, from the environment or through a pipe: Joma asks in its own window.
 - Discussions with the user live on the dev board (below), since 2026-11-24: an item of
   kind `discussion` with `intro` and `outro` (markdown), `date`, `file`, and `questions`
   (`n`, `title`, `group`, `text` in markdown, `answer`, `done` = ticked, i.e. agreed,
