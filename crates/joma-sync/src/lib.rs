@@ -104,6 +104,7 @@ impl Syncthing {
     /// `default_dir` is where folders shared by your other devices appear.
     pub fn start(home: &Path, default_dir: &Path) -> Result<Self> {
         std::fs::create_dir_all(home)?;
+        stop_stale(home);
         if !home.join("config.xml").exists() {
             let out = Command::new("syncthing")
                 .arg("generate")
@@ -358,6 +359,35 @@ impl Drop for Syncthing {
     }
 }
 
+/// Stop a Syncthing left running on this home by an earlier Joma that was killed rather
+/// than quit (it would hold the ports and the database). Matched by the exact `--home`
+/// argument, so the user's own Syncthing is never touched.
+fn stale_pids(home: &Path) -> Vec<i32> {
+    let want = format!("--home={}", home.display());
+    let Ok(dir) = std::fs::read_dir("/proc") else { return Vec::new() };
+    dir.filter_map(|e| e.ok()?.file_name().to_str()?.parse::<i32>().ok())
+        .filter(|pid| {
+            std::fs::read(format!("/proc/{pid}/cmdline"))
+                .map(|c| {
+                    let args: Vec<&[u8]> = c.split(|b| *b == 0).collect();
+                    args.first().is_some_and(|a| a.ends_with(b"syncthing")) && args.iter().any(|a| *a == want.as_bytes())
+                })
+                .unwrap_or(false)
+        })
+        .collect()
+}
+
+fn stop_stale(home: &Path) {
+    let pids = stale_pids(home);
+    for pid in &pids {
+        let _ = Command::new("kill").arg(pid.to_string()).status();
+    }
+    let until = Instant::now() + Duration::from_secs(5);
+    while !stale_pids(home).is_empty() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 /// Status code and body of a raw HTTP/1.1 response (chunked or not).
 fn parse_response(raw: &[u8]) -> Result<(u16, String)> {
     let text = String::from_utf8_lossy(raw);
@@ -405,6 +435,27 @@ mod tests {
         let id = folder_id("My Notes!");
         assert!(id.starts_with("joma-mynotes-") && id.len() == "joma-mynotes-".len() + 6, "{id}");
         assert!(folder_id("???").starts_with("joma-folder-"));
+    }
+
+    /// A Syncthing left behind by a killed Joma is stopped by the next start.
+    #[test]
+    fn a_stale_instance_is_stopped() {
+        if !available() {
+            return;
+        }
+        let base = std::env::temp_dir().join(format!("joma-sync-stale-{}", std::process::id()));
+        let home = base.join("home");
+        let first = Syncthing::start(&home, &base.join("sync")).unwrap();
+        // Never stopped, as if Joma had been killed.
+        std::mem::forget(first);
+        std::thread::sleep(Duration::from_millis(500));
+        assert!(!stale_pids(&home).is_empty());
+        let second = Syncthing::start(&home, &base.join("sync")).unwrap();
+        assert!(second.get("/rest/system/ping").is_ok());
+        drop(second);
+        std::thread::sleep(Duration::from_millis(500));
+        assert!(stale_pids(&home).is_empty(), "{:?}", stale_pids(&home));
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// Two real Syncthing instances, paired directly on 127.0.0.1 (as two Jami tunnels

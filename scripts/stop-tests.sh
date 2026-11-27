@@ -6,3 +6,9 @@ for p in $(pgrep -x joma); do
     kill "$p" && echo "stopped test instance $p"
   fi
 done
+# Joma's own Syncthing (folder sync) inherits JOMA_PROFILE: stop it too.
+for p in $(pgrep -x syncthing); do
+  if tr '\0' '\n' <"/proc/$p/environ" 2>/dev/null | grep -q '^JOMA_PROFILE='; then
+    kill "$p" 2>/dev/null && echo "stopped test syncthing $p"
+  fi
+done

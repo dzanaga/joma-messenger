@@ -21,5 +21,11 @@ D-23, discussion `docs/discussions/2026-11-24-folder-sync.qmd`.
   status` show the Jami path to each device (from the connection list, see connection
   info) and warn on relayed ones. Later: sync only on direct paths, a self-hosted server
   for the rest.
+- **Killed, not quit.** A Syncthing left by a Joma that was killed keeps running; the
+  next start stops any Syncthing whose `--home` is Joma's own (never the user's), and
+  `scripts/stop-tests.sh` stops a test profile's Syncthing.
+- **Tested** (2026-11-27): two test profiles linked as two devices of one account, sync
+  on in both, a folder added on one: its files reached the other's `~/joma-sync/` in
+  5 s and an edit came back in 12 s, over a Jami tunnel on the local network.
 - **Not yet.** Contacts (folders shared in a conversation), Tailscale straight to the
   other Syncthing without a tunnel, the folder list in the GitHub backup, agents.
