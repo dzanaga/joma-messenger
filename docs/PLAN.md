@@ -48,3 +48,4 @@ Design notes live in `docs/design/`. Decisions are in `docs/DECISIONS.md`.
 | **U8** | Transcription of voice messages (whisper.cpp local, superwhisper by choice) | built in 0.5.2.dev8; the flow verified with a stand-in `whisper-cli`; to try with whisper.cpp installed |
 | **U9** | GIFs from a local folder, filtered by name | built in 0.5.2.dev9, the picker verified in the nest |
 | **A0** | joma for Android: Jami Android with joma's name, icon, palette, font, icons and words, built from pinned sources with an overlay and patches (`android/`, `docs/design/07-android.md`) | built (0.1.0.dev1); verified in an emulator (account without username, chat and request between two local accounts, notification); to try on the phone |
+| **A1** | joma for Android: restore from GitHub (device flow, the shared backup format), after the desktop backup and the GitHub App (D-24, discussion question 20) | planned |

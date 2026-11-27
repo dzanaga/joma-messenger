@@ -59,8 +59,8 @@
   from a public `joma.json` gist and an `X-JOMA-GITHUB` vCard line; adding by `gh:name`;
   encrypted account archives (one password) in a private repo, restore and "add this
   machine" on the first-start screen; every step with its `joma` command, passwords
-  only in Joma's window. Order: backup/restore with `gh`, restore screen, badge, the
-  App, automatic backups. Open: re-checking and removal with several accounts (8),
+  only in Joma's window. Order: backup/restore with `gh`, the App (device flow),
+  restore from GitHub on Android, restore screen, badge, automatic backups. Open: re-checking and removal with several accounts (8),
   adding a machine while the old one works (13). (User, 2026-11-26,
   `docs/discussions/2026-11-26-github.qmd`.)
 - D-25 joma for Android starts as Jami Android reskinned (name, icon, palette, font, icons,

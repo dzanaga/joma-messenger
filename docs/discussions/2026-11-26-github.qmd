@@ -298,3 +298,23 @@ Each step with its commands from section E and their tests.
 
 - [x] A:
 
+# 20. Restore from GitHub on Android
+
+The phone has no `gh`, so on Android the sign-in is the GitHub App's device flow (the
+code shows on the phone, you approve it in a browser). Proposal, added at the user's
+request (2026-11-27):
+
+- The Android app's first-start screen gets **restore from GitHub** next to create and
+  link: sign in with the device flow → the accounts in `index.json` → tick → the
+  password once → the account comes back with the same Jami ID (a new device
+  certificate, as on the desktop).
+- One backup format for both: the same encryption (password → key with a slow
+  derivation, then an authenticated cipher), specified in `docs/design/` and tested on
+  both sides against the same sample files.
+- **New order:** 1. desktop `joma backup` / `joma restore` with `gh` and a file; 2. the
+  GitHub App with the device flow (desktop, so it can be tested); 3. restore from GitHub
+  on Android; 4. the desktop restore screen and the keep / revoke notice; 5. the badge
+  and adding by GitHub name; 6. automatic backups.
+- Backing up *from* the phone: later.
+
+- [x] A: (User, 2026-11-27: add Android GitHub restore to the plan.)
