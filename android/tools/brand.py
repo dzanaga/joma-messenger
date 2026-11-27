@@ -105,7 +105,7 @@ def night(p: dict) -> dict:
         "donation_card_background_color": hx(p["lighter_background"]),
         "donation_card_button_color": hx(acc),
         "color_primary_light": hx(acc),
-        "color_primary_dark": hx(p["selection"]),
+        "color_primary_dark": hx(quiet),
         "color_primary_light_container": hx(p["selection"]),
         "color_secondary": hx(p["dark_background"]),
         "color_primary_light_translucent": hx(acc, 0xB0),
@@ -117,6 +117,16 @@ def night(p: dict) -> dict:
         "joma_accent": hx(acc),
         "joma_border": hx(border),
         "joma_lavender": "#B193F7",
+        # Material's surface roles (cards, sheets, menus, fields), from the background
+        # toward the foreground like the desktop's tiles.
+        "joma_surface_lowest": hx(p["dark_background"]),
+        "joma_surface_low": hx(mix(bg, fg, 0.04)),
+        "joma_surface": hx(p["lighter_background"]),
+        "joma_surface_high": hx(mix(bg, fg, 0.12)),
+        "joma_surface_highest": hx(mix(bg, fg, 0.16)),
+        "joma_on_surface_variant": hx(fg),
+        "joma_outline": hx(mix(bg, fg, 0.30)),
+        "joma_outline_variant": hx(border),
     }
 
 
@@ -129,6 +139,15 @@ def day(p: dict) -> dict:
         "jami_id_surface_color": hx(acc),
         "conversation_palette_dark_blue": hx(acc),
         "ic_launcher_background": "#000000",
+        # Material's light defaults, for the day theme (joma is dark unless asked).
+        "joma_surface_lowest": "#FFFFFF",
+        "joma_surface_low": "#F7F7FA",
+        "joma_surface": "#F1F1F5",
+        "joma_surface_high": "#EBEBF0",
+        "joma_surface_highest": "#E5E5EB",
+        "joma_on_surface_variant": "#45464F",
+        "joma_outline": "#767680",
+        "joma_outline_variant": "#C6C6D0",
     }
 
 

@@ -41,6 +41,15 @@
         <!-- joma -->
         <item name="android:fontFamily">@font/joma_mono</item>
         <item name="fontFamily">@font/joma_mono</item>
+        <item name="colorSurfaceContainerLowest">@color/joma_surface_lowest</item>
+        <item name="colorSurfaceContainerLow">@color/joma_surface_low</item>
+        <item name="colorSurfaceContainer">@color/joma_surface</item>
+        <item name="colorSurfaceContainerHigh">@color/joma_surface_high</item>
+        <item name="colorSurfaceContainerHighest">@color/joma_surface_highest</item>
+        <item name="colorSurfaceVariant">@color/joma_surface</item>
+        <item name="colorOnSurfaceVariant">@color/joma_on_surface_variant</item>
+        <item name="colorOutline">@color/joma_outline</item>
+        <item name="colorOutlineVariant">@color/joma_outline_variant</item>
         <item name="android:statusBarColor">@color/background</item>
         <item name="android:navigationBarColor">@color/background</item>
         <item name="textAppearanceDisplayLarge">@style/TextAppearance.Joma.DisplayLarge</item>
@@ -58,6 +67,24 @@
         <item name="textAppearanceLabelLarge">@style/TextAppearance.Joma.LabelLarge</item>
         <item name="textAppearanceLabelMedium">@style/TextAppearance.Joma.LabelMedium</item>
         <item name="textAppearanceLabelSmall">@style/TextAppearance.Joma.LabelSmall</item>
+    </style>
+
+    <!-- Jami forces a light theme on the account wizard; joma's is the same as the rest. -->
+    <style name="AppThemeBase.Light" parent="AppThemeBase" />
+
+    <!-- Jami's dark theme for calls and the media viewer, with the terminal font. -->
+    <style name="AppThemeBase.Dark" parent="@style/Theme.Material3Expressive.Dark.NoActionBar">
+        <item name="android:colorBackground">@color/black</item>
+        <item name="colorPrimary">@color/white</item>
+        <item name="colorSecondary">@color/color_primary_light</item>
+        <item name="colorError">@color/colorError</item>
+        <item name="colorOnSecondary">@color/white</item>
+        <item name="colorPrimaryContainer">@color/colorPrimary</item>
+        <item name="colorOnPrimaryContainer">@color/background</item>
+        <item name="android:windowContentTransitions">true</item>
+        <!-- joma -->
+        <item name="android:fontFamily">@font/joma_mono</item>
+        <item name="fontFamily">@font/joma_mono</item>
     </style>
 
     <style name="TextAppearance.Joma.DisplayLarge" parent="TextAppearance.Material3.DisplayLarge"><item name="fontFamily">@font/joma_mono</item><item name="android:fontFamily">@font/joma_mono</item></style>
