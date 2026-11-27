@@ -21,6 +21,10 @@ WORK="$OUT/work"
 ABIS="${ABIS:-arm64-v8a}"
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/Sdk}"
 STEP="${1:-apk}"
+# Cross builds must not see this machine's pkg-config files (gnutls found the host's
+# tss2 and failed): an empty default path; the contrib build's PKG_CONFIG_PATH still applies.
+export PKG_CONFIG_LIBDIR="$OUT/no-host-pkgconfig"
+mkdir -p "$PKG_CONFIG_LIBDIR"
 
 case "$OUT" in "$REPO"/*) echo "refusing to build inside the repository: $OUT" >&2; exit 1 ;; esac
 
