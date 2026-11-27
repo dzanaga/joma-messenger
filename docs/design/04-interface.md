@@ -64,3 +64,16 @@ bubble gets a pixel limit (`bubble_max`, from the window) and a text that will w
 estimate, the font is monospace) gets that width outright. `scripts/shots.sh` screenshots
 every tab of a test profile in the nest, with the user's theme; `joma ui <part>` opens
 overlays for it.
+
+0.5.2 (pass 2, after the user's review, mockups in the "Joma Interface Plan" artifact):
+Flux's manner. An icon rail (48 px, `render/shell.rs::rail`) replaces the tab strip; the
+names and keys are tooltips (`ui::tip`). No corners anywhere (`radius()` is 0; Hyprland
+rounds the window) and no frames: `tile` is a plain container, panels touch and are told
+apart by fill (rail `darker_background`, list `dark_background`, chat `background`),
+with `hair` (foreground at 7 %) where one fill meets itself. Selection is `sel`
+(`selection` of the theme), never the accent; the accent marks unread counts, played
+audio and video, switches that are on, and a send button with something to send. Icons
+at 2 px stroke; action icons in the text colour, secondary ones muted. Messages are flat
+(`panel` for theirs, `sent` = `dark_background` + 10 % accent for ours). The composer is
+a hairline, the text, the tools and send.
+

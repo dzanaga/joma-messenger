@@ -137,7 +137,8 @@ pub struct SettingsView {
     /// The default camera's sizes (largest first) and, per size, its rates.
     pub sizes: Vec<(String, Vec<String>)>,
     pub camera_settings: joma_jami::Details,
-    /// The section shown: interface, audio, video, desktop share, about.
+    /// The section shown: 1 audio, 2 video, 3 desktop share, 4 about (colours, font and
+    /// corners come from Omarchy, so there is no interface section).
     pub section: usize,
 }
 
@@ -464,7 +465,6 @@ pub struct Joma {
     /// The message box has the keyboard (its field shows it).
     pub composer_focused: bool,
     /// The window is wide enough for the tabs' names.
-    pub tab_labels: bool,
     /// How wide a bubble may get: three quarters of the conversation (GPUI's text does
     /// not wrap under a percentage width).
     pub bubble_max: f32,
@@ -770,7 +770,6 @@ impl Joma {
             update_note: String::new(),
             keys_open: false,
             composer_focused: false,
-            tab_labels: true,
             bubble_max: 480.,
             focus: cx.focus_handle(),
             messages_scroll: ScrollHandle::new(),
@@ -805,7 +804,6 @@ impl Joma {
             adding_account: None,
         };
         joma_desk::share::set_max_fps(j.quick.share_fps);
-        crate::ui::set_rounded(j.quick.rounded);
         j.composer.update(cx, |c, _| c.set_bare(true));
         j.configure_inputs(cx);
         j.boot(cx);
@@ -2054,14 +2052,12 @@ impl Joma {
         }
         let last_msg = conv.messages.iter().rev().find(|m| m.author == peer).map(|m| m.ts).unwrap_or(0);
         let seen = self.presence.seen.get(peer).map(|s| *s as i64).unwrap_or(0).max(last_msg);
-        let mut parts = Vec::new();
+        // One short word: online, or when last seen.
         if self.model.online.contains(peer) {
-            parts.push("on Jami".to_owned());
+            Some("online".into())
+        } else {
+            (seen > 0).then(|| format!("seen {}", crate::render::when(seen)))
         }
-        if seen > 0 {
-            parts.push(format!("seen {}", crate::render::when(seen)));
-        }
-        (!parts.is_empty()).then(|| parts.join(" · "))
     }
 
     /// Share with a conversation's peer without a call: ask what to share first, when
@@ -2975,7 +2971,7 @@ impl Joma {
         let (noise, echo, agc) = joma_jami::audio_processing().unwrap_or_default();
         let cameras = joma_jami::video_devices().unwrap_or_default();
         let camera = joma_jami::default_video_device().unwrap_or_default();
-        let mut v = SettingsView { inputs, outputs, current, noise, echo, agc, cameras, camera, ..Default::default() };
+        let mut v = SettingsView { inputs, outputs, current, noise, echo, agc, cameras, camera, section: 1, ..Default::default() };
         self.load_camera_modes(&mut v);
         self.settings = Some(v);
         cx.notify();
@@ -3073,17 +3069,6 @@ impl Joma {
             }
             let _ = joma_jami::set_codec_details(&acc, id, &d);
         }
-    }
-
-    pub fn set_rounded(&mut self, on: bool, cx: &mut Context<Self>) {
-        self.quick.rounded = on;
-        crate::ui::set_rounded(on);
-        self.save_quick(cx);
-    }
-
-    pub fn set_show_version(&mut self, on: bool, cx: &mut Context<Self>) {
-        self.quick.show_version = on;
-        self.save_quick(cx);
     }
 
     /// Ask GitHub which releases exist (in the background). Test profiles only with
@@ -3539,7 +3524,12 @@ impl Joma {
         all.into_iter().filter(|c| q.is_empty() || c.title.to_lowercase().contains(&q)).collect()
     }
 
-    fn send_composed(&mut self, cx: &mut Context<Self>) {
+    /// Files waiting beside the composer for the open conversation.
+    pub fn attachments_pending(&self) -> bool {
+        self.selected.as_ref().is_some_and(|c| self.attachments.get(c).is_some_and(|v| !v.is_empty()))
+    }
+
+    pub fn send_composed(&mut self, cx: &mut Context<Self>) {
         let Some(conv) = self.selected.clone() else { return };
         let files = self.attachments.remove(&conv).unwrap_or_default();
         let text = self.composer.read(cx).text();
@@ -4493,7 +4483,6 @@ impl Joma {
                 let quick = QuickConfig::load();
                 if quick != self.quick {
                     self.quick = quick;
-                    crate::ui::set_rounded(self.quick.rounded);
                     cx.notify();
                 }
                 Reply::Quick(self.quick_state())

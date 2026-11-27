@@ -32,18 +32,18 @@ account from this machine: two clicks when your other devices keep it, else typi
 `delete`, since an account no other device has is lost for good.
 
 ## Settings
-The sliders icon in the tab strip opens a page in place of the list and the
+The sliders icon at the bottom of the rail opens a page in place of the list and the
 conversation (the icon again, ✕ or Esc closes it), with sections on the left:
-**interface** (rounded or square corners; the version shown or hidden), **audio**,
-**video**, **desktop share**, **about** (version, account, keys). Audio and video: microphone, speakers and the device that rings;
+**audio**, **video**, **desktop share**, **about** (version, account, keys). Colours,
+the font and the window's corners come from Omarchy, so there is no interface section. Audio and video: microphone, speakers and the device that rings;
 noise and echo removal (auto, Jami's, the system's, off) and automatic gain; the camera,
 its resolution and frame rate; call quality (auto lets Jami adapt; low, medium, high
 fix the video bitrate at 0.5, 1.5 or 4 Mb/s, applied again at every start since the
 daemon forgets it); the Joma desktop share's frame rate (30 or 60). Saved in Jami's own
-configuration, and `share_fps`, `video_quality`, `rounded`, `show_version` in `quick.toml`.
+configuration, and `share_fps`, `video_quality` in `quick.toml`.
 
 ## Your picture
-Your picture in the tab strip → **your picture** (or the pencil in Accounts): choose a picture (cropped square) or
+Your picture at the bottom of the rail → **your picture** (or the pencil in Accounts): choose a picture (cropped square) or
 **draw pixels**: a 16×16 grid with pen, eraser, fill and mirror, colours from a grid of
 hues and greys (shift+click a colour: the background), a live preview; "use it" sets
 it. Contacts receive it with your profile and see it in their lists, headers and
@@ -227,7 +227,7 @@ colour, its dot lavender online, green with unread messages, red offline, grey i
   Again: it hides.
 - **Right click:** open, invisible, start at login, quit.
 - **Opening Joma** (the launcher, `joma`): a floating window, 980×680, centred, like a
-  messenger app. the **expand** icon in the panel's tab strip pops out to it; the **tray** icon pops
+  messenger app. the **expand** icon in the panel's rail pops out to it; the **tray** icon pops
   back in.
 - **Closing the window** (Super+W) hides it to the tray; Joma keeps receiving messages and
   calls. `joma`, the launcher, `joma open` or an incoming call bring it back. Ctrl+Q,
@@ -321,7 +321,7 @@ whichever ran last.
 
 ## Updates
 Joma asks GitHub for its releases shortly after it starts and every six hours. When a
-newer one exists, **update · 0.6.0** shows in the tab strip (and a desktop notification
+newer one exists, an orange download icon shows in the rail (and a desktop notification
 says so once): it opens **settings → about**, where **update and restart** installs it
 with mise and starts the new version. A Joma not installed with mise shows the command
 instead. **Channel**: stable releases only (the default), or pre-releases too
@@ -345,6 +345,12 @@ notifications); calls, voice messages and files not yet tried. Design:
 `docs/design/07-android.md`.
 
 ## Log
+- 0.5.2 (2026-11-27): a quieter look, like Flux: an icon rail on the left in place of the
+  tab strip (names and keys in tooltips), square everywhere (Hyprland rounds the
+  window), areas set apart by their fill, selection as a lighter fill, the accent only
+  for unread, played and on; white icons drawn at 2 px; flat messages (yours on a warm
+  tint); a one-line chat header; the message field without a frame and with a **send**
+  button; the corners and version settings are gone (the version is in settings → about).
 - 0.5.2.dev14 (2026-11-27): voice messages like the Jami app's (play button, bars,
   jump by click); video messages play in the bubble with subtitles from their transcript,
   and fill the window from the corner button; the chat follows a message that grows.

@@ -89,9 +89,7 @@ pub fn avatar(t: &Theme, picture: Option<std::path::PathBuf>, key: &str, name: &
                 .flex()
                 .items_center()
                 .justify_center()
-                .bg(color.opacity(0.22))
-                .border_1()
-                .border_color(color.opacity(0.5)).rounded(px(radius()))
+                .bg(color.opacity(0.2))
                 .text_color(color)
                 .text_size(px((side * 0.48).max(9.)))
                 .font_weight(FontWeight::BOLD)
@@ -318,8 +316,7 @@ impl Render for Joma {
         }
         // A narrow window (the compact panel) shows the list or one conversation.
         self.narrow = window.viewport_size().width < px(700.);
-        self.tab_labels = window.viewport_size().width >= px(900.);
-        let chat_width = f32::from(window.viewport_size().width) - if self.narrow || (self.stage && self.has_stage()) { 2. * GAP } else { 290. + 3. * GAP };
+        let chat_width = f32::from(window.viewport_size().width) - if self.narrow || (self.stage && self.has_stage()) { 48. } else { 48. + 290. };
         self.bubble_max = ((chat_width - 30.) * 0.74).max(160.);
         self.composer_focused = composer_shown && self.composer.focus_handle(cx).is_focused(window);
         let full = if self.fullscreen { self.fullscreen_stage(&t, cx) } else { None };
@@ -335,9 +332,8 @@ impl Render for Joma {
             div()
                 .flex()
                 .flex_1()
+                .min_w(px(0.))
                 .min_h(px(0.))
-                .px(px(GAP))
-                .pb(px(GAP))
                 .when(chat, |d| d.child(tile(&t, true).flex_1().bg(t.bg).child(self.chat(&t, cx))))
                 .when(!chat, |d| d.child(self.sidebar(&t, cx)))
                 .into_any_element()
@@ -345,10 +341,8 @@ impl Render for Joma {
             div()
                 .flex()
                 .flex_1()
+                .min_w(px(0.))
                 .min_h(px(0.))
-                .gap(px(GAP))
-                .px(px(GAP))
-                .pb(px(GAP))
                 // A stage that takes the window takes the sidebar's room too.
                 .when(!(self.stage && self.has_stage()), |d| d.child(self.sidebar(&t, cx)))
                 .child(tile(&t, self.mode == Mode::Chat).flex_1().bg(t.bg).child(self.chat(&t, cx)))
@@ -500,8 +494,16 @@ impl Render for Joma {
                 }
             }))
             .relative()
-            .when(!self.fullscreen && self.gate == Gate::Ready, |d| d.child(self.tab_strip(&t, cx)).children(self.setup_banner(&t, cx)))
-            .child(body)
+            .when(!self.fullscreen && self.gate == Gate::Ready, |d| d.children(self.setup_banner(&t, cx)))
+            // The rail, then the view: areas touch, set apart by their fill.
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .when(!self.fullscreen && self.gate == Gate::Ready, |d| d.child(self.rail(&t, cx)))
+                    .child(body),
+            )
             .children(self.menu_overlay(&t, cx))
             .children(self.keys_overlay(&t, cx))
             .children(self.viewer_overlay(&t, cx))

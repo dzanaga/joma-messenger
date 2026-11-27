@@ -1,35 +1,38 @@
-//! The frame around the views: top bar, setup banner, tab rail, status line, first-run screens.
+//! The frame around the views: the icon rail, setup banner, first-run screens.
 
 use super::*;
 
 impl Joma {
-    /// The strip on top: the numbered tabs, then the version, settings, tray and our
-    /// picture (its menu holds what the old top bar said).
-    pub(super) fn tab_strip(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+    /// The rail on the left: the six views as icons (their names and keys in tooltips),
+    /// then an update, settings, the panel/window switch and our picture (its menu holds
+    /// the rest). The accent only for unread messages and an update.
+    pub(super) fn rail(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let unread: u32 = self.listed_unread();
         let live = !self.model.calls.is_empty() || !self.running_shares_empty();
-        let labels = self.tab_labels;
         let item = |n: usize, tab: Tab, g: Icon, title: &'static str, count: Option<String>, dot: bool| {
-            let on = self.tab == tab;
+            let on = self.tab == tab && self.settings.is_none();
             div()
                 .id(SharedString::from(format!("tab-{title}")))
+                .relative()
                 .flex()
                 .flex_none()
                 .items_center()
-                .gap(px(6.))
-                .h(px(26.))
-                .px(px(if labels { 9. } else { 7. }))
-                .rounded(px(radius()))
-                .text_color(if on { t.accent } else { t.muted })
-                .when(on, |d| d.bg(t.accent_bg))
+                .justify_center()
+                .size(px(36.))
+                .text_color(if on { t.bright } else { t.muted })
+                .when(on, |d| d.bg(t.raised))
                 .cursor_pointer()
-                .hover(|d| d.text_color(t.bright).bg(t.raised))
-                .when(labels, |d| d.child(div().text_size(px(t.size - 3.)).opacity(0.7).child(n.to_string())))
+                .hover(|d| d.text_color(t.bright))
+                .tooltip(tip(t, format!("{title} · Ctrl+{n}")))
                 .child(g)
-                .when(labels, |d| d.child(title))
-                .when_some(count, |d, c| d.child(badge(t, c)))
-                .when(dot, |d| d.child(div().size(px(6.)).rounded_full().bg(t.green)))
-                .on_click(cx.listener(move |this, _, window, cx| this.set_tab(tab, window, cx)))
+                .when_some(count, |d, c| {
+                    d.child(div().absolute().top(px(3.)).right(px(3.)).text_size(px(t.size - 4.)).font_weight(FontWeight::BOLD).text_color(t.accent).child(c))
+                })
+                .when(dot, |d| d.child(div().absolute().top(px(6.)).right(px(6.)).size(px(6.)).rounded_full().bg(t.green)))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.settings = None;
+                    this.set_tab(tab, window, cx)
+                }))
         };
         let reg = self.model.registration.as_str();
         let status = match reg {
@@ -39,21 +42,36 @@ impl Joma {
             _ => t.red,
         };
         let full = crate::hypr::shape() == crate::hypr::Shape::Full;
+        let small = |id: &'static str, g: Icon, on: bool, hint: String| {
+            div()
+                .id(id)
+                .flex()
+                .items_center()
+                .justify_center()
+                .size(px(36.))
+                .text_color(if on { t.bright } else { t.muted })
+                .when(on, |d| d.bg(t.raised))
+                .cursor_pointer()
+                .hover(|d| d.text_color(t.bright))
+                .tooltip(tip(t, hint))
+                .child(g)
+        };
         div()
             .flex()
+            .flex_col()
             .flex_none()
             .items_center()
             .justify_between()
-            .gap(px(S2))
-            .h(px(38.))
-            .px(px(GAP))
+            .w(px(48.))
+            .h_full()
+            .py(px(6.))
+            .bg(t.bar)
             .child(
                 div()
                     .flex()
+                    .flex_col()
                     .items_center()
                     .gap(px(2.))
-                    .min_w(px(0.))
-                    .overflow_hidden()
                     .child(item(1, Tab::Chats, G_COMMENT, "chats", (unread > 0).then(|| unread.min(99).to_string()), false))
                     .child(item(2, Tab::Calls, G_PHONE, "calls", None, live))
                     .child(item(3, Tab::Contacts, G_USERS, "contacts", None, false))
@@ -64,28 +82,26 @@ impl Joma {
             .child(
                 div()
                     .flex()
-                    .flex_none()
+                    .flex_col()
                     .items_center()
                     .gap(px(2.))
                     .when_some(self.update.clone(), |d, v| {
-                        d.child(
-                            button("strip-update", G_DOWNLOAD, &format!("update · {}", joma_quick::version::pretty(&v)), t, true)
-                                .mr(px(S2))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    // The About page says what happens and has the button.
-                                    this.settings = None;
-                                    this.open_settings(cx);
-                                    if let Some(s) = this.settings.as_mut() {
-                                        s.section = 4;
-                                    }
-                                })),
-                        )
+                        d.child(small("strip-update", G_DOWNLOAD, false, format!("update to {}", joma_quick::version::pretty(&v))).text_color(t.accent).on_click(cx.listener(|this, _, _, cx| {
+                            // The About page says what happens and has the button.
+                            this.settings = None;
+                            this.open_settings(cx);
+                            if let Some(s) = this.settings.as_mut() {
+                                s.section = 4;
+                            }
+                        })))
                     })
-                    .when(self.quick.show_version && labels, |d| {
-                        d.child(div().pr(px(S2)).text_size(px(t.size - 2.5)).text_color(t.muted).child(format!("v{}", joma_quick::version::pretty(env!("CARGO_PKG_VERSION")))))
-                    })
-                    .child(button("strip-settings", G_COG, "", t, self.settings.is_some()).on_click(cx.listener(|this, _, _, cx| this.open_settings(cx))))
-                    .child(button("strip-pop", if full { G_TRAY } else { G_EXPAND }, "", t, false).on_click(cx.listener(move |this, _, window, cx| {
+                    .child(small("strip-settings", G_COG, self.settings.is_some(), "settings".into()).on_click(cx.listener(|this, _, _, cx| {
+                        if this.settings.take().is_none() {
+                            this.open_settings(cx);
+                        }
+                        cx.notify();
+                    })))
+                    .child(small("strip-pop", if full { G_TRAY } else { G_EXPAND }, false, if full { "back to the panel".into() } else { "open as a window".into() }).on_click(cx.listener(move |this, _, window, cx| {
                         if full {
                             this.pop_in(cx)
                         } else {
@@ -95,10 +111,10 @@ impl Joma {
                     .child(
                         div()
                             .id("strip-me")
-                            .ml(px(S1))
+                            .mt(px(S1))
                             .cursor_pointer()
                             .hover(|d| d.opacity(0.8))
-                            .child(avatar(t, self.model.avatars.get(&self.model.me).cloned(), &self.model.me, &self.model.my_name, 24., Some(status)))
+                            .child(avatar(t, self.model.avatars.get(&self.model.me).cloned(), &self.model.me, &self.model.my_name, 26., Some(status)))
                             .on_click(cx.listener(|this, _, _, cx| this.toggle_menu(Menu::Me, cx))),
                     ),
             )
@@ -288,7 +304,7 @@ impl Joma {
                     this.keys_open = false;
                     cx.notify();
                 }))
-                .child(div().flex().flex_col().w(px(690.)).max_w_full().m(px(16.)).bg(t.bg).border_1().border_color(t.accent).rounded(px(radius())).child(
+                .child(div().flex().flex_col().w(px(690.)).max_w_full().m(px(16.)).bg(t.bg).border_1().border_color(t.border).rounded(px(radius())).child(
                     div().px(px(S3)).py(px(S2)).border_b_1().border_color(t.border).text_color(t.bright).font_weight(FontWeight::BOLD).child("Keys"),
                 ).child(body))
                 .into_any_element(),
@@ -309,14 +325,9 @@ impl Joma {
                 .flex_wrap()
                 .items_center()
                 .gap(px(8.))
-                .mx(px(GAP))
-                .mb(px(GAP))
                 .px(px(12.))
                 .py(px(6.))
-                .bg(t.accent_bg)
-                .border_1()
-                .border_color(t.border)
-                .rounded(px(radius()))
+                .bg(t.panel)
                 .child(div().text_color(t.bright).child("Set Joma up here:"))
                 .when(s.bar_has_tray && !s.pinned, |d| {
                     d.child(button("setup-pin", G_CHECK, "pin the icon in the bar", t, false).on_click(cx.listener(|this, _, _, cx| this.pin_in_bar(cx))))

@@ -183,7 +183,7 @@ impl Joma {
             .bg(t.bar.opacity(0.92))
             .border_1()
             .border_color(t.border)
-            .rounded(px(radius() + 4.))
+            .rounded(px(radius()))
             .child(
                 button("mute", if call.muted_audio { G_MIC_OFF } else { G_MIC }, "", t, call.muted_audio)
                     .on_click(cx.listener(|this, _, _, cx| this.toggle_mute(false, cx))),
@@ -298,7 +298,7 @@ impl Joma {
                         .p(px(24.))
                         .bg(t.panel)
                         .border_1()
-                        .border_color(t.accent)
+                        .border_color(t.border)
                         .rounded(px(radius()))
                         .shadow_lg()
                         .child(avatar(t, picture, &key, &name, 72., None))

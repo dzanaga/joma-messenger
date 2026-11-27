@@ -283,7 +283,7 @@ impl Joma {
                 .flex()
                 .items_center()
                 .gap(px(6.))
-                .child(div().flex_1().min_w(px(0.)).px(px(6.)).py(px(3.)).bg(t.bar).border_1().border_color(t.border).rounded(px(radius())).text_color(t.bright).truncate().child(text.to_owned()))
+                .child(div().flex_1().min_w(px(0.)).px(px(6.)).py(px(3.)).bg(t.bar).text_color(t.bright).truncate().child(text.to_owned()))
                 .child(button(id, G_COPY, "", t, false).on_click(cx.listener(move |this, _, _, cx| {
                     cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy.clone()));
                     this.show_flash("copied", cx);
@@ -293,7 +293,7 @@ impl Joma {
             div()
                 .flex()
                 .gap(px(8.))
-                .child(div().flex_none().size(px(18.)).rounded_full().bg(t.accent_bg).text_color(t.accent).text_size(px(t.size - 3.)).flex().items_center().justify_center().child(n.to_owned()))
+                .child(div().flex_none().size(px(18.)).rounded_full().bg(t.raised).text_color(t.bright).text_size(px(t.size - 3.)).flex().items_center().justify_center().child(n.to_owned()))
                 .child(div().flex_1().min_w(px(0.)).text_color(t.text).text_size(px(t.size - 1.)).child(text.to_owned()))
         };
         div()
@@ -303,8 +303,6 @@ impl Joma {
             .mx(px(10.))
             .my(px(8.))
             .p(px(10.))
-            .border_1()
-            .border_color(t.border).rounded(px(radius()))
             .bg(t.bg)
             .child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child("Add a device"))
             .child(step("1", "On the new device, install Joma and run (or open Joma and choose “link to your account”):"))
@@ -497,7 +495,7 @@ impl Joma {
                 .px(px(S2))
                 .py(px(6.))
                 .rounded(px(radius()))
-                .when(selected, |d| d.bg(t.accent_bg))
+                .when(selected, |d| d.bg(t.sel))
                 .hover(|d| d.bg(t.raised))
                 .cursor_pointer()
                 .on_click(cx.listener(move |this, _, window, cx| this.quick_action(&u_open, Quick::Message, window, cx)))

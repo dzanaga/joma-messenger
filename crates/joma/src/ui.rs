@@ -2,7 +2,6 @@
 //! glyphs of whichever Nerd Font the terminal uses, and the controls every view shares.
 
 use std::borrow::Cow;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpui::prelude::*;
 use gpui::{
@@ -160,8 +159,7 @@ pub fn labelled(icon: Icon, text: impl Into<SharedString>) -> gpui::Div {
 }
 
 /// A button: a mark, a label, or both; `on` marks it active. All share one height.
-/// Icon-only buttons are square and have no frame until hovered; labelled ones keep a
-/// thin border.
+/// Icon-only buttons are white and bare until hovered; labelled ones sit on a quiet fill.
 pub fn button(id: impl Into<SharedString>, mark: impl Into<Mark>, label: &str, t: &Theme, on: bool) -> gpui::Stateful<gpui::Div> {
     let id: SharedString = id.into();
     let mark = mark.into();
@@ -175,17 +173,16 @@ pub fn button(id: impl Into<SharedString>, mark: impl Into<Mark>, label: &str, t
         .justify_center()
         .gap(px(5.))
         .h(px(t.size + 13.))
-        .rounded(px(radius()))
-        .when(icon_only, |d| d.w(px(t.size + 13.)).text_color(if on { t.accent } else { t.muted }).hover(|d| d.bg(t.raised).text_color(t.bright)))
+        // White icons, a lighter fill when on; labelled buttons are a quiet fill, no frame.
+        .when(icon_only, |d| d.w(px(t.size + 13.)).text_color(if on { t.bright } else { t.text }).hover(|d| d.bg(t.raised).text_color(t.bright)))
         .when(!icon_only, |d| {
             d.pl(px(if bare { 9. } else { 6. }))
                 .pr(px(9.))
-                .border_1()
-                .border_color(if on { t.accent } else { t.border })
-                .text_color(if on { t.accent } else { t.text })
-                .hover(|d| d.bg(t.raised).text_color(t.bright))
+                .bg(t.raised)
+                .text_color(if on { t.bright } else { t.muted })
+                .hover(|d| d.bg(t.sel).text_color(t.bright))
         })
-        .when(on, |d| d.bg(t.accent_bg))
+        .when(on, |d| d.bg(t.sel))
         .cursor_pointer()
         .map(|d| match mark {
             Mark::None => d,
@@ -195,16 +192,9 @@ pub fn button(id: impl Into<SharedString>, mark: impl Into<Mark>, label: &str, t
         .when(!icon_only, |d| d.child(div().whitespace_nowrap().child(label.to_owned())))
 }
 
-static ROUNDED: AtomicBool = AtomicBool::new(true);
-
-/// Rounded corners on or off (the setting).
-pub fn set_rounded(on: bool) {
-    ROUNDED.store(on, Ordering::Relaxed);
-}
-
-/// The one corner radius: 4 px, or square when the setting is off.
+/// No corners inside Joma: Hyprland rounds the window when Omarchy says so.
 pub fn radius() -> f32 {
-    if ROUNDED.load(Ordering::Relaxed) { 4. } else { 0. }
+    0.
 }
 
 /// Spacing steps.
@@ -214,10 +204,9 @@ pub const S3: f32 = 12.;
 /// The gap between tiles and around them.
 pub const GAP: f32 = 6.;
 
-/// A panel of the window: its own border and corners, like a tiled window. `focused`
-/// borders it in the accent.
-pub fn tile(t: &Theme, focused: bool) -> gpui::Div {
-    div().flex().flex_col().min_w(px(0.)).min_h(px(0.)).overflow_hidden().border_1().border_color(if focused { t.accent } else { t.border }).rounded(px(radius()))
+/// A panel of the window: set apart by its fill, no frame.
+pub fn tile(_t: &Theme, _focused: bool) -> gpui::Div {
+    div().flex().flex_col().min_w(px(0.)).min_h(px(0.)).overflow_hidden()
 }
 
 /// A small count on the accent (unread messages).
@@ -227,7 +216,7 @@ pub fn badge(t: &Theme, text: impl Into<SharedString>) -> gpui::Div {
         .min_w(px(16.))
         .h(px(15.))
         .px(px(4.))
-        .rounded(px(radius() + 1.))
+        .rounded(px(radius()))
         .flex()
         .items_center()
         .justify_center()
@@ -264,3 +253,25 @@ pub fn menu_item(id: impl Into<SharedString>, icon: Icon, label: impl Into<Share
 pub fn menu_box(t: &Theme) -> gpui::Div {
     div().flex().flex_col().p(px(S1)).min_w(px(190.)).bg(t.panel).border_1().border_color(t.border).rounded(px(radius())).shadow_lg().occlude()
 }
+
+/// A tooltip: a short line on the panel's fill.
+pub struct Tip {
+    text: SharedString,
+    bg: gpui::Hsla,
+    fg: gpui::Hsla,
+    font: SharedString,
+    size: f32,
+}
+
+impl gpui::Render for Tip {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        div().px(px(7.)).py(px(3.)).bg(self.bg).text_color(self.fg).font_family(self.font.clone()).text_size(px(self.size - 1.)).child(self.text.clone())
+    }
+}
+
+/// What `.tooltip(…)` takes, for a line of text.
+pub fn tip(t: &Theme, text: impl Into<SharedString>) -> impl Fn(&mut Window, &mut App) -> gpui::AnyView + 'static {
+    let (text, bg, fg, font, size) = (text.into(), t.raised, t.bright, t.font.clone(), t.size);
+    move |_, cx| cx.new(|_| Tip { text: text.clone(), bg, fg, font: font.clone(), size }).into()
+}
+

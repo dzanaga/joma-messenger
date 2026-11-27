@@ -22,9 +22,9 @@ impl Joma {
                 .mx(px(S3))
                 .pl(px(S2))
                 .border_l_2()
-                .border_color(t.accent)
+                .border_color(t.muted)
                 .text_size(px(t.size - 2.))
-                .child(div().flex_none().text_color(t.accent).child(if editing { "editing".to_owned() } else { format!("replying to {whom}") }))
+                .child(div().flex_none().text_color(t.text).child(if editing { "editing".to_owned() } else { format!("replying to {whom}") }))
                 .child(div().flex_1().min_w(px(0.)).truncate().text_color(t.muted).child(line))
                 .child(button("reply-cancel", G_TIMES, "", t, false).on_click(cx.listener(|this, _, _, cx| this.cancel_reply(cx))))
                 .into_any_element(),
@@ -34,12 +34,14 @@ impl Joma {
     /// The message field: the text, then attach, emoji, YouTube, voice and video messages
     /// inside it; while recording, the recording's time with send and cancel.
     pub(super) fn composer_row(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let field = div().flex().flex_none().items_end().gap(px(2.)).mx(px(S3)).mt(px(S1)).mb(px(S3)).pl(px(S2)).pr(px(S1)).bg(t.panel).border_1().rounded(px(radius()));
+        // No frame: a hairline above, the text, then the tools and send.
+        let field = div().flex().flex_none().items_end().gap(px(2.)).pl(px(S3 + 4.)).pr(px(S2)).py(px(S1)).border_t_1();
         let tools = div().flex().flex_none().items_center().gap(px(2.)).h(px(t.size * 1.6 + 14.));
         if let Some(r) = &self.recording {
             let secs = r.started.elapsed().as_secs();
             return field
                 .border_color(t.red)
+                .bg(t.red.opacity(0.08))
                 .child(
                     div()
                         .flex_1()
@@ -58,27 +60,35 @@ impl Joma {
                 .into_any_element();
         }
         let conv = self.selected.clone().unwrap_or_default();
+        let empty = self.composer.read(cx).text().trim().is_empty() && !self.attachments_pending();
         field
-            .border_color(if self.composer_focused { t.accent.opacity(0.6) } else { t.border })
+            .border_color(t.hair)
             .child(div().flex_1().min_w(px(0.)).child(self.composer.clone()))
             .child(
                 tools
-                    .child(button("send-file", G_CLIP, "", t, false).on_click(cx.listener(move |this, _, _, cx| this.pick_and_send(conv.clone(), cx))))
-                    .child(button("emoji", G_SMILE, "", t, self.emoji_open).on_click(cx.listener(|this, _, _, cx| {
+                    .child(button("send-file", G_CLIP, "", t, false).text_color(t.muted).on_click(cx.listener(move |this, _, _, cx| this.pick_and_send(conv.clone(), cx))))
+                    .child(button("emoji", G_SMILE, "", t, self.emoji_open).text_color(if self.emoji_open { t.bright } else { t.muted }).on_click(cx.listener(|this, _, _, cx| {
                         this.emoji_open = !this.emoji_open;
                         this.gifs = None;
                         cx.notify();
                     })))
-                    .child(button("gifs", G_IMAGE, "", t, self.gifs.is_some()).on_click(cx.listener(|this, _, _, cx| this.toggle_gifs(cx))))
+                    .child(button("gifs", G_IMAGE, "", t, self.gifs.is_some()).text_color(if self.gifs.is_some() { t.bright } else { t.muted }).on_click(cx.listener(|this, _, _, cx| this.toggle_gifs(cx))))
                     // YouTube: the message box becomes the search box (`@youtube …`, then Enter).
-                    .child(button("yt", G_YOUTUBE, "", t, false).on_click(cx.listener(|this, _, _, cx| {
+                    .child(button("yt", G_YOUTUBE, "", t, false).text_color(t.muted).on_click(cx.listener(|this, _, _, cx| {
                         this.emoji_open = false;
                         this.composer.update(cx, |c, cx| c.set_text("@youtube ", cx));
                         this.focus_composer = true;
                         cx.notify();
                     })))
                     .child(button("rec-voice", G_MIC, "", t, false).on_click(cx.listener(|this, _, _, cx| this.start_recording(false, cx))))
-                    .child(button("rec-video", G_VIDEO, "", t, false).on_click(cx.listener(|this, _, _, cx| this.start_recording(true, cx)))),
+                    .child(button("rec-video", G_VIDEO, "", t, false).on_click(cx.listener(|this, _, _, cx| this.start_recording(true, cx))))
+                    // Send (Enter does the same): quiet until there is something to send.
+                    .child(
+                        button("send", G_SEND, "", t, false)
+                            .text_color(if empty { t.muted } else { t.accent })
+                            .tooltip(tip(t, "send · Enter"))
+                            .on_click(cx.listener(|this, _, _, cx| this.send_composed(cx))),
+                    ),
             )
             .into_any_element()
     }
@@ -460,18 +470,17 @@ impl Joma {
                             .mb(px(S1))
                             .pl(px(S2))
                             .border_l_2()
-                            .border_color(t.accent.opacity(0.6))
+                            .border_color(t.muted)
                             .text_size(px(t.size - 2.))
-                            .when(!whom.is_empty(), |d| d.child(div().text_color(t.accent).child(whom)))
+                            .when(!whom.is_empty(), |d| d.child(div().text_color(t.text).child(whom)))
                             .child(div().max_w(px(self.bubble_max - 40.)).truncate().text_color(t.muted).child(what)),
                     )
                 })
                 .when(wraps, |d| d.w(px(self.bubble_max)))
                 .px(px(10.))
                 .py(px(5.))
-                .rounded(px(radius()))
-                .border_1()
-                .map(|d| if me { d.bg(t.accent_bg).border_color(t.accent.opacity(0.3)) } else { d.bg(t.raised).border_color(t.raised) })
+                // Flat: theirs on the list's fill, ours on a warm tint of it.
+                .map(|d| if me { d.bg(t.sent) } else { d.bg(t.panel) })
                 .when(group && !me && !repeat, |d| d.child(div().text_size(px(t.size - 2.)).font_weight(FontWeight::BOLD).text_color(color).child(who.clone())));
             let bubble = match file {
                 None => {
@@ -544,10 +553,7 @@ impl Joma {
                             .gap(px(3.))
                             .h(px(20.))
                             .px(px(6.))
-                            .rounded(px(radius()))
-                            .border_1()
-                            .border_color(if ours { t.accent.opacity(0.5) } else { t.border })
-                            .when(ours, |d| d.bg(t.accent_bg))
+                            .bg(if ours { t.sel } else { t.panel })
                             .text_size(px(t.size - 2.))
                             .cursor_pointer()
                             .hover(|d| d.bg(t.raised))
@@ -632,34 +638,29 @@ impl Joma {
             .flex_none()
             .items_center()
             .gap(px(10.))
-            .h(px(46.))
-            .pl(px(S3))
+            .h(px(44.))
+            .pl(px(S3 + 4.))
             .pr(px(S2))
             .border_b_1()
-            .border_color(t.border)
+            .border_color(t.hair)
             .when(self.narrow, |d| {
                 d.child(button("back", G_BACK, "", t, false).on_click(cx.listener(|this, _, _, cx| {
                     this.narrow_chat = false;
                     cx.notify();
                 })))
             })
-            .child({
-                let peer = (conv.peers.len() == 1).then(|| crate::model::bare_uri(&conv.peers[0]).to_owned());
-                let picture = peer.as_ref().and_then(|p| self.model.avatars.get(p).cloned());
-                let key = peer.unwrap_or_else(|| conv.id.clone());
-                avatar(t, picture, &key, &conv.title, 28., None)
-            })
+            // One line: the name, then how they are (online, seen …) or who is in it.
             .child(
                 div()
                     .flex()
-                    .flex_col()
                     .flex_1()
                     .min_w(px(0.))
+                    .items_baseline()
+                    .gap(px(S2))
                     .overflow_hidden()
-                    .child(div().flex().items_center().gap(px(6.)).child(div().truncate().text_color(t.bright).font_weight(FontWeight::BOLD).child(conv.title.clone())).when(fav, |d| {
-                        d.child(div().flex_none().text_size(px(t.size - 3.)).text_color(t.yellow).child(G_STAR))
-                    }))
-                    .child(div().truncate().text_size(px(t.size - 2.)).text_color(t.muted).child({
+                    .child(div().flex_none().max_w(px(260.)).truncate().text_color(t.bright).font_weight(FontWeight::BOLD).child(conv.title.clone()))
+                    .when(fav, |d| d.child(div().flex_none().text_size(px(t.size - 3.)).text_color(t.yellow).child(G_STAR)))
+                    .child(div().flex_1().min_w(px(0.)).truncate().text_size(px(t.size - 2.)).text_color(t.muted).child({
                         let who = if peers == conv.title { peer_ids } else { format!("{peers} · {peer_ids}") };
                         status.unwrap_or(who)
                     })),
@@ -680,9 +681,9 @@ impl Joma {
                                     }
                                 }
                             })))
-                            .child(div().w(px(1.)).h(px(16.)).mx(px(S1)).bg(t.border))
+
                     })
-                    .child(button("chat-more", G_MORE, "", t, self.menu == Some(Menu::Chat)).on_click(cx.listener(|this, _, _, cx| this.toggle_menu(Menu::Chat, cx)))),
+                    .child(button("chat-more", G_MORE, "", t, self.menu == Some(Menu::Chat)).text_color(t.muted).on_click(cx.listener(|this, _, _, cx| this.toggle_menu(Menu::Chat, cx)))),
             );
 
         let body: AnyElement = if conv.request {
@@ -729,7 +730,7 @@ impl Joma {
             row
         });
 
-        let accent_bg = t.accent_bg;
+        let accent_bg = t.sel;
         div()
             .flex()
             .flex_col()

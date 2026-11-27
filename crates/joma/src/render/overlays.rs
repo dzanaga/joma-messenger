@@ -33,19 +33,6 @@ impl Joma {
             .unwrap_or_default();
         let page = div().flex().flex_col();
         let content = match v.section {
-            0 => page
-                .child(title("Interface"))
-                .child(row(
-                    label("corners"),
-                    chips(t, cx, "round", vec![("on".into(), "rounded".into()), ("off".into(), "square".into())], if self.quick.rounded { "on" } else { "off" }, |j, x, cx| j.set_rounded(x == "on", cx)),
-                ))
-                .child(row(
-                    label("version"),
-                    chips(t, cx, "ver", vec![("on".into(), "shown in the tab strip".into()), ("off".into(), "hidden".into())], if self.quick.show_version { "on" } else { "off" }, |j, x, cx| {
-                        j.set_show_version(x == "on", cx)
-                    }),
-                ))
-                .child(note("Colours and the font follow your Omarchy theme and terminal.")),
             1 => page
                 .child(title("Audio"))
                 .child(row(label("microphone"), chips(t, cx, "ain", devices(&v.inputs), &idx(1), |j, x, cx| j.set_audio("input", x.parse().unwrap_or(0), cx))))
@@ -153,8 +140,8 @@ impl Joma {
                 .h(px(30.))
                 .px(px(S2))
                 .rounded(px(radius()))
-                .text_color(if on { t.accent } else { t.text })
-                .when(on, |d| d.bg(t.accent_bg))
+                .text_color(if on { t.bright } else { t.muted })
+                .when(on, |d| d.bg(t.sel))
                 .cursor_pointer()
                 .hover(|d| d.bg(t.raised))
                 .child(icon)
@@ -170,24 +157,18 @@ impl Joma {
             div()
                 .flex()
                 .flex_1()
+                .min_w(px(0.))
                 .min_h(px(0.))
-                .gap(px(GAP))
-                .px(px(GAP))
-                .pb(px(GAP))
                 .child(
                     tile(t, false)
                         .flex_none()
-                        .w(px(if self.narrow { 44. } else { 220. }))
+                        .w(px(if self.narrow { 44. } else { 200. }))
                         .bg(t.panel)
-                        .when(!self.narrow, |d| d.child(div().flex().flex_none().items_center().h(px(38.)).pl(px(S3)).child(caption(t, "settings"))))
-                        .when(self.narrow, |d| d.pt(px(S1)))
+                        .pt(px(S2))
                         .child(
                             div()
                                 .flex()
                                 .flex_col()
-                                .gap(px(2.))
-                                .px(px(S1))
-                                .child(nav_item(0, G_COG, "interface"))
                                 .child(nav_item(1, G_MIC, "audio"))
                                 .child(nav_item(2, G_VIDEO, "video"))
                                 .child(nav_item(3, G_DESKTOP, "desktop share"))
@@ -318,7 +299,7 @@ impl Joma {
                         .m(px(16.))
                         .bg(t.bg)
                         .border_1()
-                        .border_color(t.accent).rounded(px(radius()))
+                        .border_color(t.border).rounded(px(radius()))
                         .child(
                             div()
                                 .flex()

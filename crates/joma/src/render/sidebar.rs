@@ -42,10 +42,8 @@ impl Joma {
                     .flex()
                     .flex_col()
                     .flex_none()
-                    .mx(px(S1))
-                    .px(px(S2))
-                    .rounded(px(radius()))
-                    .when(selected, |d| d.bg(t.accent_bg))
+                    .px(px(S3))
+                    .when(selected, |d| d.bg(t.sel))
                     .hover(|d| d.bg(t.raised))
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -58,8 +56,8 @@ impl Joma {
                             .flex()
                             .items_center()
                             .gap(px(S2))
-                            .h(px(34.))
-                            .child(avatar(t, picture, &key, &c.title, 22., dot_color))
+                            .h(px(40.))
+                            .child(avatar(t, picture, &key, &c.title, 24., dot_color))
                             .child(
                                 div()
                                     .flex_none()
@@ -110,9 +108,6 @@ impl Joma {
             .h_full()
             .overflow_hidden()
             .bg(t.panel)
-            .border_1()
-            .border_color(if self.mode != Mode::Chat { t.accent } else { t.border })
-            .rounded(px(radius()))
             .child(
                 div()
                     .flex()
@@ -120,26 +115,41 @@ impl Joma {
                     .justify_between()
                     .flex_none()
                     .pr(px(S1))
-                    .h(px(38.))
-                    .child(
-                        caption(t, match self.tab {
-                            Tab::Chats => "chats",
-                            Tab::Calls => "calls",
-                            Tab::Contacts => "contacts",
-                            Tab::Devices => "devices",
-                            Tab::Accounts => "accounts",
-                            Tab::Agents => "agents",
-                        })
-                        .pl(px(S3)),
-                    )
+                    .h(px(44.))
+                    .border_b_1()
+                    .border_color(t.hair)
+                    // Chats and contacts: a search line (a click searches); elsewhere the
+                    // view's name.
+                    .map(|d| match self.tab {
+                        Tab::Chats | Tab::Contacts => d.child(
+                            div()
+                                .id("find")
+                                .flex()
+                                .flex_1()
+                                .items_center()
+                                .gap(px(S2))
+                                .h_full()
+                                .pl(px(S3))
+                                .text_color(t.muted)
+                                .cursor_pointer()
+                                .hover(|d| d.text_color(t.text))
+                                .child(G_SEARCH)
+                                .child("Search")
+                                .on_click(cx.listener(|this, _, window, cx| this.set_mode(Mode::Search, window, cx))),
+                        ),
+                        tab => d.child(
+                            div().pl(px(S3)).text_color(t.bright).font_weight(FontWeight::BOLD).child(match tab {
+                                Tab::Calls => "Calls",
+                                Tab::Devices => "Devices",
+                                Tab::Accounts => "Accounts",
+                                _ => "Agents",
+                            }),
+                        ),
+                    })
                     .when(matches!(self.tab, Tab::Chats | Tab::Contacts), |d| d.child(
                         div()
                             .flex()
                             .gap(px(2.))
-                            .child(
-                                button("btn-search", G_SEARCH, "", t, self.mode == Mode::Search)
-                                    .on_click(cx.listener(|this, _, window, cx| this.set_mode(Mode::Search, window, cx))),
-                            )
                             .child(
                                 button("btn-add", G_PLUS, "", t, self.mode == Mode::Add)
                                     .on_click(cx.listener(|this, _, window, cx| this.set_mode(Mode::Add, window, cx))),

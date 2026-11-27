@@ -469,7 +469,7 @@ impl Joma {
                         .m(px(16.))
                         .bg(t.bg)
                         .border_1()
-                        .border_color(t.accent).rounded(px(radius()))
+                        .border_color(t.border).rounded(px(radius()))
                         .child(
                             div()
                                 .flex()

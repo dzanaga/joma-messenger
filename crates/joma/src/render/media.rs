@@ -29,7 +29,7 @@ fn round(id: impl Into<SharedString>, icon: Icon, side: f32, bg: Hsla, fg: Hsla)
 
 /// A small dark label over a video.
 fn chip(text: String) -> gpui::Div {
-    div().px(px(6.)).py(px(1.)).rounded(px(4.)).bg(gpui::black().opacity(0.55)).text_color(gpui::white()).text_size(px(11.)).child(text)
+    div().px(px(6.)).py(px(1.)).bg(gpui::black().opacity(0.55)).text_color(gpui::white()).text_size(px(11.)).child(text)
 }
 
 /// The current picture of the playing video, fitted into its box.
@@ -105,7 +105,7 @@ impl Joma {
                     .flex()
                     .items_center()
                     .cursor_pointer()
-                    .child(div().w(px(BAR_W)).h(px(3. + v * (BAR_H - 3.))).rounded(px(1.5)).bg(if played { t.accent } else { t.muted.opacity(0.55) }))
+                    .child(div().w(px(BAR_W)).h(px(3. + v * (BAR_H - 3.))).bg(if played { t.accent } else { t.text.opacity(0.3) }))
                     .when_some(path, |d, path| {
                         d.on_click(cx.listener(move |this, _, _, cx| {
                             cx.stop_propagation();
@@ -119,7 +119,7 @@ impl Joma {
             .items_center()
             .gap(px(S2))
             .py(px(2.))
-            .child(round(SharedString::from(format!("play-{msg}")), if playing { G_PAUSE } else { G_PLAY }, 34., t.accent, t.bg).on_click(self.play_click(conv, msg, file, saved.clone(), cx)))
+            .child(round(SharedString::from(format!("play-{msg}")), if playing { G_PAUSE } else { G_PLAY }, 32., t.bright, t.bar).on_click(self.play_click(conv, msg, file, saved.clone(), cx)))
             .child(wave)
             .child(div().min_w(px(34.)).text_size(px(t.size - 2.)).text_color(t.muted).child(time));
         div().flex().flex_col().child(player).children(self.transcript_line(t, msg, &file.id, saved.as_deref(), 300., cx)).into_any_element()
@@ -195,7 +195,7 @@ impl Joma {
             .relative()
             .w(px(w))
             .h(px(h))
-            .rounded(px(radius()))
+            
             .overflow_hidden()
             .bg(gpui::black())
             .cursor_pointer()
@@ -237,7 +237,7 @@ impl Joma {
             .when_some(sub, |d, s| {
                 d.child(
                     div().absolute().bottom(px(10.)).left_0().right_0().flex().justify_center().px(px(8.)).child(
-                        div().px(px(6.)).py(px(2.)).rounded(px(4.)).bg(gpui::black().opacity(0.65)).text_color(gpui::white()).text_size(px(t.size - 1.)).text_center().child(s),
+                        div().px(px(6.)).py(px(2.)).bg(gpui::black().opacity(0.65)).text_color(gpui::white()).text_size(px(t.size - 1.)).text_center().child(s),
                     ),
                 )
             })
@@ -315,7 +315,7 @@ impl Joma {
                         .when_some(sub, |d, s| {
                             d.child(
                                 div().absolute().bottom(px(24.)).left_0().right_0().flex().justify_center().child(
-                                    div().max_w(px(900.)).px(px(10.)).py(px(4.)).rounded(px(6.)).bg(gpui::black().opacity(0.7)).text_color(gpui::white()).text_size(px(t.size + 6.)).text_center().child(s),
+                                    div().max_w(px(900.)).px(px(10.)).py(px(4.)).bg(gpui::black().opacity(0.7)).text_color(gpui::white()).text_size(px(t.size + 6.)).text_center().child(s),
                                 ),
                             )
                         }),

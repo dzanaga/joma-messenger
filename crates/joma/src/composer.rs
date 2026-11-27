@@ -398,7 +398,7 @@ impl Render for Composer {
                     .overflow_y_scroll()
                     .px(px(if self.bare { 2. } else { 10. }))
                     .py(px(7.))
-                    .when(!self.bare, |d| d.border_1().border_color(if focused { theme.accent } else { theme.border }).bg(theme.panel).rounded(px(crate::ui::radius())))
+                    .when(!self.bare, |d| d.bg(if focused { theme.sel } else { theme.raised }))
                     .text_color(if self.text.is_empty() { theme.muted } else { theme.bright })
                     .on_mouse_down(
                         MouseButton::Left,
