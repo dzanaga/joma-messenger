@@ -24,12 +24,12 @@ STEP="${1:-apk}"
 
 case "$OUT" in "$REPO"/*) echo "refusing to build inside the repository: $OUT" >&2; exit 1 ;; esac
 
-# swig, yasm, nasm and gperf: the system's, else Arch's packages unpacked under
+# swig, yasm, nasm, gperf and meson: the system's, else Arch's packages unpacked under
 # $OUT/hosttools (no root needed; `android/build.sh hosttools` fetches and checks them).
 hosttools() {
     local t="$OUT/hosttools"
     mkdir -p "$t/pkgs" "$t/root"
-    for u in $(pacman -Sp swig yasm nasm gperf); do
+    for u in $(pacman -Sp swig yasm nasm gperf meson python-tqdm); do
         local f="$t/pkgs/${u##*/}"
         [ -f "$f" ] || { curl -sSfL -o "$f" "$u"; curl -sSfL -o "$f.sig" "$u.sig"; }
         gpg --homedir /etc/pacman.d/gnupg --verify "$f.sig" "$f" 2>/dev/null
@@ -40,6 +40,11 @@ if ! command -v swig >/dev/null && [ -x "$OUT/hosttools/root/usr/bin/swig" ]; th
     export PATH="$OUT/hosttools/root/usr/bin:$PATH"
     SWIG_LIB="$(echo "$OUT"/hosttools/root/usr/share/swig/*)"
     export SWIG_LIB
+fi
+if ! command -v meson >/dev/null && [ -x "$OUT/hosttools/root/usr/bin/meson" ]; then
+    export PATH="$PATH:$OUT/hosttools/root/usr/bin"
+    PYTHONPATH="$(echo "$OUT"/hosttools/root/usr/lib/python3*/site-packages)${PYTHONPATH:+:$PYTHONPATH}"
+    export PYTHONPATH
 fi
 
 fetch() {

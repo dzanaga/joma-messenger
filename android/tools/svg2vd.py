@@ -56,6 +56,34 @@ def convert(svg: Path) -> str:
             '    android:tint="?attr/colorControlNormal">\n' + "\n".join(out) + "\n</vector>\n")
 
 
+# Jami Android's drawables that show joma's icon instead (same name, so every screen
+# that uses them follows). Only line icons with a clear match; the rest stay Jami's.
+ALIASES = {
+    "outline_call_24": "phone",
+    "baseline_call_24": "phone",
+    "outline_videocam_24": "video",
+    "baseline_videocam_24": "video",
+    "send_24px": "send",
+    "baseline_mic_on_24": "mic",
+    "baseline_mic_off_24": "mic-off",
+    "baseline_photo_camera_24": "camera",
+    "baseline_search_24": "search",
+    "baseline_reply_24": "reply",
+    "baseline_delete_24": "trash",
+    "baseline_close_24": "x",
+    "baseline_more_vert_24": "more",
+    "outline_person_24": "user",
+    "baseline_person_add_24": "user-plus",
+    "baseline_group_add_24": "users",
+    "baseline_chat_24": "chat",
+    "baseline_forum_24": "chat",
+    "baseline_attach_file_24": "clip",
+    "baseline_settings_24": "settings",
+    "baseline_add_24": "plus",
+    "baseline_block_24": "ban",
+}
+
+
 def main():
     src, dst = Path(sys.argv[1]), Path(sys.argv[2])
     dst.mkdir(parents=True, exist_ok=True)
@@ -63,6 +91,8 @@ def main():
         name = "joma_ic_" + svg.stem.replace("-", "_")
         (dst / f"{name}.xml").write_text(convert(svg))
         print(name)
+    for jami, icon in ALIASES.items():
+        (dst / f"{jami}.xml").write_text(convert(src / f"{icon}.svg"))
 
 
 if __name__ == "__main__":
