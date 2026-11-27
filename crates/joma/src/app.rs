@@ -93,6 +93,8 @@ pub enum AppMsg {
     Updated(Result<String, String>),
     /// A voice message was transcribed (file id, the text or why not).
     Transcribed(String, Result<String, String>),
+    /// A voice or video message's length, bars and still picture (by file id).
+    Media(String, Option<MediaView>),
     /// The watch-together player of a conversation's session reported something.
     Watch(String, crate::watch::PlayerEvent),
     /// An `@youtube` search finished: the message to send to the conversation.
@@ -347,6 +349,14 @@ pub enum Gate {
 }
 
 /// A picture ready to paint, and the serial it came from.
+/// What a voice or video message shows before it plays.
+#[derive(Clone)]
+pub struct MediaView {
+    pub info: crate::player::Info,
+    pub bars: Vec<f32>,
+    pub thumb: Option<std::path::PathBuf>,
+}
+
 pub struct Frame {
     pub image: Arc<RenderImage>,
     pub serial: u64,
@@ -401,8 +411,16 @@ pub struct Joma {
     pub ink_stroke: Option<u32>,
     ink_next: u32,
     pub ink_laser_at: Option<Instant>,
-    /// The file mpv plays now (its message's file id), and mpv.
-    pub playing: Option<(String, std::process::Child)>,
+    /// The voice or video message playing or paused in the chat.
+    pub player: Option<crate::player::Player>,
+    /// Its latest picture, for the chat.
+    pub player_frame: Option<Frame>,
+    /// The playing video fills the window (Telegram's corner button).
+    pub video_big: bool,
+    /// Voice and video messages measured (None: being measured or failed).
+    pub media: HashMap<String, Option<MediaView>>,
+    /// Subtitles of voice and video messages, by file id.
+    pub cues: HashMap<String, Vec<crate::media::Cue>>,
     pub emoji_open: bool,
     /// Link previews by video id (None: being fetched or failed).
     pub previews_yt: HashMap<String, Option<crate::media::Preview>>,
@@ -535,6 +553,12 @@ impl SetupState {
     }
 }
 
+/// A voice or video message, by its name.
+pub fn media_name(name: &str) -> bool {
+    let p = std::path::Path::new(name);
+    crate::media::is_audio(p) || crate::media::is_video(p)
+}
+
 /// Received files up to this size download by themselves (D-9: 200 MB; the Jami app uses 20 MB).
 const AUTO_DOWNLOAD: u64 = 200 * 1024 * 1024;
 
@@ -664,7 +688,7 @@ impl Joma {
                 cx.background_executor().timer(Duration::from_millis(33)).await;
                 n += 1;
                 let alive = this.update(cx, |j, cx| {
-                    if j.model.calls.values().any(|c| !c.sinks.is_empty()) {
+                    if j.model.calls.values().any(|c| !c.sinks.is_empty()) || j.player.as_ref().is_some_and(|p| p.playing()) {
                         cx.notify();
                     }
                     if n % 15 == 0 {
@@ -715,7 +739,11 @@ impl Joma {
             ink_stroke: None,
             ink_next: 1,
             ink_laser_at: None,
-            playing: None,
+            player: None,
+            player_frame: None,
+            video_big: false,
+            media: HashMap::new(),
+            cues: HashMap::new(),
             emoji_open: false,
             previews_yt: HashMap::new(),
             share_log: Vec::new(),
@@ -1277,9 +1305,13 @@ impl Joma {
         }
         self.track_shares();
         self.tick_watch();
-        // mpv finished: the button goes back to play.
-        if self.playing.as_mut().is_some_and(|(_, c)| !matches!(c.try_wait(), Ok(None))) {
-            self.playing = None;
+        // Played to the end: back to the start.
+        if self.player.as_mut().is_some_and(|p| p.ended()) {
+            if let Some(p) = self.player.as_mut() {
+                p.rewind();
+            }
+            self.video_big = false;
+            cx.notify();
         }
         let acc = self.model.account.clone();
         for after in self.desk.tick(&acc) {
@@ -1475,7 +1507,14 @@ impl Joma {
                 cx.notify();
             }
             AppMsg::Transcribed(id, r) => {
+                if let Some(c) = crate::media::cached_cues(&id) {
+                    self.cues.insert(id.clone(), c);
+                }
                 self.transcripts.insert(id, Some(r));
+                cx.notify();
+            }
+            AppMsg::Media(id, m) => {
+                self.media.insert(id, m);
                 cx.notify();
             }
             AppMsg::Preview(id) => {
@@ -2721,20 +2760,62 @@ impl Joma {
     }
 
     /// Play a voice or video message with mpv, or stop the one playing.
+    /// Play or pause a voice or video message inside Joma (another one stops).
     pub fn toggle_play(&mut self, file_id: &str, path: &std::path::Path, cx: &mut Context<Self>) {
-        if let Some((id, mut child)) = self.playing.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-            if id == file_id {
-                cx.notify();
-                return;
+        if let Some(p) = self.player.as_mut().filter(|p| p.file_id == file_id) {
+            if p.playing() {
+                p.pause();
+            } else if let Err(e) = p.play() {
+                self.show_flash(format!("cannot play it: {e:#}"), cx);
             }
+            cx.notify();
+            return;
         }
-        match crate::media::play(path) {
-            Ok(child) => self.playing = Some((file_id.to_owned(), child)),
-            Err(e) => self.show_flash(format!("cannot play it (mpv?): {e}"), cx),
+        self.player = None;
+        self.player_frame = None;
+        self.video_big = false;
+        match crate::player::Player::new(file_id, path).and_then(|mut p| p.play().map(|_| p)) {
+            Ok(p) => self.player = Some(p),
+            Err(e) => self.show_flash(format!("cannot play it: {e:#}"), cx),
         }
         cx.notify();
+    }
+
+    /// Jump to `frac` (0 to 1) of a message, starting it when it is not the one playing.
+    pub fn seek_media(&mut self, file_id: &str, path: &std::path::Path, frac: f64, cx: &mut Context<Self>) {
+        if self.player.as_ref().is_none_or(|p| p.file_id != file_id) {
+            self.toggle_play(file_id, path, cx);
+        }
+        if let Some(p) = self.player.as_mut().filter(|p| p.file_id == file_id) {
+            let to = frac.clamp(0., 1.) * p.info.duration;
+            if let Err(e) = p.seek(to) {
+                self.show_flash(format!("cannot play it: {e:#}"), cx);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Where the message `file_id` is (seconds), playing or paused there; 0 otherwise.
+    pub fn media_position(&self, file_id: &str) -> (bool, f64) {
+        self.player.as_ref().filter(|p| p.file_id == file_id).map_or((false, 0.), |p| (p.playing(), p.position()))
+    }
+
+    /// Measure a voice or video message once, in the background.
+    pub fn want_media(&mut self, file_id: &str, path: &std::path::Path) {
+        if self.media.contains_key(file_id) {
+            return;
+        }
+        self.media.insert(file_id.to_owned(), None);
+        let (tx, id, path) = (self.tx.clone(), file_id.to_owned(), path.to_owned());
+        std::thread::spawn(move || {
+            let view = (|| -> anyhow::Result<MediaView> {
+                let info = crate::player::probe(&path)?;
+                let bars = if info.audio { crate::player::waveform(&path).unwrap_or_default() } else { Vec::new() };
+                let thumb = if info.video.is_some() { crate::player::thumbnail(&id, &path, &info).ok() } else { None };
+                Ok(MediaView { info, bars, thumb })
+            })();
+            let _ = tx.unbounded_send(AppMsg::Media(id, view.ok()));
+        });
     }
 
     pub fn insert_emoji(&mut self, e: &str, cx: &mut Context<Self>) {
@@ -2757,17 +2838,20 @@ impl Joma {
             if let Some(text) = crate::media::cached_transcript(file_id) {
                 self.transcripts.insert(file_id.to_owned(), Some(Ok(text)));
             }
+            if let Some(c) = crate::media::cached_cues(file_id) {
+                self.cues.insert(file_id.to_owned(), c);
+            }
         }
     }
 
-    /// The open conversation's voice messages: download those not here (one sent before
+    /// The open conversation's voice and video messages: download those not here (one sent before
     /// this device joined, or while Joma was off), and transcribe them one at a time when
     /// a transcriber is set up. Each is tried once by itself; the buttons try again.
     pub fn voice_messages(&mut self, cx: &mut Context<Self>) {
         let Some(conv) = self.selected.as_ref().and_then(|s| self.model.conversations.get(s)) else { return };
         let conv_id = conv.id.clone();
         let voices: Vec<(String, FileRef)> =
-            conv.messages.iter().filter_map(|m| Some((m.id.clone(), m.file.clone()?))).filter(|(_, f)| crate::media::is_audio(std::path::Path::new(&f.name))).collect();
+            conv.messages.iter().filter_map(|m| Some((m.id.clone(), m.file.clone()?))).filter(|(_, f)| media_name(&f.name)).collect();
         let auto = self.quick.transcribe != "off" && crate::media::transcriber(&self.quick.transcribe).is_some();
         let mut busy = self.transcripts.values().any(Option::is_none);
         for (msg, f) in voices {
@@ -2779,6 +2863,7 @@ impl Joma {
                     }
                 }
                 Some(path) => {
+                    self.want_media(&f.id, &path);
                     if auto && !busy && !self.transcripts.contains_key(&f.id) && self.voice_transcribed.insert(f.id.clone()) {
                         self.transcribe(&f.id, &path, cx);
                         busy = true;

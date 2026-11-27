@@ -165,6 +165,7 @@ mod calls;
 mod stage_view;
 mod chat;
 mod overlays;
+mod media;
 
 impl Joma {
     /// Copy new pictures (remote video, the desktop share) into images to paint.
@@ -261,6 +262,25 @@ impl Joma {
         }
         // Its voice messages: fetched, then transcribed, by themselves.
         self.voice_messages(cx);
+        // The playing video's latest picture.
+        let pic = self.player.as_ref().filter(|p| p.info.video.is_some()).map(|p| p.picture.clone());
+        match pic {
+            Some(pic) => {
+                let p = pic.lock().unwrap();
+                if p.serial > 0 && self.player_frame.as_ref().is_none_or(|f| f.serial != p.serial) {
+                    if let Some(image) = bgra_image(p.width, p.height, p.bgra.clone()) {
+                        if let Some(old) = self.player_frame.replace(Frame { image, serial: p.serial, buf: Vec::new() }) {
+                            cx.drop_image(old.image, Some(window));
+                        }
+                    }
+                }
+            }
+            None => {
+                if let Some(old) = self.player_frame.take() {
+                    cx.drop_image(old.image, Some(window));
+                }
+            }
+        }
         let gone: Vec<String> = self.previews.keys().filter(|k| self.desk.shared(k).is_none()).cloned().collect();
         for k in gone {
             if let Some(old) = self.previews.remove(&k) {
@@ -363,6 +383,11 @@ impl Render for Joma {
                 // Esc closes a menu, the keys, the picker or the profile, then leaves full screen.
                 if this.password_ask.is_some() {
                     this.cancel_password(window, cx);
+                    return;
+                }
+                if this.video_big {
+                    this.video_big = false;
+                    cx.notify();
                     return;
                 }
                 if this.viewer.take().is_some() {
@@ -480,6 +505,7 @@ impl Render for Joma {
             .children(self.menu_overlay(&t, cx))
             .children(self.keys_overlay(&t, cx))
             .children(self.viewer_overlay(&t, cx))
+            .children(self.video_overlay(&t, cx))
             .children(self.incoming_overlay(&t, cx))
             .children(self.toast(&t))
             .children(picker)

@@ -2,7 +2,7 @@
 //! (found in text, searched with yt-dlp, previewed with their thumbnail and title).
 
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 
 /// A file a voice or video message plays from.
 pub fn is_audio(path: &Path) -> bool {
@@ -15,18 +15,6 @@ pub fn is_video(path: &Path) -> bool {
 
 fn ext_in(path: &Path, list: &[&str]) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| list.contains(&e.to_ascii_lowercase().as_str()))
-}
-
-/// Play a file with mpv: sound only for audio, a window for video.
-pub fn play(path: &Path) -> std::io::Result<Child> {
-    let mut c = Command::new("mpv");
-    c.arg("--really-quiet").arg("--force-window=no");
-    if is_audio(path) {
-        c.arg("--no-video");
-    } else {
-        c.arg("--force-window=yes").arg("--title=Joma");
-    }
-    c.arg(path).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()
 }
 
 /// The video id of the first YouTube link in a text.
@@ -164,12 +152,34 @@ mod tests {
         assert!(offline_mode(&serde_json::json!({"processing": "Offline Lite"})));
         assert!(!offline_mode(&serde_json::json!({"processing": "cloud"})));
         assert!(!offline_mode(&serde_json::json!({})));
-        let st = serde_json::json!({"last": {"session_id": 3, "text": " ciao ", "warning": null}});
-        assert_eq!(session_done(&st, 3).unwrap().unwrap(), "ciao");
+        let st = serde_json::json!({"last": {"session_id": 3, "text": " ciao ", "warning": null, "silence_removal": {"segments": [[16000, 48000]]}}});
+        let h = session_done(&st, 3).unwrap().unwrap();
+        assert_eq!((h.text.as_str(), h.speech), ("ciao", vec![(1., 3.)]));
         assert!(session_done(&st, 4).is_none());
         let quiet = serde_json::json!({"last": {"session_id": 1, "text": "", "warning": "No speech detected"}});
-        assert_eq!(session_done(&quiet, 1).unwrap().unwrap_err().to_string(), "no speech detected");
-        assert_eq!(superwhisper_result(r#"{"text":"hi"}"#).unwrap(), "hi");
+        assert_eq!(session_done(&quiet, 1).unwrap().err().unwrap().to_string(), "no speech detected");
+        assert_eq!(superwhisper_result(r#"{"text":"hi"}"#).unwrap().text, "hi");
+        assert!(session_done(&serde_json::json!({"last": {"session_id": 1, "text": ""}}), 1).is_none());
+    }
+
+    #[test]
+    fn subtitles() {
+        // Two stretches: the words go to each in proportion, lines break at sentences.
+        let c = spread("Dunque, questa è la prova. Di un cane", &[(1.75, 6.7), (9.0, 12.0)], 12.);
+        assert_eq!(c.iter().map(|c| c.text.as_str()).collect::<Vec<_>>(), vec!["Dunque, questa è la prova.", "Di un cane"]);
+        assert!((c[0].start - 1.75).abs() < 1e-9);
+        // The second line is in the second stretch, and the first ends before it.
+        assert!(c[1].start >= 9.0 && c[1].end <= 12.7 && c[0].end <= c[1].start);
+        assert_eq!(cue_at(&c, 2.0), Some("Dunque, questa è la prova."));
+        assert_eq!(cue_at(&c, 0.5), None);
+        // No stretches: the whole length; long text in lines of seven words.
+        let long = spread("a b c d e f g h i", &[], 9.);
+        assert_eq!(long.len(), 2);
+        assert_eq!(long[0].text, "a b c d e f g");
+        assert!(long.iter().all(|c| c.end <= 9.6));
+        assert!(spread("", &[], 3.).is_empty());
+        let w = whisper_lines("[00:00:00.000 --> 00:00:02.500]   Ciao a tutti.\n[00:01:02.000 --> 00:01:03.000]  Sì\n");
+        assert_eq!(w, vec![Cue { start: 0., end: 2.5, text: "Ciao a tutti.".into() }, Cue { start: 62., end: 63., text: "Sì".into() }]);
     }
 }
 
@@ -241,12 +251,29 @@ pub fn fetch_whisper_model() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// One line of subtitles: shown from `start` to `end` (seconds).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Cue {
+    pub start: f64,
+    pub end: f64,
+    pub text: String,
+}
+
+/// What an engine heard: the text, and the stretches (seconds) where someone speaks or
+/// the timed lines it gave.
+struct Heard {
+    text: String,
+    speech: Vec<(f64, f64)>,
+    cues: Vec<Cue>,
+}
+
 /// Superwhisper transcribes in the background: `transcribe` answers
-/// `{"ok":true,"session_id":N}` and `status` later shows that session under `last`.
-fn superwhisper_result(answer: &str) -> anyhow::Result<String> {
+/// `{"ok":true,"session_id":N}` and `status` later shows that session under `last`,
+/// with the stretches its voice detection found (`silence_removal.segments`, 16 kHz samples).
+fn superwhisper_result(answer: &str) -> anyhow::Result<Heard> {
     let v: serde_json::Value = serde_json::from_str(answer.trim()).map_err(|_| anyhow::anyhow!("superwhisper: {}", answer.trim()))?;
     if let Some(t) = v.get("text").and_then(|t| t.as_str()) {
-        return Ok(t.to_owned());
+        return Ok(Heard { text: t.to_owned(), speech: Vec::new(), cues: Vec::new() });
     }
     anyhow::ensure!(v.get("ok").and_then(|o| o.as_bool()) == Some(true), "superwhisper: {}", answer.trim());
     let session = v.get("session_id").and_then(|s| s.as_i64()).ok_or_else(|| anyhow::anyhow!("superwhisper: no session"))?;
@@ -263,58 +290,166 @@ fn superwhisper_result(answer: &str) -> anyhow::Result<String> {
 }
 
 /// The result of `session` in a `superwhisper status`, once it is done.
-fn session_done(status: &serde_json::Value, session: i64) -> Option<anyhow::Result<String>> {
+fn session_done(status: &serde_json::Value, session: i64) -> Option<anyhow::Result<Heard>> {
     let last = status.get("last")?;
     if last.get("session_id")?.as_i64()? != session {
         return None;
     }
     let text = last.get("text").and_then(|t| t.as_str()).unwrap_or("").trim().to_owned();
     if !text.is_empty() {
-        return Some(Ok(text));
+        let speech = last
+            .pointer("/silence_removal/segments")
+            .and_then(|s| s.as_array())
+            .map(|l| l.iter().filter_map(|r| Some((r.get(0)?.as_f64()? / 16000., r.get(1)?.as_f64()? / 16000.))).collect())
+            .unwrap_or_default();
+        return Some(Ok(Heard { text, speech, cues: Vec::new() }));
     }
     // No text and no warning yet: still working.
     let warn = last.get("warning").or_else(|| last.get("error")).and_then(|w| w.as_str())?;
     Some(Err(anyhow::anyhow!("{}", warn.to_lowercase())))
 }
 
-fn transcript_path(file_id: &str) -> Option<PathBuf> {
+/// whisper.cpp's lines: `[00:00:01.000 --> 00:00:03.500]  text`.
+fn whisper_lines(out: &str) -> Vec<Cue> {
+    let secs = |t: &str| -> Option<f64> {
+        let mut p = t.trim().split(':').rev();
+        let s: f64 = p.next()?.parse().ok()?;
+        let m: f64 = p.next().unwrap_or("0").parse().ok()?;
+        let h: f64 = p.next().unwrap_or("0").parse().ok()?;
+        Some(h * 3600. + m * 60. + s)
+    };
+    out.lines()
+        .filter_map(|l| {
+            let rest = l.trim().strip_prefix('[')?;
+            let (times, text) = rest.split_once(']')?;
+            let (a, b) = times.split_once("-->")?;
+            let text = text.trim();
+            (!text.is_empty()).then(|| Cue { start: secs(a).unwrap_or(0.), end: secs(b).unwrap_or(0.), text: text.to_owned() })
+        })
+        .collect()
+}
+
+/// Lines of at most this many words.
+const CUE_WORDS: usize = 7;
+
+/// Subtitles from a text and where the speech is: the words are spread over the speech
+/// at an even pace (no engine here gives each word's time), cut into short lines at the
+/// ends of sentences and of stretches. Without stretches: over the whole `duration`.
+pub fn spread(text: &str, speech: &[(f64, f64)], duration: f64) -> Vec<Cue> {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let mut parts: Vec<(f64, f64)> = speech.iter().copied().filter(|(a, b)| b > a).collect();
+    if parts.is_empty() {
+        parts.push((0., duration.max(0.5)));
+    }
+    let total: f64 = parts.iter().map(|(a, b)| b - a).sum();
+    // The time and stretch of the speech `x` seconds in.
+    let at = |x: f64| -> (f64, usize) {
+        let mut left = x;
+        for (i, (a, b)) in parts.iter().enumerate() {
+            if left <= b - a || i == parts.len() - 1 {
+                return (a + left.min(b - a), i);
+            }
+            left -= b - a;
+        }
+        (0., 0)
+    };
+    let n = words.len().max(1) as f64;
+    let mut cues: Vec<Cue> = Vec::new();
+    let mut line: Vec<&str> = Vec::new();
+    let mut line_start = (0., 0usize);
+    for (i, w) in words.iter().enumerate() {
+        let here = at(total * i as f64 / n);
+        if line.is_empty() {
+            line_start = here;
+        } else if here.1 != line_start.1 {
+            // A new stretch of speech starts a new line.
+            let end = parts[line_start.1].1;
+            cues.push(Cue { start: line_start.0, end, text: line.join(" ") });
+            line.clear();
+            line_start = here;
+        }
+        line.push(w);
+        let sentence_end = w.ends_with(['.', '?', '!', ':', ';']);
+        if line.len() >= CUE_WORDS || sentence_end || i + 1 == words.len() {
+            let next = at(total * (i + 1) as f64 / n);
+            let end = if next.1 == line_start.1 { next.0 } else { parts[line_start.1].1 };
+            cues.push(Cue { start: line_start.0, end, text: line.join(" ") });
+            line.clear();
+        }
+    }
+    // Each line stays a little longer, until the next one.
+    for i in 0..cues.len() {
+        let next = cues.get(i + 1).map_or(f64::MAX, |c| c.start);
+        cues[i].end = (cues[i].end + 0.6).min(next).max(cues[i].start + 0.3);
+    }
+    cues
+}
+
+/// The line to show at `pos` seconds.
+pub fn cue_at(cues: &[Cue], pos: f64) -> Option<&str> {
+    cues.iter().find(|c| pos >= c.start && pos < c.end).map(|c| c.text.as_str())
+}
+
+fn cache_path(file_id: &str, ext: &str) -> Option<PathBuf> {
     let safe: String = file_id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' }).collect();
     let cache = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
-    Some(cache.join("joma/transcripts").join(format!("{safe}.txt")))
+    Some(cache.join("joma/transcripts").join(format!("{safe}.{ext}")))
 }
 
 /// A transcript made earlier.
 pub fn cached_transcript(file_id: &str) -> Option<String> {
-    std::fs::read_to_string(transcript_path(file_id)?).ok()
+    std::fs::read_to_string(cache_path(file_id, "txt")?).ok()
 }
 
-/// Transcribe a voice message with `engine` and keep the text in Joma's cache (it is
-/// not sent anywhere by Joma; "superwhisper" works in that app's own mode).
-pub fn transcribe(engine: &str, file_id: &str, audio: &Path) -> anyhow::Result<String> {
-    let text = match engine {
-        "superwhisper" => {
-            let out = Command::new("superwhisper").arg("transcribe").arg(audio).output()?;
-            anyhow::ensure!(out.status.success(), "superwhisper: {}", String::from_utf8_lossy(&out.stderr).trim().to_owned());
-            superwhisper_result(&String::from_utf8_lossy(&out.stdout))?
+/// Its subtitles, made with it.
+pub fn cached_cues(file_id: &str) -> Option<Vec<Cue>> {
+    serde_json::from_str(&std::fs::read_to_string(cache_path(file_id, "cues.json")?).ok()?).ok()
+}
+
+/// Transcribe a voice or video message with `engine` and keep the text and its
+/// subtitles in Joma's cache (Joma sends them nowhere; "superwhisper" works in that
+/// app's own mode).
+pub fn transcribe(engine: &str, file_id: &str, media: &Path) -> anyhow::Result<String> {
+    // Both engines get 16 kHz mono WAV: the sound of a video too.
+    let wav = std::env::temp_dir().join(format!("joma-transcribe-{}-{}.wav", std::process::id(), file_id.len()));
+    let conv = Command::new("ffmpeg").args(["-y", "-loglevel", "error", "-i"]).arg(media).args(["-vn", "-ar", "16000", "-ac", "1", "-f", "wav"]).arg(&wav).output()?;
+    anyhow::ensure!(conv.status.success(), "ffmpeg: {}", String::from_utf8_lossy(&conv.stderr).trim().to_owned());
+    let duration = std::fs::metadata(&wav).map(|m| m.len().saturating_sub(44) as f64 / 32000.).unwrap_or(0.);
+    let heard = (|| -> anyhow::Result<Heard> {
+        match engine {
+            "superwhisper" => {
+                let out = Command::new("superwhisper").arg("transcribe").arg(&wav).output()?;
+                anyhow::ensure!(out.status.success(), "superwhisper: {}", String::from_utf8_lossy(&out.stderr).trim().to_owned());
+                superwhisper_result(&String::from_utf8_lossy(&out.stdout))
+            }
+            _ => {
+                let out = Command::new("whisper-cli").arg("-m").arg(whisper_model()).arg("-f").arg(&wav).args(["-l", "auto", "-np"]).output()?;
+                anyhow::ensure!(out.status.success(), "whisper-cli: {}", String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("failed").to_owned());
+                let cues = whisper_lines(&String::from_utf8_lossy(&out.stdout));
+                let text = cues.iter().map(|c| c.text.as_str()).collect::<Vec<_>>().join(" ");
+                Ok(Heard { text, speech: Vec::new(), cues })
+            }
         }
-        _ => {
-            // whisper.cpp reads 16 kHz mono WAV.
-            let wav = std::env::temp_dir().join(format!("joma-transcribe-{}.wav", std::process::id()));
-            let conv = Command::new("ffmpeg").args(["-y", "-loglevel", "error", "-i"]).arg(audio).args(["-ar", "16000", "-ac", "1", "-f", "wav"]).arg(&wav).output()?;
-            anyhow::ensure!(conv.status.success(), "ffmpeg: {}", String::from_utf8_lossy(&conv.stderr).trim().to_owned());
-            let out = Command::new("whisper-cli").arg("-m").arg(whisper_model()).arg("-f").arg(&wav).args(["-l", "auto", "-nt", "-np"]).output();
-            let _ = std::fs::remove_file(&wav);
-            let out = out?;
-            anyhow::ensure!(out.status.success(), "whisper-cli: {}", String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("failed").to_owned());
-            String::from_utf8_lossy(&out.stdout).split_whitespace().collect::<Vec<_>>().join(" ")
-        }
-    };
+    })();
+    let _ = std::fs::remove_file(&wav);
+    let heard = heard?;
+    let text = heard.text.split_whitespace().collect::<Vec<_>>().join(" ");
     anyhow::ensure!(!text.is_empty(), "nothing was heard");
-    if let Some(p) = transcript_path(file_id) {
+    // whisper.cpp's own lines, cut shorter; else spread over the speech.
+    let cues = if heard.cues.is_empty() {
+        spread(&text, &heard.speech, duration)
+    } else {
+        heard.cues.iter().flat_map(|c| spread(&c.text, &[(c.start, c.end)], c.end)).collect()
+    };
+    if let Some(p) = cache_path(file_id, "txt") {
         if let Some(dir) = p.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
         let _ = std::fs::write(p, &text);
     }
+    if let Some(p) = cache_path(file_id, "cues.json") {
+        let _ = std::fs::write(p, serde_json::to_string(&cues).unwrap_or_default());
+    }
     Ok(text)
 }
+

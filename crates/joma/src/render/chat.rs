@@ -483,11 +483,11 @@ impl Joma {
                         None => bubble.child(div().text_color(t.bright).when(wraps, |d| d.w(px(inner))).child(m.text.clone())).when_some(yt, |d, id| d.child(self.youtube_card(t, &id, &m.id, cx))),
                     }
                 }
+                // A voice or video message plays inside Joma.
+                Some(file) if crate::app::media_name(&file.name) => bubble.child(self.media_bubble(t, &conv.id, &m.id, &file, inner, cx)),
                 // A file: click to open it, or to download one too big to come by itself.
                 Some(file) => {
                     let saved = self.saved_file(&conv.id, &file.id);
-                    let file_id = file.id.clone();
-                    let (file_name, file_ref) = (file.name.clone(), file.clone());
                     let have = saved.is_some();
                     let hint = match (have, me, self.downloads.contains_key(&file.id)) {
                         (true, _, _) => " · open".to_owned(),
@@ -509,55 +509,6 @@ impl Joma {
                                 }))
                             })
                             .child(div().flex().items_center().gap(px(6.)).child(div().text_color(t.muted).child(G_CLIP)).child(div().min_w(px(0.)).child(format!("{}{hint}", m.text))))
-                            // A voice message not here yet: the button fetches it and plays it.
-                            .when(saved.is_none() && crate::media::is_audio(std::path::Path::new(&file_name)), |d| {
-                                let busy = self.downloads.contains_key(&file_id);
-                                let (conv_id, msg_id, file) = (conv.id.clone(), m.id.clone(), file_ref.clone());
-                                d.child(div().mt(px(S1)).flex().child(
-                                    button(SharedString::from(format!("play-{}", m.id)), G_PLAY, if busy { "voice message arriving…" } else { "play voice message" }, t, busy).on_click(cx.listener(move |this, _, _, cx| {
-                                        cx.stop_propagation();
-                                        this.play_after = Some(file.id.clone());
-                                        this.file_clicked(&conv_id, &msg_id, &file, cx);
-                                        cx.notify();
-                                    })),
-                                ))
-                            })
-                            // A voice or video message plays with mpv.
-                            .when_some(saved.clone().filter(|p| crate::media::is_audio(p) || crate::media::is_video(p)), |d, path| {
-                                let fid = file_id.clone();
-                                let playing = self.playing.as_ref().is_some_and(|(id, _)| *id == file_id);
-                                let voice = crate::media::is_audio(&path) || path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("voice"));
-                                let (tid, tpath) = (file_id.clone(), path.clone());
-                                let transcript = self.transcripts.get(&file_id).cloned();
-                                let can = voice && crate::media::is_audio(&path);
-                                d.child(
-                                    div()
-                                        .mt(px(S1))
-                                        .flex()
-                                        .gap(px(S1))
-                                        .child(
-                                            button(SharedString::from(format!("play-{}", m.id)), if playing { G_STOP } else { G_PLAY }, if playing { "stop" } else if voice { "play voice message" } else { "play video" }, t, playing)
-                                                .on_click(cx.listener(move |this, _, _, cx| {
-                                                    cx.stop_propagation();
-                                                    this.toggle_play(&fid, &path, cx);
-                                                })),
-                                        )
-                                        // The words of a voice message, made on this machine.
-                                        .when(can && !matches!(transcript, Some(Some(Ok(_)))), |d| {
-                                            let busy = matches!(transcript, Some(None));
-                                            d.child(button(SharedString::from(format!("tr-{}", m.id)), G_COMMENT, if busy { "transcribing…" } else { "transcribe" }, t, busy).on_click(cx.listener(move |this, _, _, cx| {
-                                                cx.stop_propagation();
-                                                this.transcribe(&tid, &tpath, cx);
-                                            })))
-                                        }),
-                                )
-                                .when_some(transcript.flatten(), |d, r| {
-                                    d.child(match r {
-                                        Ok(text) => div().mt(px(S1)).w(px(inner.min(420.))).text_color(t.bright).child(text),
-                                        Err(e) => div().mt(px(S1)).w(px(inner.min(420.))).text_size(px(t.size - 2.)).text_color(t.red).child(format!("not transcribed: {e}")),
-                                    })
-                                })
-                            })
                             // A picture shows itself once it is here.
                             .when_some(saved.filter(|p| is_picture(p)), |d, path| {
                                 // Sized from the file's header, so the list does not jump
@@ -758,7 +709,8 @@ impl Joma {
             // the user scrolled up.
             let at_end = {
                 let h = &self.messages_scroll;
-                f32::from(h.max_offset().height) > 0. && f32::from(-h.offset().y) >= f32::from(h.max_offset().height) - 4.
+                // Everything fitting counts as the end: the first growth past it follows.
+                f32::from(-h.offset().y) >= f32::from(h.max_offset().height) - 4.
             };
             if std::mem::take(&mut self.pinned_bottom) || at_end {
                 self.messages_scroll.scroll_to_bottom();

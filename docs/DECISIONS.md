@@ -68,6 +68,11 @@
   patches, no push (a background service), English only, arm64, debug-signed. joma's
   own screens later. (Claude, 2026-11-27, to revisit after the phone test,
   `docs/design/07-android.md`.)
+- D-26 Voice and video messages play inside Joma: sound through mpv (no window), video
+  frames decoded by ffmpeg and drawn in the chat, one clock for both; subtitles from the
+  transcript spread over the speech stretches the engine reports (no per-word times);
+  transcription automatic, superwhisper when it works offline. (User, 2026-11-27:
+  "stile dell'app Android … play embedded … stile telegram … sottotitoli".)
 
 ## Decided
 

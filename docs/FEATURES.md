@@ -165,14 +165,20 @@ Beside the message box:
   name, a click sends one as a file, so it plays in the Jami app too. No online search:
   that needs an account and a key with Giphy or Tenor.
 - 🎤 **voice message** and 🎥 **video message** (from the camera): record, then send
-  or ✕. They go as files (`.ogg`, `.webm`); received ones have **play** (mpv: sound
-  only for voice, a window for video), click again to stop.
+  or ✕. They go as files (`.ogg`, `.webm`) and play inside Joma:
+  - a **voice message** looks like the Jami app's: a round play/pause button, the bars
+    of its sound (they fill as it plays; a click on one jumps there), its length, and
+    its words under it;
+  - a **video message** shows a still picture and its length, and plays in the bubble
+    (a click pauses), with its words as **subtitles** in time with the speech. The
+    corner button makes it fill the window (Telegram's): bigger subtitles, a bar to
+    jump with; Esc or the corner button goes back. Phone videos are turned upright.
 
-## Transcribing voice messages
-Voice messages (`.ogg`, `.m4a` from Jami for Android, …) in the open conversation come
+## Transcribing voice and video messages
+Voice and video messages (`.ogg`, `.m4a` from Jami for Android, …) in the open conversation come
 by themselves, also ones sent before this device joined, and have **play** even before
 they are here (it fetches, then plays). Once here they are **transcribed by
-themselves**, one at a time: the words appear under them and stay in Joma's cache
+themselves** (a video's sound too), one at a time: the words appear under them and stay in Joma's cache
 (`~/.cache/joma/transcripts`); nothing is sent into the conversation. **transcribe**
 tries again. **Settings → audio → voice messages** chooses the engine:
 - **automatic** (default): superwhisper when it is installed and set to work offline
@@ -339,6 +345,9 @@ notifications); calls, voice messages and files not yet tried. Design:
 `docs/design/07-android.md`.
 
 ## Log
+- 0.5.2.dev14 (2026-11-27): voice messages like the Jami app's (play button, bars,
+  jump by click); video messages play in the bubble with subtitles from their transcript,
+  and fill the window from the corner button; the chat follows a message that grows.
 - 0.5.2.dev13 (2026-11-27): voice messages come, play and are transcribed by
   themselves (an `.m4a` from Jami for Android sent before this device joined showed only
   *download*); automatic transcription uses superwhisper when it works offline.

@@ -18,6 +18,7 @@ mod hypr;
 mod ipc;
 mod media;
 mod model;
+mod player;
 mod presence;
 mod setup;
 mod stage;
