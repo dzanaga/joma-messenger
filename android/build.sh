@@ -40,12 +40,14 @@ hosttools() {
         tar -C "$t/root" -xf "$f" --exclude .PKGINFO --exclude .BUILDINFO --exclude .MTREE --exclude .INSTALL
     done
 }
+need_meson=no
+command -v meson >/dev/null || need_meson=yes
 if ! command -v swig >/dev/null && [ -x "$OUT/hosttools/root/usr/bin/swig" ]; then
     export PATH="$OUT/hosttools/root/usr/bin:$PATH"
     SWIG_LIB="$(echo "$OUT"/hosttools/root/usr/share/swig/*)"
     export SWIG_LIB
 fi
-if ! command -v meson >/dev/null && [ -x "$OUT/hosttools/root/usr/bin/meson" ]; then
+if [ "$need_meson" = yes ] && [ -x "$OUT/hosttools/root/usr/bin/meson" ]; then
     export PATH="$PATH:$OUT/hosttools/root/usr/bin"
     PYTHONPATH="$(echo "$OUT"/hosttools/root/usr/lib/python3*/site-packages)${PYTHONPATH:+:$PYTHONPATH}"
     export PYTHONPATH
