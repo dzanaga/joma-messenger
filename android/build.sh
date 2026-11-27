@@ -7,7 +7,7 @@
 #      contrib build in daemon/contrib/ is kept between builds);
 #   3. lay android/overlay over it, generate the icons, apply android/patches;
 #   4. gradle assembleNoPushDebug for $ABIS (default arm64-v8a), copy the APK to
-#      $OUT/joma-debug.apk.
+#      $OUT/joma-<version>.apk.
 # Usage: android/build.sh [prepare|daemon|apk] (default apk).
 set -euo pipefail
 
@@ -112,8 +112,10 @@ case "$STEP" in
     apk)
         gradle assembleNoPushDebug
         apk="$(ls -t "$WORK"/jami-android/app/build/outputs/apk/noPush/debug/*.apk | head -1)"
-        cp "$apk" "$OUT/joma-debug.apk"
-        echo "$OUT/joma-debug.apk"
+        # Named by its version (versionName from patches/0001), e.g. joma-0.1.0.dev2.apk.
+        ver="$(sed -n 's/^+ *versionName = "\(.*\)"$/\1/p' "$HERE/patches/0001-joma-identity.patch")"
+        cp "$apk" "$OUT/joma-${ver:-debug}.apk"
+        echo "$OUT/joma-${ver:-debug}.apk"
         ;;
     *) echo "unknown step: $STEP" >&2; exit 2 ;;
 esac

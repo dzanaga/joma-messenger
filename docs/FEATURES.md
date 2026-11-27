@@ -331,7 +331,7 @@ with `scripts/release.sh "notes" --pre`.
 
 ## On the phone (Android, first build)
 `android/build.sh` builds **joma for Android**: an APK (arm64) at
-`~/builds/joma-android/joma-debug.apk`, installed by hand (open it on the phone and allow
+`~/builds/joma-android/joma-<version>.apk` (for example `joma-0.1.0.dev2.apk`), installed by hand (open it on the phone and allow
 installing from that app; Play Protect warns about an unknown developer). It is the
 Jami Android app with joma's name, icon, palette, font, icons and words, and its own id
 (`io.github.dzanaga.joma`), so it installs beside the Jami app. What Jami Android does,

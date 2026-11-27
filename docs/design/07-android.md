@@ -20,7 +20,7 @@ conversations, calls, files) and its screens, rebranded. Nothing of Jami Android
 copied into the repository; the build copies the pinned sources to
 `~/builds/joma-android/work`, lays the overlay over them and applies the patches. The
 overlay is added as the `noPush` flavor's resource folder, so each file names only what
-it changes. The APK ends at `~/builds/joma-android/joma-debug.apk`.
+it changes. The APK ends at `~/builds/joma-android/joma-<version>.apk` (for example `joma-0.1.0.dev2.apk`).
 
 - **Identity:** `applicationId io.github.dzanaga.joma` (installs beside the Jami app,
   own data), name `joma`, the j icon (adaptive, with a themed-icon layer), the j in
