@@ -76,6 +76,8 @@ pub struct Composer {
     allow_empty: bool,
     /// No frame of its own: the field around it draws the border.
     bare: bool,
+    /// A password: shown as stars, never copied, never kept as a draft.
+    masked: bool,
 }
 impl EventEmitter<Submit> for Composer {}
 impl EventEmitter<Edited> for Composer {}
@@ -102,6 +104,7 @@ impl Composer {
             placeholder: "Write a message…".into(),
             allow_empty: false,
             bare: false,
+            masked: false,
         }
     }
     pub fn set_bare(&mut self, bare: bool) {
@@ -109,7 +112,10 @@ impl Composer {
     }
     pub fn configure(&mut self, key: String, theme: std::rc::Rc<Theme>, enabled: bool) {
         if key != self.key {
-            self.drafts.insert(self.key.clone(), std::mem::take(&mut self.text));
+            let left = std::mem::take(&mut self.text);
+            if !self.masked {
+                self.drafts.insert(self.key.clone(), left);
+            }
             self.text = self.drafts.remove(&key).unwrap_or_default();
             self.selected = self.text.len()..self.text.len();
             self.marked = None;
@@ -121,6 +127,9 @@ impl Composer {
     }
     pub fn set_placeholder(&mut self, p: impl Into<String>) {
         self.placeholder = p.into();
+    }
+    pub fn set_masked(&mut self, masked: bool) {
+        self.masked = masked;
     }
     pub fn set_allow_empty(&mut self, allow: bool) {
         self.allow_empty = allow;
@@ -184,6 +193,7 @@ impl Composer {
         if ctrl {
             match k.key.as_str() {
                 "a" => self.selected = 0..self.text.len(),
+                "c" | "x" if self.masked => {}
                 "c" | "x" => {
                     cx.write_to_clipboard(ClipboardItem::new_string(self.text[self.selected.clone()].into()));
                     if k.key == "x" {
@@ -334,6 +344,9 @@ impl Render for Composer {
         let focused = self.focus.is_focused(window);
         let shown = if self.text.is_empty() {
             if focused { " " } else { self.placeholder.as_str() }.to_string()
+        } else if self.masked {
+            // One star per byte keeps the caret's byte offsets.
+            self.text.chars().map(|c| "*".repeat(c.len_utf8())).collect()
         } else {
             self.text.clone()
         };

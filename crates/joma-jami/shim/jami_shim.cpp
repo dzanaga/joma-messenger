@@ -389,6 +389,8 @@ dispatch(const std::string& m, const Json::Value& a)
     if (m == "lookupAddress")
         return lookupAddress(str(a, 0), str(a, 1), str(a, 2));
     // Devices
+    if (m == "exportToFile")
+        return exportToFile(str(a, 0), str(a, 1), str(a, 2), str(a, 3));
     if (m == "getConnectionList")
         return toJson(getConnectionList(str(a, 0), str(a, 1)));
     if (m == "getChannelList")

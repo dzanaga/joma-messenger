@@ -197,6 +197,27 @@ pub fn link_account() -> Result<String> {
     typed("addAccount", json!([details]))
 }
 
+/// Write the account's archive (keys, contacts, devices, settings; no history) to
+/// `path`. Joma accounts have no archive password, so the file is not encrypted: the
+/// caller encrypts it (`joma-backup`) and removes it.
+pub fn export_archive(account: &str, path: &str) -> Result<()> {
+    let ok: bool = typed("exportToFile", json!([account, path, "", ""]))?;
+    if !ok {
+        bail!("the daemon could not export the account");
+    }
+    Ok(())
+}
+
+/// Add an account from an archive file (a restore): the same Jami id, with a new device
+/// certificate for this machine. Returns the new account's local id.
+pub fn import_archive(path: &str) -> Result<String> {
+    let mut details: Details = typed("getAccountTemplate", json!(["RING"]))?;
+    details.insert("Account.type".into(), "RING".into());
+    details.insert("Account.archivePath".into(), path.into());
+    details.insert("Account.archivePassword".into(), String::new());
+    typed("addAccount", json!([details]))
+}
+
 /// Remove an account from this machine (a link that failed).
 pub fn remove_account(account: &str) -> Result<()> {
     call("removeAccount", json!([account])).map(drop)

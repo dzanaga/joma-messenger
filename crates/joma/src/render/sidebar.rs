@@ -170,6 +170,9 @@ impl Joma {
                             Mode::LinkDevice => "link a device: on the new one choose \"link to an account\"",
                             Mode::DeviceName => "rename this device",
                             Mode::RemoveAccount => "remove this account: only this device has it, so it is lost for good",
+                            Mode::Password if self.password_ask.as_ref().is_some_and(|a| a.restore) => "restore: the backup's password",
+                            Mode::Password if self.password_ask.as_ref().is_some_and(|a| a.first.is_some()) => "backup: type the same password again",
+                            Mode::Password => "backup: one password for all your accounts (a forgotten one makes the backup useless)",
                             _ => "filter",
                         }))
                         .child(self.input.clone())
@@ -180,6 +183,7 @@ impl Joma {
                             Mode::LinkDevice => "enter: link · esc: cancel",
                             Mode::DeviceName => "enter: rename · esc: cancel",
                             Mode::RemoveAccount => "type delete, then enter · esc: keep it",
+                            Mode::Password => "enter: continue · esc: cancel",
                             _ => "",
                         })),
                 )

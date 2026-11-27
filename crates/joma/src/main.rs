@@ -10,6 +10,7 @@
 
 mod app;
 mod avatar;
+mod backup;
 mod composer;
 mod conninfo;
 mod desk;
@@ -68,6 +69,14 @@ const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); -
        joma sync add <path> [label]
                                  share a folder with all your devices
        joma sync remove <folder> stop syncing a folder (its files stay)
+       joma backup [ACCT…|--all] [--file PATH]
+                                 back up accounts, encrypted with a password Joma asks
+                                 for in its window, to github.com/<you>/joma-backup
+                                 (private, through gh) or to a file
+       joma backup list          what the backup repo holds
+       joma restore [ACCT…] [--file PATH]
+                                 restore accounts from the repo or a file
+       joma github status        the GitHub login and the backup repo
        joma quit                 quit Joma (closing the window keeps it running)
        joma probe [--bench [--display-gpu]]
                                  the GPUs and codecs the desktop share can use
@@ -93,6 +102,30 @@ fn cli(args: &[String]) -> Option<i32> {
         Some("draw") if args.len() == 2 => Request::Draw { what: args[1].clone() },
         Some("ui") if args.len() == 2 => Request::Ui { what: args[1].clone() },
         Some("toggle") => Request::Toggle,
+        Some("backup") if args.get(1).map(String::as_str) == Some("list") => Request::BackupList,
+        Some(c @ ("backup" | "restore")) => {
+            let (mut accounts, mut all, mut file) = (Vec::new(), false, None);
+            let mut it = args[1..].iter();
+            while let Some(a) = it.next() {
+                match a.as_str() {
+                    "--all" => all = true,
+                    "--file" => match it.next() {
+                        Some(p) => file = Some(std::path::absolute(p).map_or_else(|_| p.clone(), |c| c.to_string_lossy().into_owned())),
+                        None => {
+                            eprintln!("{USAGE}");
+                            return Some(2);
+                        }
+                    },
+                    _ => accounts.push(a.clone()),
+                }
+            }
+            if c == "backup" {
+                Request::Backup { accounts, all, file }
+            } else {
+                Request::Restore { accounts, file }
+            }
+        }
+        Some("github") if args.get(1).map(String::as_str) == Some("status") => Request::GithubStatus,
         Some("sync") => match (args.get(1).map(String::as_str), args.len()) {
             (Some("status") | None, _) => Request::Sync { what: "status".into(), arg: None, label: None, json: args.iter().any(|a| a == "--json") },
             (Some(w @ ("on" | "off")), 2) => Request::Sync { what: w.into(), arg: None, label: None, json: false },

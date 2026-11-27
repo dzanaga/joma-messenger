@@ -80,8 +80,39 @@ pub enum Request {
         #[serde(default)]
         json: bool,
     },
+    /// Back up accounts (labels, usernames or ids; none: the open one; `all`: every
+    /// account here), encrypted with a password Joma asks for in its window, into the
+    /// private GitHub repo or into `file`.
+    Backup {
+        #[serde(default)]
+        accounts: Vec<String>,
+        #[serde(default)]
+        all: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file: Option<String>,
+    },
+    /// What the backup repo holds.
+    BackupList,
+    /// Restore accounts from the repo or from `file` (none named: all), asking for the
+    /// password in Joma's window.
+    Restore {
+        #[serde(default)]
+        accounts: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file: Option<String>,
+    },
+    /// The GitHub connection and the backup repo.
+    GithubStatus,
     /// Quit Joma (closing its window only hides it).
     Quit,
+}
+
+impl Request {
+    /// Requests that wait for the user (a password typed in Joma's window) or for the
+    /// network.
+    pub fn slow(&self) -> bool {
+        matches!(self, Request::Backup { .. } | Request::Restore { .. } | Request::BackupList | Request::GithubStatus)
+    }
 }
 
 /// One conversation offered by Quick Messages.
@@ -162,7 +193,7 @@ pub fn socket_path() -> Option<PathBuf> {
 pub fn request(req: &Request) -> Result<Reply> {
     let path = socket_path().ok_or_else(|| anyhow!("XDG_RUNTIME_DIR is not set"))?;
     let mut s = UnixStream::connect(&path).map_err(|_| anyhow!("Joma is not running"))?;
-    s.set_read_timeout(Some(Duration::from_secs(10)))?;
+    s.set_read_timeout(Some(if req.slow() { Duration::from_secs(15 * 60) } else { Duration::from_secs(10) }))?;
     s.write_all(format!("{}\n", serde_json::to_string(req)?).as_bytes())?;
     let mut line = String::new();
     BufReader::new(s).read_line(&mut line)?;

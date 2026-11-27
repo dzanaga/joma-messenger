@@ -116,6 +116,16 @@ path is yellow (slow for large files). `joma sync on|off`, `joma sync add <path>
 [label]`, `joma sync remove <folder>`, `joma sync status [--json]`. Needs `syncthing`
 installed.
 
+## Backups
+`joma backup` encrypts the open account (or `joma backup <name>…`, `--all`) with one
+password and puts it in your private repo `github.com/<you>/joma-backup`, through your
+`gh` login (Joma creates the repo, private, and refuses a public one). `--file <path>`
+writes the backup to a file or a folder instead. `joma restore [<name>…] [--file <path>]`
+brings accounts back, with the same Jami id (contacts and username stay valid); the
+conversation history comes back from your contacts and other devices. Joma asks for the
+password in its window (twice for a backup), never on the command line: a forgotten
+password makes the backup useless. `joma backup list`, `joma github status`.
+
 ## Removing chats
 The bin in a conversation's header takes it off the lists (window, bar, notifications);
 it stays in Jami, and its messages keep arriving quietly. The bin next to + in the chats
@@ -288,7 +298,7 @@ Ctrl+. and Alt+1…9 in the window or the panel; `joma send` and `joma send-quic
 
 ## Command line
 `joma chat <to> [n]` (JSON), `joma call <to> [--video]`, `joma share <to> [--source …]`, `joma watch <to>`,
-`joma send-file <to> [path]`, `joma open <to>`, `joma block <to>`, `joma unblock <to>`, `joma link`, `joma link-device <code>`, `joma accounts`, `joma account <name>`, `joma ui settings|profile|keys|menu|chat-menu|emoji|quick|close`, `joma connections [<to>] [--json]`, `joma sync status|on|off|add|remove`, `joma quit`, `joma probe [--bench]` (the
+`joma send-file <to> [path]`, `joma open <to>`, `joma block <to>`, `joma unblock <to>`, `joma link`, `joma link-device <code>`, `joma accounts`, `joma account <name>`, `joma ui settings|profile|keys|menu|chat-menu|emoji|quick|close`, `joma connections [<to>] [--json]`, `joma sync status|on|off|add|remove`, `joma backup [list]`, `joma restore`, `joma github status`, `joma quit`, `joma probe [--bench]` (the
 GPUs the desktop share can use).
 
 ## Install
@@ -325,6 +335,10 @@ notifications); calls, voice messages and files not yet tried. Design:
 `docs/design/07-android.md`.
 
 ## Log
+- 0.5.2.dev12 (2026-11-27): `joma backup` / `joma restore` (encrypted, one password asked
+  in the window; to your private GitHub repo through gh, or to a file; tested with files
+  between two test profiles, not yet against GitHub); password fields show stars; a
+  Syncthing left by a killed Joma is stopped at the next start.
 - Android 0.1.0.dev1 (2026-11-27): the first APK, Jami Android with joma's skin (see
   "On the phone").
 - 0.5.2.dev11 (2026-11-27): folder sync between your own devices (Joma's own Syncthing

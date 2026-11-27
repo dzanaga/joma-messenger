@@ -99,6 +99,8 @@ pub enum AppMsg {
     SearchDone(String, anyhow::Result<String>),
     /// A link preview was fetched (or failed) for this video id.
     Preview(String),
+    /// A backup or restore finished: was it a restore, and what to tell the user.
+    BackupDone(bool, Result<String, String>),
     /// Joma's Syncthing for this account started (or not).
     SyncStarted(String, Result<joma_sync::Syncthing, String>),
     /// A fresh sync report for the devices tab.
@@ -223,6 +225,20 @@ pub enum Mode {
     DeviceName,
     /// The input asks for "delete" before removing an account no other device has.
     RemoveAccount,
+    /// The input takes the backup password (`joma backup` / `joma restore`), masked.
+    Password,
+}
+
+/// A backup or restore waiting for its password in the window.
+pub struct PasswordAsk {
+    pub restore: bool,
+    /// Backup: the accounts; restore: the wanted labels or ids.
+    pub accounts: Vec<crate::backup::Account>,
+    pub wanted: Vec<String>,
+    pub file: Option<String>,
+    /// Backup: the first entry, waiting to be typed again.
+    pub first: Option<String>,
+    pub reply: std::sync::mpsc::Sender<Reply>,
 }
 
 /// This machine joining an account that lives on another device.
@@ -471,6 +487,8 @@ pub struct Joma {
     pub conn_info: Option<(String, Option<Vec<crate::conninfo::Row>>)>,
     /// Folder sync with our other devices.
     pub sync: crate::sync::Sync,
+    /// A backup or restore waiting for its password.
+    pub password_ask: Option<PasswordAsk>,
     /// The devices tab's last sync report, refreshed in the background.
     pub sync_view: Option<crate::sync::Report>,
     sync_view_busy: bool,
@@ -741,6 +759,7 @@ impl Joma {
             device_op: None,
             conn_info: None,
             sync: Default::default(),
+            password_ask: None,
             sync_view: None,
             sync_view_busy: false,
             sync_view_at: None,
@@ -900,6 +919,99 @@ impl Joma {
     /// The sync report (folders, devices, paths), for the socket (blocking).
     pub fn sync_report(&self) -> crate::sync::Report {
         self.sync.snapshot().report(&self.model.account)
+    }
+
+    /// A `joma backup` / `joma restore` arrived: ask for the password in the window.
+    fn ask_password(&mut self, p: crate::ipc::Pending, window: &mut Window, cx: &mut Context<Self>) {
+        let refuse = |p: crate::ipc::Pending, m: &str| {
+            let _ = p.reply.send(Reply::Error { message: m.into() });
+        };
+        if self.password_ask.is_some() {
+            return refuse(p, "Joma is already asking for a backup password");
+        }
+        if self.gate != Gate::Ready {
+            return refuse(p, "open an account first (restoring on a fresh install comes with the restore screen)");
+        }
+        self.load_accounts();
+        let here: Vec<crate::backup::Account> = self
+            .accounts
+            .iter()
+            .map(|(id, name)| crate::backup::Account { id: id.clone(), uri: joma_jami::account_uri(id).unwrap_or_default(), label: name.clone() })
+            .collect();
+        let (restore, wanted, all, file) = match &p.request {
+            Request::Backup { accounts, all, file } => (false, accounts.clone(), *all, file.clone()),
+            Request::Restore { accounts, file } => (true, accounts.clone(), false, file.clone()),
+            _ => return,
+        };
+        let accounts = if restore {
+            Vec::new()
+        } else if all {
+            here
+        } else if wanted.is_empty() {
+            here.into_iter().filter(|a| a.id == self.model.account).collect()
+        } else {
+            let low: Vec<String> = wanted.iter().map(|w| w.to_lowercase()).collect();
+            here.into_iter().filter(|a| low.iter().any(|w| a.label.to_lowercase() == *w || a.id == *w || a.uri.starts_with(w.as_str()))).collect()
+        };
+        if !restore && accounts.iter().any(|a| a.uri.is_empty()) {
+            return refuse(p, "an account is not ready yet");
+        }
+        if !restore && accounts.is_empty() {
+            return refuse(p, "no account matches (joma accounts)");
+        }
+        self.password_ask = Some(PasswordAsk { restore, accounts, wanted, file, first: None, reply: p.reply });
+        self.set_mode(Mode::Password, window, cx);
+        raise(window);
+    }
+
+    fn password_entered(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.input.update(cx, |c, cx| c.clear(cx));
+        let Some(ask) = self.password_ask.as_mut() else { return };
+        if text.is_empty() {
+            return;
+        }
+        if !ask.restore {
+            if ask.first.is_none() {
+                if let Some(why) = joma_backup::weak(&text) {
+                    return self.show_flash(format!("password too weak: {why}"), cx);
+                }
+                ask.first = Some(text);
+                self.configure_inputs(cx);
+                cx.notify();
+                return;
+            }
+            if ask.first.as_deref() != Some(text.as_str()) {
+                ask.first = None;
+                self.configure_inputs(cx);
+                return self.show_flash("the two passwords differ: type it again", cx);
+            }
+        }
+        let Some(ask) = self.password_ask.take() else { return };
+        self.set_mode(Mode::Chat, window, cx);
+        self.show_flash(if ask.restore { "restoring…" } else { "backing up…" }, cx);
+        let present: Vec<String> = self.accounts.iter().filter_map(|(id, _)| joma_jami::account_uri(id).ok()).collect();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let file = ask.file.as_deref().map(std::path::Path::new);
+            let r = if ask.restore {
+                crate::backup::restore(&ask.wanted, &text, file, &present)
+            } else {
+                crate::backup::backup(&ask.accounts, &text, file)
+            }
+            .map_err(|e| format!("{e:#}"));
+            let _ = ask.reply.send(match &r {
+                Ok(t) => Reply::Text { text: t.clone() },
+                Err(e) => Reply::Error { message: e.clone() },
+            });
+            let _ = tx.unbounded_send(AppMsg::BackupDone(ask.restore, r));
+        });
+    }
+
+    pub fn cancel_password(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(ask) = self.password_ask.take() {
+            let _ = ask.reply.send(Reply::Error { message: "cancelled in Joma".into() });
+        }
+        self.set_mode(Mode::Chat, window, cx);
     }
 
     /// The devices tab's switch.
@@ -1074,12 +1186,18 @@ impl Joma {
             (_, Mode::LinkDevice) => ("link", "The jami-auth:// code the new device shows, then Enter"),
             (_, Mode::DeviceName) => ("device-name", "A name for this device, then Enter"),
             (_, Mode::RemoveAccount) => ("remove-account", "Type delete, then Enter"),
+            (_, Mode::Password) => match &self.password_ask {
+                Some(a) if a.restore => ("password", "The backup's password, then Enter"),
+                Some(a) if a.first.is_some() => ("password-again", "The same password again, then Enter"),
+                _ => ("password", "A password for the backup (the same for all accounts), then Enter"),
+            },
             _ => ("idle", ""),
         };
         self.input.update(cx, |c, _| {
             c.configure(key.into(), theme, true);
             c.set_placeholder(placeholder);
             c.set_allow_empty(key == "onboarding-user");
+            c.set_masked(matches!(key, "password" | "password-again" | "link-password"));
         });
     }
 
@@ -1219,9 +1337,37 @@ impl Joma {
                 self.repaint_queued.store(false, Ordering::SeqCst);
                 cx.notify();
             }
-            AppMsg::Ipc(p) => {
-                let reply = self.ipc(p.request, window, cx);
-                let _ = p.reply.send(reply);
+            AppMsg::Ipc(p) => match p.request {
+                Request::Backup { .. } | Request::Restore { .. } => self.ask_password(p, window, cx),
+                Request::BackupList | Request::GithubStatus => {
+                    // gh talks to GitHub: off the UI thread.
+                    let list = matches!(p.request, Request::BackupList);
+                    std::thread::spawn(move || {
+                        let reply = if list {
+                            match crate::backup::list() {
+                                Ok(text) => Reply::Text { text },
+                                Err(e) => Reply::Error { message: format!("{e:#}") },
+                            }
+                        } else {
+                            Reply::Text { text: crate::backup::status() }
+                        };
+                        let _ = p.reply.send(reply);
+                    });
+                }
+                _ => {
+                    let reply = self.ipc(p.request, window, cx);
+                    let _ = p.reply.send(reply);
+                }
+            },
+            AppMsg::BackupDone(restore, r) => {
+                match r {
+                    Ok(text) => self.show_flash(text.lines().next().unwrap_or("done").to_owned(), cx),
+                    Err(e) => self.show_flash(format!("{} failed: {e}", if restore { "restore" } else { "backup" }), cx),
+                }
+                if restore {
+                    self.load_accounts();
+                }
+                cx.notify();
             }
             AppMsg::Portal(call, result) => {
                 let acc = self.model.account.clone();
@@ -3823,6 +3969,11 @@ impl Joma {
     }
 
     fn submit_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.mode == Mode::Password {
+            // A password keeps its spaces.
+            let text = self.input.read(cx).text();
+            return self.password_entered(text, window, cx);
+        }
         let text = self.input.read(cx).text().trim().to_owned();
         if let Some(l) = self.linking.clone() {
             if let Some(scheme) = l.password_scheme {
@@ -3902,6 +4053,8 @@ impl Joma {
                     Err(e) => self.show_flash(format!("could not rename: {e}"), cx),
                 }
             }
+            // Handled before the gate (see the top of this function).
+            Mode::Password => {}
             Mode::RemoveAccount => {
                 if text != "delete" {
                     self.show_flash("type delete to remove the account, or Esc", cx);
@@ -4389,6 +4542,10 @@ impl Joma {
                     }
                     None => Reply::Error { message: format!("no account {to}: see joma accounts") },
                 }
+            }
+            // Answered from AppMsg::Ipc (a password or the network).
+            Request::Backup { .. } | Request::Restore { .. } | Request::BackupList | Request::GithubStatus => {
+                Reply::Error { message: "busy".into() }
             }
             Request::Connections { to, json } => {
                 let conv = match to {

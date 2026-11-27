@@ -364,6 +364,10 @@ impl Render for Joma {
             .on_action(cx.listener(|this, _: &Search, window, cx| this.set_mode(Mode::Search, window, cx)))
             .on_action(cx.listener(|this, _: &Cancel, window, cx| {
                 // Esc closes a menu, the keys, the picker or the profile, then leaves full screen.
+                if this.password_ask.is_some() {
+                    this.cancel_password(window, cx);
+                    return;
+                }
                 if this.viewer.take().is_some() {
                     cx.notify();
                     return;
