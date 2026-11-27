@@ -1,0 +1,131 @@
+---
+title: "Transcription shared across your devices"
+date: 2026-11-27
+lang: en
+---
+
+The idea (user, 2026-11-27): with several devices on one account, choose which ones
+transcribe. The mini PC at home is always on and has a local model (superwhisper or
+whisper.cpp): it transcribes every voice message the account receives, and the phone
+shows the words without running a model. Settings → voice messages becomes one setting
+for the account, showing which devices transcribe. And an account that lives only on a
+phone needs an answer too: no transcription, a model on the phone, or a cloud service.
+
+What holds today (0.5.2): each device transcribes on its own, only the open
+conversation, with superwhisper (when it works offline) or whisper.cpp. Text and
+subtitles stay in that device's cache, keyed by the file's id. That id comes from the
+conversation's commit (`fileId`), so it is **the same on every device**: a transcript
+made on one device fits the message on all of them. Joma already talks to its own
+other devices with account messages to its own Jami ID (folder sync does, D-23).
+
+Two facts shape the design. libjami's public API sends only plain text into a
+conversation, no custom message types. And Jami keeps account messages for an offline
+device only a short while, so a phone that was off for a day would miss them.
+
+Sketch:
+
+- **A private Joma conversation.** Joma creates one conversation per account with only
+  you in it ("Joma"); Jami syncs it to all your devices, the phone included, and keeps
+  its history. Transcripts go there as records: one line of text that starts with a
+  marker and carries JSON (`joma:transcript {"file": …, "conv": …, "lang": "it",
+  "text": …, "cues": …, "by": "minis"}`). Joma reads them and hides the conversation.
+  It is end-to-end encrypted like any conversation, and only your devices are in it.
+- **A live nudge.** The transcriber also sends an account message to your own ID, so a
+  device that is on shows the words at once instead of at the next conversation sync.
+- **Roles.** Each Joma device writes a device record in the same conversation: its
+  name, the engines it has (superwhisper offline, whisper.cpp, a cloud key), whether it
+  is always on, and whether it transcribes. Settings → voice messages shows them all
+  and lets you choose. Devices shows "transcribes" on those that do.
+- **The transcriber.** A device that transcribes watches every conversation, downloads
+  each new voice or video message, transcribes it and posts the record. With two
+  transcribers, the second waits a little and skips messages that already have one.
+- **Readers.** Every device, the phone too, reads the records and shows the words under
+  the message and the subtitles on videos. A device that transcribes for itself only
+  (today's behaviour) still works without the shared conversation.
+
+Joma for Android needs a patch to read the records and to hide the Joma conversation;
+until then the phone shows that conversation as plain text lines (they read as
+`joma:transcript …`).
+
+# 1. Where transcripts travel
+
+The private Joma conversation (lasting, reaches the phone after being off) plus a live
+account message (instant). Proposal: yes. The same conversation can later carry other
+per-account Joma settings (synced folders, quick messages, favourites).
+
+- [ ] A:
+
+# 2. Who sees them
+
+Only your devices. A contact never sees your transcripts unless you send them. Proposal:
+only yours by default; a later per-conversation switch "share transcripts here" posts
+them into that conversation for everyone (useful in a group where nobody transcribes).
+
+- [ ] A:
+
+# 3. Choosing the transcribers
+
+Proposal: settings → voice messages lists your devices with what each can do
+("minis · superwhisper offline · always on"), and a switch per device. Default: every
+device with a local engine transcribes for itself; a device marked **for all my
+devices** transcribes everything, and then the others stop doing it themselves (they
+wait for its records, and fall back to themselves after a few minutes if none comes).
+
+- [ ] A:
+
+# 4. What gets transcribed
+
+Proposal: new voice and video messages in every conversation, up to 10 minutes long.
+When a transcriber is switched on, it also does the last 7 days. Older messages: on
+demand. The phone's "transcribe" button asks the transcriber (a request record), so a
+phone can get any old message transcribed by the mini PC.
+
+- [ ] A:
+
+# 5. An account only on a phone
+
+No other device to do the work. Options, any mix:
+
+- (a) **no transcription** (the default);
+- (b) **a model on the phone**: whisper.cpp's small multilingual models (75 to 150 MB)
+  run on a recent phone, slowly for long messages and with some battery;
+- (c) **a cloud service with your own key**: OpenAI's or Groq's Whisper API (an
+  OpenAI-style endpoint, so one setting serves several providers); the audio leaves the
+  phone, which the setting says plainly;
+- (d) **superwhisper's cloud**: superwhisper's account works inside its own app; I have
+  not found a public API it offers to other apps. To check before promising it.
+
+Proposal: (a) by default, (c) as an opt-in setting, (b) later. The same cloud option
+can serve a desktop without a local model.
+
+- [ ] A:
+
+# 6. Language
+
+Proposal: automatic everywhere (the engine decides), with an optional language per
+contact for people who always speak one ("Marta: Italian"), stored in the Joma
+conversation so every device uses it.
+
+- [ ] A:
+
+# 7. Order of work
+
+Proposal:
+
+1. The Joma conversation and the record format (with a test between two linked test
+   profiles).
+2. Desktop as transcriber and reader: every conversation in the background, records,
+   the live nudge, the settings page with device roles.
+3. Requests ("transcribe this one") and the 7-day catch-up.
+4. Joma for Android reads records and hides the conversation (A2 in the plan).
+5. The cloud key option, then a model on the phone.
+
+- [ ] A:
+
+# 8. Commands
+
+Proposal: `joma transcribe <conversation> <message>` (asks the transcriber or does it
+here), `joma transcription` (the devices and their roles, `--json`), `joma
+transcription on|off|all` (this device's role).
+
+- [ ] A:

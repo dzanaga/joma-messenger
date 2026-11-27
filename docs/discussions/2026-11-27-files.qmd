@@ -1,0 +1,93 @@
+---
+title: "A files view: synced folders you can browse"
+date: 2026-11-27
+lang: en
+---
+
+The idea (user, 2026-11-27): a **files** section, like devices, where you choose which
+folders sync, and browse their files: select them, open them, drag files in.
+
+What Joma has today: folder sync runs on Joma's own Syncthing over Jami tunnels
+(0.5.2.dev12, design note 08). Folders are added in devices → synced folders or with
+`joma sync add <path>`; the list shows each folder's state. Received files land in
+`~/Downloads/joma`. GPUI (Joma's toolkit) takes files dropped from other apps, but it
+cannot start a drag towards other apps on Linux: it uses the Wayland data source only
+for the clipboard (checked in gpui 0.2.2).
+
+Sketch: a seventh icon in the rail, **files** (Ctrl+7). The list on the left holds the
+synced folders (with their state) and, below, **received** (files from conversations).
+The right side browses the chosen folder: a path line, rows with icon, name, size,
+modified and sync state, a preview for pictures, voice and video (Joma's own viewer and
+player). Synced-folder settings move from devices to here; devices keeps a short line
+("2 folders synced").
+
+# 1. Where it lives
+
+A new rail entry **files**, between devices and accounts. Proposal: yes; devices keeps
+only a count that links here.
+
+- [ ] A:
+
+# 2. What it shows
+
+Synced folders only, or also files from conversations? Proposal: synced folders, then a
+**received** group: every file of every conversation that is on this machine (from who,
+when, a click opens the message). One place to find "that PDF Marta sent".
+
+- [ ] A:
+
+# 3. Choosing what syncs, per device
+
+Today a folder goes to all your devices. Syncthing can share a folder with some devices
+only. Proposal: each folder lists your devices with a switch each (default: all that run
+Joma); a new device gets the folders marked "all devices".
+
+- [ ] A:
+
+# 4. Browsing and selecting
+
+Proposal: click selects, Ctrl/Shift+click adds, Enter or double click opens with the
+system's app (`xdg-open`), Space previews in Joma, Delete moves to the trash (Syncthing
+passes the deletion on, so it asks first and says on how many devices). Keys like the
+chat list (j/k, /).
+
+- [ ] A:
+
+# 5. Drag and drop
+
+Into Joma: dropping files on a folder copies them in (Shift: move); dropping on a
+conversation sends them, as today. From the browser onto a conversation in Joma: sends
+(an internal drag, works). Out of Joma into other apps: GPUI cannot start it. Options:
+(a) a **copy** action that puts the files on the clipboard as file paths (most file
+managers and browsers take a paste); (b) "show in folder" opens the system file
+manager there; (c) a small helper (`ripdrag`, AUR) started for the selected files,
+which other apps can drag from. Proposal: (a) and (b) now, (c) only if you miss real
+dragging.
+
+- [ ] A:
+
+# 6. Conflicts and old versions
+
+When two devices change a file at once, Syncthing keeps both (`name.sync-conflict-…`).
+It can also keep old versions of changed and deleted files. Proposal: conflicts show as
+a badge on the file with "keep this / keep the other"; folders keep old versions for 30
+days (Syncthing's "staggered" versioning) under the folder's `.stversions`, browsable
+from the file's menu.
+
+- [ ] A:
+
+# 7. The phone
+
+Joma for Android has no Syncthing yet. Proposal: later, as its own discussion: browsing
+a home device's folder from the phone over a Jami tunnel (no full copy on the phone) is
+a better fit than syncing everything.
+
+- [ ] A:
+
+# 8. Commands
+
+Proposal, like the other features: `joma files` (folders and their state),
+`joma files ls <folder> [path] [--json]`, `joma files open <path>`, `joma sync share
+<folder> <device>|--all` for question 3.
+
+- [ ] A:
