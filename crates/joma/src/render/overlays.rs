@@ -63,16 +63,18 @@ impl Joma {
                         t,
                         cx,
                         "tr",
-                        vec![("".into(), "whisper.cpp · local".into()), ("superwhisper".into(), "superwhisper · its mode".into()), ("off".into(), "off".into())],
-                        if self.quick.transcribe == "whisper" { "" } else { &self.quick.transcribe },
+                        vec![("".into(), "automatic".into()), ("superwhisper".into(), "superwhisper".into()), ("whisper".into(), "whisper.cpp".into()), ("off".into(), "off".into())],
+                        &self.quick.transcribe,
                         |j, x, cx| j.set_transcribe(x, cx),
                     ),
                 ))
                 .child(note(match crate::media::transcriber(&self.quick.transcribe) {
-                    Some("whisper") => "Transcripts are made on this machine with whisper.cpp and kept in Joma's cache. The model (about 150 MB) is downloaded at the first one.",
+                    Some("whisper") => "Voice messages are transcribed by themselves on this machine with whisper.cpp (language detected) and kept in Joma's cache. The model (about 150 MB) is downloaded at the first one.",
+                    Some(_) if self.quick.transcribe.is_empty() => "Voice messages are transcribed by themselves with superwhisper, which is set to work offline: they stay on this machine. Language: superwhisper's (automatic by default).",
                     Some(_) => "Transcripts are made by superwhisper in the mode it is set to: in a cloud mode the voice message leaves this machine.",
                     None if self.quick.transcribe == "off" => "Voice messages are not transcribed.",
-                    None => "Not installed: whisper.cpp provides whisper-cli (AUR: whisper.cpp). Until then voice messages are not transcribed.",
+                    None if self.quick.transcribe.is_empty() => "Automatic uses superwhisper when it is set to work offline, or whisper.cpp (whisper-cli). Neither is ready, so voice messages are not transcribed.",
+                    None => "Not installed, so voice messages are not transcribed.",
                 }))
                 .child(note("Devices and sound processing apply to the next call.")),
             2 => page

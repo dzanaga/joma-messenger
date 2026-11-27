@@ -159,6 +159,17 @@ mod tests {
         assert_eq!(youtube_id("no link"), None);
         assert_eq!(duration_label(3725), "1:02:05");
         assert!(is_audio(Path::new("a/voice.OGG")) && is_video(Path::new("v.webm")));
+        assert!(is_audio(Path::new("audio_20261127_173803.m4a")));
+        assert!(offline_mode(&serde_json::json!({"processing": "offline"})));
+        assert!(offline_mode(&serde_json::json!({"processing": "Offline Lite"})));
+        assert!(!offline_mode(&serde_json::json!({"processing": "cloud"})));
+        assert!(!offline_mode(&serde_json::json!({})));
+        let st = serde_json::json!({"last": {"session_id": 3, "text": " ciao ", "warning": null}});
+        assert_eq!(session_done(&st, 3).unwrap().unwrap(), "ciao");
+        assert!(session_done(&st, 4).is_none());
+        let quiet = serde_json::json!({"last": {"session_id": 1, "text": "", "warning": "No speech detected"}});
+        assert_eq!(session_done(&quiet, 1).unwrap().unwrap_err().to_string(), "no speech detected");
+        assert_eq!(superwhisper_result(r#"{"text":"hi"}"#).unwrap(), "hi");
     }
 }
 
@@ -169,13 +180,44 @@ pub fn installed(program: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(program).is_file()))
 }
 
-/// The engine to use: the setting, or whisper.cpp when it is here. `None`: off.
+/// The engine to use: the setting, or by itself Superwhisper when it is installed and
+/// set to work offline (nothing more to install), else whisper.cpp when it is here.
+/// `None`: off. A cloud mode is used only when chosen in the settings.
 pub fn transcriber(setting: &str) -> Option<&'static str> {
     match setting {
         "off" => None,
         "superwhisper" => installed("superwhisper").then_some("superwhisper"),
+        "whisper" => installed("whisper-cli").then_some("whisper"),
+        _ if superwhisper_offline() => Some("superwhisper"),
         _ => installed("whisper-cli").then_some("whisper"),
     }
+}
+
+/// Superwhisper is installed and transcribes on this machine (checked once a minute).
+pub fn superwhisper_offline() -> bool {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    static SEEN: Mutex<Option<(Instant, bool)>> = Mutex::new(None);
+    if let Some((at, v)) = *SEEN.lock().unwrap() {
+        if at.elapsed() < Duration::from_secs(60) {
+            return v;
+        }
+    }
+    let v = installed("superwhisper")
+        && Command::new("superwhisper")
+            .args(["models", "show"])
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok())
+            .is_some_and(|j| offline_mode(&j));
+    *SEEN.lock().unwrap() = Some((Instant::now(), v));
+    v
+}
+
+/// `superwhisper models show` says it processes offline ("offline", "offline-lite"…).
+fn offline_mode(j: &serde_json::Value) -> bool {
+    j.get("processing").and_then(|p| p.as_str()).is_some_and(|p| p.to_ascii_lowercase().starts_with("offline"))
 }
 
 /// whisper.cpp's multilingual `base` model (about 150 MB), kept with Joma's data.
@@ -199,6 +241,42 @@ pub fn fetch_whisper_model() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Superwhisper transcribes in the background: `transcribe` answers
+/// `{"ok":true,"session_id":N}` and `status` later shows that session under `last`.
+fn superwhisper_result(answer: &str) -> anyhow::Result<String> {
+    let v: serde_json::Value = serde_json::from_str(answer.trim()).map_err(|_| anyhow::anyhow!("superwhisper: {}", answer.trim()))?;
+    if let Some(t) = v.get("text").and_then(|t| t.as_str()) {
+        return Ok(t.to_owned());
+    }
+    anyhow::ensure!(v.get("ok").and_then(|o| o.as_bool()) == Some(true), "superwhisper: {}", answer.trim());
+    let session = v.get("session_id").and_then(|s| s.as_i64()).ok_or_else(|| anyhow::anyhow!("superwhisper: no session"))?;
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(600);
+    while std::time::Instant::now() < until {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let Ok(out) = Command::new("superwhisper").arg("status").stderr(Stdio::null()).output() else { continue };
+        let Ok(st) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else { continue };
+        if let Some(r) = session_done(&st, session) {
+            return r;
+        }
+    }
+    anyhow::bail!("superwhisper took more than ten minutes")
+}
+
+/// The result of `session` in a `superwhisper status`, once it is done.
+fn session_done(status: &serde_json::Value, session: i64) -> Option<anyhow::Result<String>> {
+    let last = status.get("last")?;
+    if last.get("session_id")?.as_i64()? != session {
+        return None;
+    }
+    let text = last.get("text").and_then(|t| t.as_str()).unwrap_or("").trim().to_owned();
+    if !text.is_empty() {
+        return Some(Ok(text));
+    }
+    // No text and no warning yet: still working.
+    let warn = last.get("warning").or_else(|| last.get("error")).and_then(|w| w.as_str())?;
+    Some(Err(anyhow::anyhow!("{}", warn.to_lowercase())))
+}
+
 fn transcript_path(file_id: &str) -> Option<PathBuf> {
     let safe: String = file_id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '_' }).collect();
     let cache = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")))?;
@@ -217,9 +295,7 @@ pub fn transcribe(engine: &str, file_id: &str, audio: &Path) -> anyhow::Result<S
         "superwhisper" => {
             let out = Command::new("superwhisper").arg("transcribe").arg(audio).output()?;
             anyhow::ensure!(out.status.success(), "superwhisper: {}", String::from_utf8_lossy(&out.stderr).trim().to_owned());
-            let raw = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-            // It may answer with JSON: take its text.
-            serde_json::from_str::<serde_json::Value>(&raw).ok().and_then(|v| v.get("text").and_then(|t| t.as_str()).map(str::to_owned)).unwrap_or(raw)
+            superwhisper_result(&String::from_utf8_lossy(&out.stdout))?
         }
         _ => {
             // whisper.cpp reads 16 kHz mono WAV.

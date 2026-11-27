@@ -487,6 +487,7 @@ impl Joma {
                 Some(file) => {
                     let saved = self.saved_file(&conv.id, &file.id);
                     let file_id = file.id.clone();
+                    let (file_name, file_ref) = (file.name.clone(), file.clone());
                     let have = saved.is_some();
                     let hint = match (have, me, self.downloads.contains_key(&file.id)) {
                         (true, _, _) => " · open".to_owned(),
@@ -508,6 +509,19 @@ impl Joma {
                                 }))
                             })
                             .child(div().flex().items_center().gap(px(6.)).child(div().text_color(t.muted).child(G_CLIP)).child(div().min_w(px(0.)).child(format!("{}{hint}", m.text))))
+                            // A voice message not here yet: the button fetches it and plays it.
+                            .when(saved.is_none() && crate::media::is_audio(std::path::Path::new(&file_name)), |d| {
+                                let busy = self.downloads.contains_key(&file_id);
+                                let (conv_id, msg_id, file) = (conv.id.clone(), m.id.clone(), file_ref.clone());
+                                d.child(div().mt(px(S1)).flex().child(
+                                    button(SharedString::from(format!("play-{}", m.id)), G_PLAY, if busy { "voice message arriving…" } else { "play voice message" }, t, busy).on_click(cx.listener(move |this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        this.play_after = Some(file.id.clone());
+                                        this.file_clicked(&conv_id, &msg_id, &file, cx);
+                                        cx.notify();
+                                    })),
+                                ))
+                            })
                             // A voice or video message plays with mpv.
                             .when_some(saved.clone().filter(|p| crate::media::is_audio(p) || crate::media::is_video(p)), |d, path| {
                                 let fid = file_id.clone();

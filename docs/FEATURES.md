@@ -169,16 +169,20 @@ Beside the message box:
   only for voice, a window for video), click again to stop.
 
 ## Transcribing voice messages
-A voice message that is here has **transcribe**: its words appear under it and stay in
-Joma's cache (`~/.cache/joma/transcripts`); nothing is sent into the conversation.
-**Settings → audio → voice messages** chooses the engine:
-- **whisper.cpp, local** (the default when `whisper-cli` is installed; AUR package
-  `whisper.cpp`): on this machine, on the CPU, language detected. The model (`base`,
-  about 150 MB) is downloaded at the first transcription into
-  `~/.local/share/joma/models`;
-- **superwhisper**: that app does it, in the mode it is set to. In a cloud mode the
-  voice message leaves this machine, so Joma never picks it by itself;
-- **no transcription**.
+Voice messages (`.ogg`, `.m4a` from Jami for Android, …) in the open conversation come
+by themselves, also ones sent before this device joined, and have **play** even before
+they are here (it fetches, then plays). Once here they are **transcribed by
+themselves**, one at a time: the words appear under them and stay in Joma's cache
+(`~/.cache/joma/transcripts`); nothing is sent into the conversation. **transcribe**
+tries again. **Settings → audio → voice messages** chooses the engine:
+- **automatic** (default): superwhisper when it is installed and set to work offline
+  (nothing more to install; its language setting applies, automatic by default), else
+  whisper.cpp when `whisper-cli` is installed;
+- **superwhisper**: in whatever mode it is set to. In a cloud mode the voice message
+  leaves this machine, so automatic never picks it then;
+- **whisper.cpp**: on this machine, language detected. The model (`base`, about
+  150 MB) is downloaded at the first transcription into `~/.local/share/joma/models`;
+- **off**.
 
 ## Watching together
 Type `@youtube epic fails` (the YouTube button beside the message box writes `@youtube `
@@ -335,6 +339,9 @@ notifications); calls, voice messages and files not yet tried. Design:
 `docs/design/07-android.md`.
 
 ## Log
+- 0.5.2.dev13 (2026-11-27): voice messages come, play and are transcribed by
+  themselves (an `.m4a` from Jami for Android sent before this device joined showed only
+  *download*); automatic transcription uses superwhisper when it works offline.
 - 0.5.2.dev12 (2026-11-27): `joma backup` / `joma restore` (encrypted, one password asked
   in the window; to your private GitHub repo through gh, or to a file; tested with files
   between two test profiles, not yet against GitHub); password fields show stars; a

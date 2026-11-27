@@ -421,6 +421,11 @@ pub struct Joma {
     /// Transcripts of voice messages by file id: `None` while one is being made.
     pub transcripts: HashMap<String, Option<Result<String, String>>>,
     transcripts_seen: std::collections::HashSet<String>,
+    /// Voice messages already fetched or transcribed by themselves (once each).
+    voice_fetched: std::collections::HashSet<String>,
+    voice_transcribed: std::collections::HashSet<String>,
+    /// A voice message to play once it has arrived.
+    pub play_after: Option<String>,
     /// The picture shown large, over the window.
     pub viewer: Option<std::path::PathBuf>,
     /// The message whose actions show (reply, react, edit, delete).
@@ -722,6 +727,9 @@ impl Joma {
             gifs: None,
             transcripts: HashMap::new(),
             transcripts_seen: std::collections::HashSet::new(),
+            voice_fetched: std::collections::HashSet::new(),
+            voice_transcribed: std::collections::HashSet::new(),
+            play_after: None,
             viewer: None,
             msg_actions: None,
             replying: None,
@@ -2748,6 +2756,34 @@ impl Joma {
         if self.transcripts_seen.insert(file_id.to_owned()) {
             if let Some(text) = crate::media::cached_transcript(file_id) {
                 self.transcripts.insert(file_id.to_owned(), Some(Ok(text)));
+            }
+        }
+    }
+
+    /// The open conversation's voice messages: download those not here (one sent before
+    /// this device joined, or while Joma was off), and transcribe them one at a time when
+    /// a transcriber is set up. Each is tried once by itself; the buttons try again.
+    pub fn voice_messages(&mut self, cx: &mut Context<Self>) {
+        let Some(conv) = self.selected.as_ref().and_then(|s| self.model.conversations.get(s)) else { return };
+        let conv_id = conv.id.clone();
+        let voices: Vec<(String, FileRef)> =
+            conv.messages.iter().filter_map(|m| Some((m.id.clone(), m.file.clone()?))).filter(|(_, f)| crate::media::is_audio(std::path::Path::new(&f.name))).collect();
+        let auto = self.quick.transcribe != "off" && crate::media::transcriber(&self.quick.transcribe).is_some();
+        let mut busy = self.transcripts.values().any(Option::is_none);
+        for (msg, f) in voices {
+            self.want_transcript(&f.id);
+            match self.saved_file(&conv_id, &f.id) {
+                None => {
+                    if f.size > 0 && f.size <= AUTO_DOWNLOAD && !self.downloads.contains_key(&f.id) && self.voice_fetched.insert(f.id.clone()) {
+                        self.download(&conv_id, &msg, &f, cx);
+                    }
+                }
+                Some(path) => {
+                    if auto && !busy && !self.transcripts.contains_key(&f.id) && self.voice_transcribed.insert(f.id.clone()) {
+                        self.transcribe(&f.id, &path, cx);
+                        busy = true;
+                    }
+                }
             }
         }
     }
@@ -4843,6 +4879,10 @@ impl Joma {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         match code {
             6 => {
+                if self.play_after.as_deref() == Some(file) {
+                    self.play_after = None;
+                    self.toggle_play(file, &path, cx);
+                }
                 notify_desktop("File received", &format!("{name} · in {}", path.parent().map(|p| p.display().to_string()).unwrap_or_default()));
                 self.show_flash(format!("received {name}"), cx);
             }
