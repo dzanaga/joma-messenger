@@ -499,8 +499,8 @@ impl SetupState {
     }
 }
 
-/// Received files up to this size download by themselves (the Jami app's default).
-const AUTO_DOWNLOAD: u64 = 20 * 1024 * 1024;
+/// Received files up to this size download by themselves (D-9: 200 MB; the Jami app uses 20 MB).
+const AUTO_DOWNLOAD: u64 = 200 * 1024 * 1024;
 
 /// Where received files go: `~/Downloads/joma` (the XDG download dir, if set).
 fn download_dir() -> std::path::PathBuf {

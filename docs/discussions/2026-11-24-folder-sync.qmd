@@ -29,13 +29,13 @@ Syncthing over Jami tunnels, or Joma's own sync engine over the tunnel. Proposal
 Syncthing. A sync engine is years of edge cases (two edits at once, renames, deletions
 that come back).
 
-- [ ] A:
+- [x] A:
 
 # 2. Order
 
 Proposal: your own devices first (one account, every device), contacts next.
 
-- [ ] A:
+- [x] A:
 
 # 3. Traffic
 
@@ -62,7 +62,9 @@ Proposal:
 - Direct, local network and Tailscale: no limit.
 - Relayed: only files up to a limit, see 9.
 
-- [ ] A:
+- [x] A: we should be able to see the connections details by clicking on an
+  info/connection icon, eg each contact/device could have it, right? this info should be
+  transparant also useful now for debugging, but in general for the app
 
 # 4. Folders and conversations
 
@@ -70,7 +72,7 @@ Proposal: a folder shared in a conversation syncs with every member; joining or
 leaving the group adds or removes them. With your own devices, a "you" folder appears
 on every device of the account. Read-only or read-write per person.
 
-- [ ] A:
+- [x] A:
 
 # 5. Where it lives in Joma
 
@@ -78,7 +80,7 @@ A "folders" tab, a section in each conversation's menu, or both. Proposal: a lis
 synced folders in the devices tab for your own, and a "shared folders" entry in the
 conversation menu for contacts.
 
-- [ ] A:
+- [x] A:
 
 # 6. Syncthing as a dependency
 
@@ -86,21 +88,21 @@ Joma starts its own Syncthing (its own config under Joma's data, not the user's
 Syncthing), or uses the user's running one. Proposal: Joma's own instance, started and
 stopped with Joma, so it never touches the user's Syncthing setup.
 
-- [ ] A:
+- [x] A:
 
 # 7. Agents
 
 An agent account shares its output folder with you (and you share a task folder with
 it). In the first version, or later?
 
-- [ ] A:
+- [x] A: later
 
 # 8. After a restore from the GitHub backup
 
 Proposal: the list of synced folders is part of what Joma backs up, so a restored
 machine offers to set them up again.
 
-- [ ] A:
+- [x] A:
 
 # 9. The limit on relayed paths
 
@@ -118,4 +120,12 @@ Proposal: (b) now, (a) later if (b) proves too coarse, and (c) in both cases so 
 relayed path never floods the relay. Default limit for (a): 20 MB per file. The folder
 row shows "waiting for a direct connection · 3 files, 1.2 GB".
 
-- [ ] A:
+- [ ] A: i am not sure here. let's try to implement it with no limits for now, so it
+  always sync, but let's display warning and debug info on what connection it's used
+  etc. we need to test to understand how the connections are established and what could
+  be the issues with jami relays etc. we only want syncing in direct connections
+  normally. otherwise we should figure out how to set up something with a self hosted
+  server and a reverse proxy. could be an additional component. I don't want slow
+  transfer over relays. so it could work for small sizes, but there could then be a
+  suggestion/procedure to setup a server, sort of opencloud. or even use opencloud...
+  let's start with syncthing no restrictions and see what happens.

@@ -2,29 +2,6 @@
 
 ## Proposed
 
-- D-1 Joma is a Jami client: libjami in process, same data as the Jami app, one at a time.
-- D-2 The Joma desktop share runs gliff's pipeline (crates as libraries) over a Jami
-  service tunnel; the gliff app is never spawned. (User, 2026-10-25: reimplement the
-  technique, do not tunnel gliff.)
-- D-3 The handshake rides in-call messages (`application/x-joma-desk+json`).
-- D-4 Fallback is Jami's portal screen share, on no `Hello`, a decline or 15 s of silence.
-- D-5 Quick Messages is an Omarchy shell plugin plus an in-app bar, all
-  through the running Joma's socket.
-- D-6 View-only desktop share for now; remote control and clipboard later.
-- D-7 Licence GPL-3.0-or-later (Joma links libjami, GPL-3).
-- D-8 Closing the window hides it on `special:joma`; Joma quits only on Ctrl+Q or
-  `joma quit`. (User, 2026-10-25: open it once, it stays in the background.)
-- D-9 Received files go to `~/Downloads/joma/`, by themselves up to 20 MB (the Jami app's
-  default). (User, 2026-10-25.)
-- D-10 The VA-API tier stays, opt-in only (`JOMA_VIDEO=va`), and never on the GPU that
-  drives the screen without asking.
-- D-11 Desktop share without a call: the handshake as account messages, the viewer
-  asked first; peers without Joma get a call with the microphone off. (User, 2026-10-25.)
-- D-12 No `joma quick` window, no quick messages under the bar chat: the bar panel is
-  the quick way in. (User, 2026-10-25.)
-- D-13 Removing a contact only hides it in Joma (`removed` in quick.toml); deleting for
-  good is a second step from the removed list (removeContact without ban, then
-  removeConversation). (User, 2026-10-25.)
 - D-14 Presence: Jami's reachability is a faint dot; Joma users exchange active/away
   (full green dot, "active now", "away since", "seen"); invisible sends nothing.
   (User, 2026-10-28.)
@@ -51,7 +28,6 @@
   full screen. Window capture needs `hypr-capture` vendored with a toplevel source.
   F11 = full screen. (User asked for zoom, full screen, the choice and a preview,
   2026-10-30.)
-
 - D-20 The interface is restyled on a foundation built first: a `ui` module with
   tokens and components, Joma's own SVG icons (line, square ends) instead of Nerd Font
   glyphs, `render.rs` split by view. The look: a numbered tab strip on top, tiled panels
@@ -69,7 +45,45 @@
   stable channel by default; transcription on click, local (whisper.cpp), never a
   cloud engine unless chosen; GIFs from a local folder, no online search; settings as
   a page; rounded corners and the version in the tab strip as settings (user asked).
+- D-23 Folder sync: Syncthing over Jami tunnels, Joma's own Syncthing instance, your own
+  devices first, contacts next; a folder shared in a conversation syncs with its
+  members; agents later; the folder list is part of the GitHub backup. For now no size
+  limit on any path: Joma shows which path each connection takes (relayed, Tailscale,
+  local, direct) with a warning on relays, and every contact and device gets a
+  connection-info view. Sync is meant for direct paths; a self-hosted server (e.g.
+  OpenCloud) for the rest is to be explored. (User, 2026-11-27,
+  `docs/discussions/2026-11-24-folder-sync.qmd`.)
+- D-24 GitHub in Joma: one GitHub App (gists, contents on `joma-backup` only, device
+  flow, no server), `gh` used when logged in; no token kept except for automatic
+  backups (keyring); one "Connect GitHub" with two switches (badge, backup); the badge
+  from a public `joma.json` gist and an `X-JOMA-GITHUB` vCard line; adding by `gh:name`;
+  encrypted account archives (one password) in a private repo, restore and "add this
+  machine" on the first-start screen; every step with its `joma` command, passwords
+  only in Joma's window. Order: backup/restore with `gh`, restore screen, badge, the
+  App, automatic backups. Open: re-checking and removal with several accounts (8),
+  adding a machine while the old one works (13). (User, 2026-11-26,
+  `docs/discussions/2026-11-26-github.qmd`.)
 
 ## Decided
 
-(none yet)
+- D-1 Joma is a Jami client: libjami in process, same data as the Jami app, one at a time.
+- D-2 The Joma desktop share runs gliff's pipeline (crates as libraries) over a Jami
+  service tunnel; the gliff app is never spawned. (User, 2026-10-25: reimplement the
+  technique, do not tunnel gliff.)
+- D-3 The handshake rides in-call messages (`application/x-joma-desk+json`).
+- D-4 Fallback is Jami's portal screen share, on no `Hello`, a decline or 15 s of silence.
+- D-6 View-only desktop share for now; remote control and clipboard later.
+- D-7 Licence GPL-3.0-or-later (Joma links libjami, GPL-3).
+- D-8 Closing the window hides it on `special:joma`; Joma quits only on Ctrl+Q or
+  `joma quit`. (User, 2026-10-25: open it once, it stays in the background.)
+- D-9 Received files go to `~/Downloads/joma/`, by themselves up to 200 MB. (User,
+  2026-10-25; limit raised from the Jami app's 20 MB, 2026-11-24.)
+- D-10 The VA-API tier stays, opt-in only (`JOMA_VIDEO=va`), and never on the GPU that
+  drives the screen without asking.
+- D-11 Desktop share without a call: the handshake as account messages, the viewer
+  asked first; peers without Joma get a call with the microphone off. (User, 2026-10-25.)
+- D-12 No `joma quick` window, no quick messages under the bar chat: the bar panel is
+  the quick way in. (User, 2026-10-25.)
+- D-13 Removing a contact only hides it in Joma (`removed` in quick.toml); deleting for
+  good is a second step from the removed list (removeContact without ban, then
+  removeConversation). (User, 2026-10-25.)

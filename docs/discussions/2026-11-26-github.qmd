@@ -75,7 +75,7 @@ binary. Permissions:
 
 Nothing else: no email, no other repos, no organizations.
 
-- [ ] A:
+- [x] A:
 
 # 2. When `gh` is already logged in
 
@@ -85,7 +85,7 @@ is logged in, Joma offers it ("use your gh login") and otherwise uses the app. J
 copies the `gh` token anywhere; it runs `gh api` each time. The alternative is the app
 always, so Joma's own access stays narrow.
 
-- [ ] A:
+- [x] A:
 
 # 3. Creating the backup repo
 
@@ -95,7 +95,7 @@ private repo itself. Without it, Joma opens `github.com/new` filled in (`joma-ba
 private), then the app's install page to pick that repo. I test the shorter path when the
 app exists and keep it if it works.
 
-- [ ] A:
+- [x] A:
 
 # 4. Tokens
 
@@ -105,7 +105,7 @@ refresh token, in the system keyring, refreshed without a secret; turning them o
 deletes it. Revoking the app on GitHub stops everything; Joma then shows "GitHub access
 was removed" once.
 
-- [ ] A:
+- [x] A:
 
 ## B. Identity
 
@@ -117,7 +117,7 @@ badge to contacts* (makes the link between your GitHub and this Jami account pub
 *back up this account* (private). Either can be on alone. The earlier proposal was a
 separate "verify with GitHub" button.
 
-- [ ] A:
+- [x] A:
 
 # 6. The badge: style, where it shows, requests
 
@@ -128,7 +128,7 @@ contact requests (`sendTrustRequest` payload), so the badge shows before you acc
 compact bar panel and the call overlay: optional. Keep the Jami picture, link to the
 GitHub profile; no GitHub avatar.
 
-- [ ] A:
+- [x] A:
 
 # 7. Adding contacts by GitHub name
 
@@ -137,7 +137,7 @@ Proposal: a switch above the add input (Jami name or ID / GitHub, Tab flips) plu
 listed you pick one by its label. A card shows what was found; nothing is sent until you
 confirm.
 
-- [ ] A:
+- [x] A:
 
 # 8. Re-checking, changes and removal
 
@@ -148,7 +148,8 @@ in that conversation and no badge until you choose "trust the new one"; nothing 
 blocked. Removing clears the profile line at once and offers to delete the gist (one
 more sign-in, or Joma opens the gist for you).
 
-- [ ] A:
+- [ ] A: To be discussed better. One GitHub user can add multiple joma accounts. Remove
+  one... But still the re could be other new, but it's different accounts...more complex
 
 ## C. Backup
 
@@ -159,7 +160,7 @@ plus automatic backups when you turn them on (a push after each such change, wit
 refresh token from 4). With them off, a reminder when the backup is older than the last
 change.
 
-- [ ] A:
+- [x] A:
 
 # 10. The password
 
@@ -177,7 +178,7 @@ conversation history, which is much bigger and comes back from contacts anyway. 
 choose per account; agent accounts are listed too, off by default. Joma refuses to write
 into a repo that is public.
 
-- [ ] A:
+- [x] A:
 
 ## D. New machines
 
@@ -189,7 +190,7 @@ tick which ones → you type the password once → the accounts come back with t
 IDs, so contacts, usernames and badges stay valid. Also in the accounts tab ("add →
 restore from GitHub") and as `joma restore`.
 
-- [ ] A:
+- [x] A:
 
 # 13. Adding a machine while the old one works
 
@@ -207,7 +208,7 @@ Linking drops the profile line (see above). Proposal: whenever a device starts o
 account that your `joma.json` already lists, Joma puts the line back by itself, with no
 new GitHub sign-in. Folder sync (its own discussion) picks up from there too.
 
-- [ ] A:
+- [x] A:
 
 ## E. Agent and command line
 
@@ -237,7 +238,7 @@ joma devices                     this account's devices; joma devices revoke ID
 Proposal: these names, `ACCT` being a label, a username or a Jami ID as in
 `joma account`. Missing anything?
 
-- [ ] A:
+- [x] A:
 
 # 16. Secrets and approvals stay with you
 
@@ -249,7 +250,7 @@ command waits and reports only "done" or "wrong password". **The GitHub approval
 plus a terminal prompt instead of the window when you run the command yourself in a
 terminal (Joma can tell: a real tty and no agent environment). Or always the window?
 
-- [ ] A:
+- [x] A:
 
 # 17. What the agent may do on its own
 
@@ -259,7 +260,7 @@ should confirm with you first (this goes in the agent's instructions, which Joma
 install with the agent account; see the agents discussion). Should it also warn when a
 backup is old, or check `joma github status` from time to time?
 
-- [ ] A:
+- [x] A:
 
 ## F. Safety
 
@@ -277,7 +278,7 @@ Proposal for the help text and the setup screen:
 - Turning it all off: revoke the app on GitHub, delete the gist and the repo. Joma offers
   each step.
 
-- [ ] A:
+- [x] A:
 
 ## G. Order
 
@@ -295,5 +296,5 @@ Proposal:
 
 Each step with its commands from section E and their tests.
 
-- [ ] A:
+- [x] A:
 

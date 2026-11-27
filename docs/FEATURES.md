@@ -175,7 +175,7 @@ the text if any. Pictures (png, jpg, gif, webp, bmp) show in the conversation on
 a click shows one large inside Joma, with before / after through the conversation's
 pictures, **open outside** (the system's viewer) and Esc to close. Pasted pictures are kept in `~/.cache/joma/pasted` (Jami sends files
 from where they are).
-Send with the clip button in a conversation or `joma send-file`. Received files up to 20 MB download by
+Send with the clip button in a conversation or `joma send-file`. Received files up to 200 MB download by
 themselves into `~/Downloads/joma/` (a desktop notification says when); larger ones show
 their size in the chat: click to download. Click a received file to open it.
 
@@ -290,6 +290,8 @@ instead. **Channel**: stable releases only (the default), or pre-releases too
 with `scripts/release.sh "notes" --pre`.
 
 ## Log
+- 0.5.2.dev11 (2026-11-27): received files up to 200 MB download by themselves (was
+  20 MB).
 - 0.5.2.dev10 (2026-11-17): the panel under the bar: pictures fit their bubble, settings
   show their sections as icons.
 - 0.5.2.dev9 (2026-11-17): a GIF picker from your own folder.
