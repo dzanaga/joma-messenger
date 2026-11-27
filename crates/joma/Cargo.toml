@@ -15,6 +15,8 @@ joma-jami = { path = "../joma-jami" }
 joma-theme = { path = "../joma-theme" }
 joma-desk = { path = "../joma-desk" }
 joma-quick = { path = "../joma-quick" }
+joma-sync = { path = "../joma-sync" }
+toml = "0.8"
 anyhow.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }
 tracing.workspace = true

@@ -20,6 +20,7 @@ mod model;
 mod presence;
 mod setup;
 mod stage;
+mod sync;
 mod tray;
 mod watch;
 mod render;
@@ -61,6 +62,12 @@ const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); -
        joma connections [<to>] [--json]
                                  the devices this account is connected to and the path
                                  each connection takes (relayed, Tailscale, local, direct)
+       joma sync status [--json] folder sync with your other devices: folders, devices,
+                                 and the path each device is reached by
+       joma sync on|off          start or stop Joma's own Syncthing for this account
+       joma sync add <path> [label]
+                                 share a folder with all your devices
+       joma sync remove <folder> stop syncing a folder (its files stay)
        joma quit                 quit Joma (closing the window keeps it running)
        joma probe [--bench [--display-gpu]]
                                  the GPUs and codecs the desktop share can use
@@ -86,6 +93,21 @@ fn cli(args: &[String]) -> Option<i32> {
         Some("draw") if args.len() == 2 => Request::Draw { what: args[1].clone() },
         Some("ui") if args.len() == 2 => Request::Ui { what: args[1].clone() },
         Some("toggle") => Request::Toggle,
+        Some("sync") => match (args.get(1).map(String::as_str), args.len()) {
+            (Some("status") | None, _) => Request::Sync { what: "status".into(), arg: None, label: None, json: args.iter().any(|a| a == "--json") },
+            (Some(w @ ("on" | "off")), 2) => Request::Sync { what: w.into(), arg: None, label: None, json: false },
+            (Some("add"), 3 | 4) => Request::Sync {
+                what: "add".into(),
+                arg: Some(std::fs::canonicalize(&args[2]).map_or_else(|_| args[2].clone(), |c| c.to_string_lossy().into_owned())),
+                label: args.get(3).cloned(),
+                json: false,
+            },
+            (Some("remove"), 3) => Request::Sync { what: "remove".into(), arg: Some(args[2].clone()), label: None, json: false },
+            _ => {
+                eprintln!("{USAGE}");
+                return Some(2);
+            }
+        },
         Some("connections") if args.len() <= 3 => {
             let rest: Vec<&String> = args[1..].iter().filter(|a| *a != "--json").collect();
             if rest.len() > 1 {

@@ -107,6 +107,15 @@ slow), **Tailscale** (or Tailscale through a DERP relay, also yellow), **local n
 normal. `joma connections [<to>] [--json]` prints the same for every connection, or for one
 conversation's members.
 
+## Folder sync
+Devices tab → **synced folders**: turn sync on, add a folder, and it is kept the same on
+all your devices that run Joma with sync on (Joma runs its own Syncthing, reached
+through Jami: no server, no account). Folders from your other devices appear in
+`~/joma-sync/`. Each device shows whether it is syncing and the path to it; a relayed
+path is yellow (slow for large files). `joma sync on|off`, `joma sync add <path>
+[label]`, `joma sync remove <folder>`, `joma sync status [--json]`. Needs `syncthing`
+installed.
+
 ## Removing chats
 The bin in a conversation's header takes it off the lists (window, bar, notifications);
 it stays in Jami, and its messages keep arriving quietly. The bin next to + in the chats
@@ -279,7 +288,7 @@ Ctrl+. and Alt+1…9 in the window or the panel; `joma send` and `joma send-quic
 
 ## Command line
 `joma chat <to> [n]` (JSON), `joma call <to> [--video]`, `joma share <to> [--source …]`, `joma watch <to>`,
-`joma send-file <to> [path]`, `joma open <to>`, `joma block <to>`, `joma unblock <to>`, `joma link`, `joma link-device <code>`, `joma accounts`, `joma account <name>`, `joma ui settings|profile|keys|menu|chat-menu|emoji|quick|close`, `joma connections [<to>] [--json]`, `joma quit`, `joma probe [--bench]` (the
+`joma send-file <to> [path]`, `joma open <to>`, `joma block <to>`, `joma unblock <to>`, `joma link`, `joma link-device <code>`, `joma accounts`, `joma account <name>`, `joma ui settings|profile|keys|menu|chat-menu|emoji|quick|close`, `joma connections [<to>] [--json]`, `joma sync status|on|off|add|remove`, `joma quit`, `joma probe [--bench]` (the
 GPUs the desktop share can use).
 
 ## Install
@@ -301,7 +310,9 @@ instead. **Channel**: stable releases only (the default), or pre-releases too
 with `scripts/release.sh "notes" --pre`.
 
 ## Log
-- 0.5.2.dev11 (2026-11-27): connection info on contacts and devices and `joma
+- 0.5.2.dev11 (2026-11-27): folder sync between your own devices (Joma's own Syncthing
+  over Jami tunnels; built and unit-tested, not yet tried between two devices);
+  connection info on contacts and devices and `joma
   connections` (path: relayed, Tailscale, local, direct; tested between two throwaway
   accounts, which connected over the local network); received files up to 200 MB
   download by themselves (was 20 MB).

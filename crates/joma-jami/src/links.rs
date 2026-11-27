@@ -6,7 +6,10 @@
 //! (a public relay), over Tailscale (itself possibly relayed by DERP), on the local
 //! network, or straight to a public address.
 
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use serde::Serialize;
@@ -135,6 +138,25 @@ pub fn classify(addr: &str, relays: &[IpAddr], derp: impl Fn(IpAddr) -> bool) ->
     }
 }
 
+/// Name lookups and `tailscale status` are kept this long.
+const CACHE: Duration = Duration::from_secs(60);
+
+type Cached = Mutex<Option<HashMap<String, (Instant, Vec<IpAddr>)>>>;
+static LOOKUPS: Cached = Mutex::new(None);
+
+fn cached(key: &str, fetch: impl FnOnce() -> Vec<IpAddr>) -> Vec<IpAddr> {
+    if let Some((at, v)) = LOOKUPS.lock().ok().and_then(|m| m.as_ref()?.get(key).cloned()) {
+        if at.elapsed() < CACHE {
+            return v;
+        }
+    }
+    let v = fetch();
+    if let Ok(mut m) = LOOKUPS.lock() {
+        m.get_or_insert_with(HashMap::new).insert(key.to_owned(), (Instant::now(), v.clone()));
+    }
+    v
+}
+
 /// The addresses of the account's TURN server (`TURN.server`, default turn.jami.net).
 pub fn relay_addresses(account: &str) -> Vec<IpAddr> {
     let details = crate::account_details(account).unwrap_or_default();
@@ -147,13 +169,17 @@ pub fn relay_addresses(account: &str) -> Vec<IpAddr> {
     } else {
         format!("{server}:3478")
     };
-    host.to_socket_addrs().map(|a| a.map(|s| s.ip()).collect()).unwrap_or_default()
+    cached(&format!("turn:{host}"), || host.to_socket_addrs().map(|a| a.map(|s| s.ip()).collect()).unwrap_or_default())
 }
 
 /// Tailscale addresses reached only through DERP, from `tailscale status --json` (empty
 /// without Tailscale). A peer whose `CurAddr` is empty and whose `Relay` is set goes
 /// through DERP.
 pub fn derp_peers() -> Vec<IpAddr> {
+    cached("tailscale", derp_peers_now)
+}
+
+fn derp_peers_now() -> Vec<IpAddr> {
     let Ok(out) = std::process::Command::new("tailscale").args(["status", "--json"]).output() else { return Vec::new() };
     if !out.status.success() {
         return Vec::new();

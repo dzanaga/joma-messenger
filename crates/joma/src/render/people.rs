@@ -40,6 +40,76 @@ impl Joma {
         Some(panel)
     }
 
+    /// Folder sync with our other devices (D-23): folders, devices, the path to each.
+    pub(super) fn sync_group(&self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
+        let small = |s: String, c| div().text_size(px(t.size - 2.)).text_color(c).child(s);
+        let head = div().px(px(10.)).pt(px(10.)).pb(px(2.)).text_size(px(t.size - 2.5)).text_color(t.muted).child("SYNCED FOLDERS");
+        let mut g = div().flex().flex_col().gap(px(3.)).child(head);
+        let row = || div().flex().flex_col().px(px(10.)).py(px(2.));
+        if let Some(e) = &self.sync.error {
+            g = g.child(row().child(small(e.clone(), t.red)));
+        }
+        if self.sync.st.is_none() {
+            if self.sync.starting {
+                return g.child(row().child(small("starting Syncthing…".into(), t.muted)));
+            }
+            return g.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(6.))
+                    .px(px(10.))
+                    .child(small("keep folders the same on all your devices".into(), t.muted))
+                    .child(button("sync-on", G_EXCHANGE, "turn on", t, false).on_click(cx.listener(|this, _, _, cx| this.sync_switch(true, cx)))),
+            );
+        }
+        let Some(r) = &self.sync_view else { return g.child(row().child(small("reading…".into(), t.muted))) };
+        if r.folders.is_empty() {
+            g = g.child(row().child(small("no folders yet".into(), t.muted)));
+        }
+        for f in &r.folders {
+            let need = if f.need_files > 0 { format!(" · needs {} files, {}", f.need_files, crate::sync::size(f.need_bytes)) } else { String::new() };
+            g = g.child(
+                row()
+                    .child(div().flex().gap(px(6.)).child(div().text_color(t.bright).child(f.label.clone())).child(small(format!("{} · {} files, {}{need}", f.state, f.files, crate::sync::size(f.bytes)), if need.is_empty() { t.muted } else { t.yellow })))
+                    .child(small(f.path.clone(), t.muted))
+                    .when(!f.error.is_empty(), |d| d.child(small(f.error.clone(), t.red))),
+            );
+        }
+        if r.devices.is_empty() {
+            g = g.child(row().child(small("no other device heard yet: start Joma on it with sync on".into(), t.muted)));
+        }
+        for d in &r.devices {
+            let (path, colour) = match d.path {
+                Some(p) if d.relayed => (format!("{} · slow for large files", p.label()), t.yellow),
+                Some(p) => (p.label().to_string(), t.green),
+                None => ("not connected now".to_string(), t.muted),
+            };
+            let st = if d.connected { "syncing with it" } else if d.tunnel { "tunnel open" } else { "waiting for a tunnel" };
+            g = g.child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(6.))
+                    .px(px(10.))
+                    .py(px(2.))
+                    .child(div().text_color(t.text).child(if d.name.is_empty() { format!("{}…", &d.device[..d.device.len().min(8)]) } else { d.name.clone() }))
+                    .child(small(st.into(), t.muted))
+                    .child(small(path, colour)),
+            );
+        }
+        g.child(
+            div()
+                .flex()
+                .gap(px(6.))
+                .px(px(10.))
+                .pt(px(4.))
+                .child(button("sync-add", G_PLUS, "add folder", t, false).on_click(cx.listener(|this, _, _, cx| this.choose_sync_folder(cx))))
+                .child(button("sync-off", G_TIMES, "turn off", t, false).on_click(cx.listener(|this, _, _, cx| this.sync_switch(false, cx)))),
+        )
+    }
+
     pub(super) fn link_card(&self, card: gpui::Div, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
         let Some(l) = &self.linking else { return card };
         let card = card.child(div().text_color(t.accent).font_weight(FontWeight::BOLD).child("Link this device to your account"));

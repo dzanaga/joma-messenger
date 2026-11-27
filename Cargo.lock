@@ -3033,6 +3033,7 @@ dependencies = [
  "joma-desk",
  "joma-jami",
  "joma-quick",
+ "joma-sync",
  "joma-theme",
  "ksni",
  "libc",
@@ -3040,6 +3041,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smallvec",
+ "toml 0.8.23",
  "tracing",
  "tracing-subscriber",
  "wayland-client",
@@ -3091,6 +3093,15 @@ dependencies = [
  "serde",
  "serde_json",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "joma-sync"
+version = "0.5.2-dev.11"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -69,6 +69,17 @@ pub enum Request {
         #[serde(default)]
         json: bool,
     },
+    /// Folder sync: `status`, `on`, `off`, `add` (arg: a path, label), `remove` (arg: a
+    /// folder id or label).
+    Sync {
+        what: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        arg: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+        #[serde(default)]
+        json: bool,
+    },
     /// Quit Joma (closing its window only hides it).
     Quit,
 }

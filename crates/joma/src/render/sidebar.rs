@@ -188,7 +188,7 @@ impl Joma {
                 Tab::Chats => list.into_any_element(),
                 Tab::Calls => self.calls_list(t, cx),
                 Tab::Contacts => self.contacts_list(t, cx),
-                Tab::Devices => div().id("devices").flex().flex_col().flex_1().overflow_y_scroll().child(self.devices_group(t, cx)).into_any_element(),
+                Tab::Devices => div().id("devices").flex().flex_col().flex_1().overflow_y_scroll().child(self.devices_group(t, cx)).child(self.sync_group(t, cx)).into_any_element(),
                 Tab::Accounts => self.accounts_list(t, cx),
                 Tab::Agents => self.agents_list(t, cx),
             })

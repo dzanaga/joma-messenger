@@ -99,6 +99,10 @@ pub enum AppMsg {
     SearchDone(String, anyhow::Result<String>),
     /// A link preview was fetched (or failed) for this video id.
     Preview(String),
+    /// Joma's Syncthing for this account started (or not).
+    SyncStarted(String, Result<joma_sync::Syncthing, String>),
+    /// A fresh sync report for the devices tab.
+    SyncView(String, crate::sync::Report),
     /// The area drawn with `slurp`, for what the picker was asked for.
     Area(PickFor, anyhow::Result<Source>),
 }
@@ -465,6 +469,12 @@ pub struct Joma {
     /// The connection-info view open under a contact (`peer:<uri>`) or a device
     /// (`device:<id>`), with the last rows read (None while reading).
     pub conn_info: Option<(String, Option<Vec<crate::conninfo::Row>>)>,
+    /// Folder sync with our other devices.
+    pub sync: crate::sync::Sync,
+    /// The devices tab's last sync report, refreshed in the background.
+    pub sync_view: Option<crate::sync::Report>,
+    sync_view_busy: bool,
+    sync_view_at: Option<Instant>,
     /// Our other devices' Joma presence, by device id.
     pub my_devices: HashMap<String, crate::presence::Peer>,
     /// When we last told our other devices, and what.
@@ -730,6 +740,10 @@ impl Joma {
             linking: None,
             device_op: None,
             conn_info: None,
+            sync: Default::default(),
+            sync_view: None,
+            sync_view_busy: false,
+            sync_view_at: None,
             my_devices: HashMap::new(),
             self_told: None,
             accounts: Vec::new(),
@@ -858,6 +872,84 @@ impl Joma {
         }
         self.load_accounts();
         self.configure_inputs(cx);
+        if crate::sync::is_on(&self.model.account) {
+            self.start_sync();
+        }
+    }
+
+    /// Start Joma's Syncthing for this account in the background.
+    pub fn start_sync(&mut self) {
+        if self.sync.st.is_some() || self.sync.starting {
+            return;
+        }
+        self.sync.starting = true;
+        self.sync.error = None;
+        let (tx, acc) = (self.tx.clone(), self.model.account.clone());
+        std::thread::spawn(move || {
+            let r = crate::sync::start_syncthing(&acc);
+            let _ = tx.unbounded_send(AppMsg::SyncStarted(acc, r));
+        });
+    }
+
+    fn sync_hello(&mut self, reply: bool) {
+        let name = self.model.devices.get(&self.model.device).cloned().unwrap_or_default();
+        let (acc, me, dev) = (self.model.account.clone(), self.model.me.clone(), self.model.device.clone());
+        self.sync.hello(&acc, &me, &dev, &name, reply);
+    }
+
+    /// The sync report (folders, devices, paths), for the socket (blocking).
+    pub fn sync_report(&self) -> crate::sync::Report {
+        self.sync.snapshot().report(&self.model.account)
+    }
+
+    /// The devices tab's switch.
+    pub fn sync_switch(&mut self, on: bool, cx: &mut Context<Self>) {
+        let acc = self.model.account.clone();
+        if let Err(e) = crate::sync::set_on(&acc, on) {
+            return self.show_flash(format!("cannot save the sync switch: {e}"), cx);
+        }
+        if on {
+            self.start_sync();
+        } else {
+            self.sync.stop(&acc);
+            self.sync_view = None;
+        }
+        cx.notify();
+    }
+
+    /// Pick a folder to sync with all our devices.
+    pub fn choose_sync_folder(&mut self, cx: &mut Context<Self>) {
+        if own_profile() && std::env::var_os("JOMA_PORTAL").is_none() {
+            return self.show_flash("folder chooser skipped in a test profile (joma sync add <path>)", cx);
+        }
+        let paths = cx.prompt_for_paths(gpui::PathPromptOptions { files: false, directories: true, multiple: false, prompt: Some("Sync".into()) });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = paths.await else { return };
+            let _ = this.update(cx, |j, cx| {
+                if let Some(p) = paths.first() {
+                    let label = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "folder".into());
+                    match j.sync.add_folder(p, &label) {
+                        Ok(_) => j.show_flash(format!("{label} syncs with your devices"), cx),
+                        Err(e) => j.show_flash(format!("cannot sync {label}: {e:#}"), cx),
+                    }
+                    j.refresh_sync_view();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Refresh the devices tab's sync section in the background.
+    pub fn refresh_sync_view(&mut self) {
+        if self.sync_view_busy {
+            return;
+        }
+        self.sync_view_busy = true;
+        let (snap, acc, tx) = (self.sync.snapshot(), self.model.account.clone(), self.tx.clone());
+        std::thread::spawn(move || {
+            let r = snap.report(&acc);
+            let _ = tx.unbounded_send(AppMsg::SyncView(acc, r));
+        });
     }
 
     /// Fill what an account learns late (a linked device gets its archive after opening):
@@ -1046,6 +1138,13 @@ impl Joma {
             }
         }
         self.tell_presence();
+        if self.sync.st.is_some() && self.sync.last_hello.is_none_or(|t| t.elapsed() > crate::sync::HELLO_EVERY) {
+            self.sync_hello(false);
+        }
+        if self.sync.st.is_some() && self.tab == Tab::Devices && self.sync_view_at.is_none_or(|t| t.elapsed() > Duration::from_secs(3)) {
+            self.sync_view_at = Some(Instant::now());
+            self.refresh_sync_view();
+        }
         self.update_tray();
         if self.presence.expire(Instant::now()) {
             cx.notify();
@@ -1156,6 +1255,31 @@ impl Joma {
                         self.show_flash(format!("screenshot saved: {path}{}", if sent { " · sent to the conversation" } else { "" }), cx);
                     }
                     Err(e) => self.show_flash(format!("no screenshot: {e}"), cx),
+                }
+                cx.notify();
+            }
+            AppMsg::SyncView(acc, r) => {
+                self.sync_view_busy = false;
+                if acc == self.model.account {
+                    self.sync_view = Some(r);
+                    cx.notify();
+                }
+            }
+            AppMsg::SyncStarted(acc, r) => {
+                if acc != self.model.account {
+                    // The account changed meanwhile: this Syncthing stops when dropped.
+                    return;
+                }
+                match r {
+                    Ok(st) => {
+                        let name = self.model.devices.get(&self.model.device).cloned().unwrap_or_default();
+                        let (me, dev) = (self.model.me.clone(), self.model.device.clone());
+                        self.sync.started(&acc, &me, &dev, &name, st);
+                    }
+                    Err(e) => {
+                        self.sync.starting = false;
+                        self.sync.error = Some(e);
+                    }
                 }
                 cx.notify();
             }
@@ -1271,6 +1395,19 @@ impl Joma {
                 }
                 return;
             }
+            Event::AccountMessage { account, from, payloads } if *account == acc && payloads.contains_key(crate::sync::MIME) => {
+                if let Some(h) = payloads.get(crate::sync::MIME).and_then(|p| crate::sync::Hello::decode(p)) {
+                    // Only our own devices take part.
+                    if bare_uri(from) == self.model.me && h.dev != self.model.device {
+                        let me = self.model.me.clone();
+                        if self.sync.heard(&acc, &me, h) {
+                            self.sync_hello(true);
+                        }
+                        cx.notify();
+                    }
+                }
+                return;
+            }
             Event::AccountMessage { account, from, payloads } if *account == acc => {
                 if let Some(wire) = payloads.get(crate::presence::MIME).and_then(|p| Wire::decode(p)) {
                     let peer = bare_uri(from).to_owned();
@@ -1282,6 +1419,8 @@ impl Joma {
                             if fresh {
                                 self.self_told = None;
                                 self.tell_presence();
+                                // A device that just came online may have missed our sync Hello.
+                                self.sync_hello(false);
                             }
                         }
                         cx.notify();
@@ -1327,6 +1466,14 @@ impl Joma {
             }
             Event::PeerServices { request, peer, services, .. } => {
                 self.desk.peer_services(&acc, *request, peer, services);
+                return;
+            }
+            Event::TunnelOpened { tunnel, port, .. } if self.sync.tunnel_opened(tunnel, *port) => {
+                cx.notify();
+                return;
+            }
+            Event::TunnelClosed { tunnel, .. } if self.sync.tunnel_closed(tunnel) => {
+                cx.notify();
                 return;
             }
             Event::TunnelOpened { tunnel, port, .. } => {
@@ -3553,6 +3700,8 @@ impl Joma {
             return false;
         }
         self.leave();
+        let acc = self.model.account.clone();
+        self.sync.stop(&acc);
         self.my_devices.clear();
         self.device_op = None;
         self.self_told = None;
@@ -4259,8 +4408,11 @@ impl Joma {
                     Err(e) => Reply::Error { message: e.to_string() },
                 }
             }
+            Request::Sync { what, arg, label, json } => self.sync_request(&what, arg, label, json),
             Request::Quit => {
                 self.leave();
+                let acc = self.model.account.clone();
+                self.sync.stop(&acc);
                 cx.defer(|cx| cx.quit());
                 Reply::Done
             }
@@ -4276,6 +4428,53 @@ impl Joma {
                 }
                 Err(e) => e,
             },
+        }
+    }
+
+    fn sync_request(&mut self, what: &str, arg: Option<String>, label: Option<String>, json: bool) -> Reply {
+        if self.gate != Gate::Ready {
+            return Reply::Error { message: "Joma is not connected to Jami yet".into() };
+        }
+        let acc = self.model.account.clone();
+        match what {
+            "status" => {
+                let r = self.sync_report();
+                Reply::Text { text: if json { serde_json::to_string(&r).unwrap_or_default() } else { r.text() } }
+            }
+            "on" => match crate::sync::set_on(&acc, true) {
+                Ok(()) => {
+                    self.start_sync();
+                    Reply::Text { text: "sync is starting (joma sync status)".into() }
+                }
+                Err(e) => Reply::Error { message: e.to_string() },
+            },
+            "off" => {
+                self.sync.stop(&acc);
+                match crate::sync::set_on(&acc, false) {
+                    Ok(()) => Reply::Done,
+                    Err(e) => Reply::Error { message: e.to_string() },
+                }
+            }
+            "add" => {
+                let Some(path) = arg else { return Reply::Error { message: "which folder?".into() } };
+                let path = std::path::PathBuf::from(path);
+                if !path.is_dir() {
+                    return Reply::Error { message: format!("{} is not a folder", path.display()) };
+                }
+                if self.sync.st.is_none() {
+                    return Reply::Error { message: if self.sync.starting { "sync is still starting: try again in a moment".into() } else { "sync is off: joma sync on".into() } };
+                }
+                let label = label.unwrap_or_else(|| path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "folder".into()));
+                match self.sync.add_folder(&path, &label) {
+                    Ok(id) => Reply::Text { text: format!("{label} syncs with your devices ({id})") },
+                    Err(e) => Reply::Error { message: format!("{e:#}") },
+                }
+            }
+            "remove" => match self.sync.remove_folder(arg.as_deref().unwrap_or("")) {
+                Ok(()) => Reply::Done,
+                Err(e) => Reply::Error { message: format!("{e:#}") },
+            },
+            other => Reply::Error { message: format!("unknown sync command {other}") },
         }
     }
 
