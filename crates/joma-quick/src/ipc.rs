@@ -103,6 +103,15 @@ pub enum Request {
     },
     /// The GitHub connection and the backup repo.
     GithubStatus,
+    /// This account's devices (`list`, `json` for JSON), or `keep` a new one (`arg`: its
+    /// name or id), one that joined without this machine linking it.
+    Devices {
+        what: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        arg: Option<String>,
+        #[serde(default)]
+        json: bool,
+    },
     /// Quit Joma (closing its window only hides it).
     Quit,
 }
@@ -210,6 +219,8 @@ mod tests {
         assert_eq!(serde_json::to_string(&r).unwrap(), r#"{"cmd":"send","to":"bob","text":"hi"}"#);
         let r: Reply = serde_json::from_str(r#"{"ok":"done"}"#).unwrap();
         assert_eq!(r, Reply::Done);
+        let r = Request::Devices { what: "keep".into(), arg: Some("zoma".into()), json: false };
+        assert_eq!(serde_json::to_string(&r).unwrap(), r#"{"cmd":"devices","what":"keep","arg":"zoma","json":false}"#);
         let r = Request::SendFile { to: "bob".into(), path: None };
         assert_eq!(serde_json::to_string(&r).unwrap(), r#"{"cmd":"send-file","to":"bob","path":null}"#);
         let r = Request::ShareScreen { to: "bob".into(), source: None };

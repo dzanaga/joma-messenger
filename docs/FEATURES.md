@@ -125,6 +125,13 @@ brings accounts back, with the same Jami id (contacts and username stay valid); 
 conversation history comes back from your contacts and other devices. Joma asks for the
 password in its window (twice for a backup), never on the command line: a forgotten
 password makes the backup useless. `joma backup list`, `joma github status`.
+- **On a fresh install** (or Accounts → new account): **restore from your backup** on
+  the welcome screen lists the accounts in your backup repo; pick them, type the
+  password once, and the account opens. `joma restore` works there too.
+- **An account that still runs elsewhere** gets this machine as a new device. Your other
+  devices then show "new device … joined your account" in Devices with **keep** and
+  **revoke** (also for a device linked from another of your devices), until you choose.
+  `joma devices [--json]` lists them, `joma devices keep <name|id>` keeps one.
 
 ## Removing chats
 The bin in a conversation's header takes it off the lists (window, bar, notifications);
@@ -308,7 +315,7 @@ Ctrl+. and Alt+1…9 in the window or the panel; `joma send` and `joma send-quic
 
 ## Command line
 `joma chat <to> [n]` (JSON), `joma call <to> [--video]`, `joma share <to> [--source …]`, `joma watch <to>`,
-`joma send-file <to> [path]`, `joma open <to>`, `joma block <to>`, `joma unblock <to>`, `joma link`, `joma link-device <code>`, `joma accounts`, `joma account <name>`, `joma ui settings|profile|keys|menu|chat-menu|emoji|quick|close`, `joma connections [<to>] [--json]`, `joma sync status|on|off|add|remove`, `joma backup [list]`, `joma restore`, `joma github status`, `joma quit`, `joma probe [--bench]` (the
+`joma send-file <to> [path]`, `joma open <to>`, `joma block <to>`, `joma unblock <to>`, `joma link`, `joma link-device <code>`, `joma accounts`, `joma account <name>`, `joma devices [keep <dev>]`, `joma ui settings|profile|keys|menu|chat-menu|emoji|quick|close`, `joma connections [<to>] [--json]`, `joma sync status|on|off|add|remove`, `joma backup [list]`, `joma restore`, `joma github status`, `joma quit`, `joma probe [--bench]` (the
 GPUs the desktop share can use).
 
 ## Install
@@ -345,6 +352,10 @@ notifications); calls, voice messages and files not yet tried. Design:
 `docs/design/07-android.md`.
 
 ## Log
+- 0.5.3.dev1 (2026-11-27): restore from your GitHub backup on the welcome screen (pick
+  the accounts, one password); devices that join your account from a backup or another
+  device are shown as new, to keep or revoke; `joma devices`, `joma devices keep`; the
+  welcome card flat like the rest.
 - 0.5.2 (2026-11-27): a quieter look, like Flux: an icon rail on the left in place of the
   tab strip (names and keys in tooltips), square everywhere (Hyprland rounds the
   window), areas set apart by their fill, selection as a lighter fill, the accent only

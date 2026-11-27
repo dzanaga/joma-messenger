@@ -353,26 +353,93 @@ impl Joma {
     }
 
     pub(super) fn gate_screen(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let card = div().flex().flex_col().gap(px(12.)).w(px(520.)).max_w_full().p(px(24.)).border_1().border_color(t.border).rounded(px(radius())).bg(t.panel);
+        let card = div().flex().flex_col().gap(px(12.)).w(px(520.)).max_w_full().p(px(24.)).bg(t.panel);
         let card = match &self.gate {
             Gate::QtRunning => card
                 .child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child("Jami is open"))
                 .child(div().child("Joma uses the same accounts and history as the Jami app, and only one of them can run at a time. Jami keeps running in the tray after its window is closed: quit it from its tray icon (or run `pkill -x jami`). Joma comes back by itself once it quits."))
                 .child(button("retry", G_CHECK, "retry", t, true).on_click(cx.listener(|this, _, _, cx| this.boot(cx)))),
             Gate::Onboarding if self.linking.is_some() => self.link_card(card, t, cx),
+            Gate::Onboarding if self.restoring.is_some() || self.password_ask.is_some() => self.restore_card(card, t, cx),
             Gate::Onboarding if self.adding_account.is_some() => card
-                .child(div().text_color(t.accent).font_weight(FontWeight::BOLD).child("Another account"))
+                .child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child("Another account"))
                 .child(div().child("A second Jami identity on this machine, with its own contacts and history. Switch between them in Contacts."))
                 .child(self.onboarding_body(t, cx))
                 .child(div().flex().child(button("account-back", G_BACK, "back", t, false).on_click(cx.listener(|this, _, window, cx| this.cancel_new_account(window, cx))))),
             Gate::Onboarding => card
-                .child(div().text_color(t.accent).font_weight(FontWeight::BOLD).child("Welcome to Joma"))
+                .child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child("Welcome to Joma"))
                 .child(div().child("Joma is a Jami client for Omarchy. Create a Jami account to start: it lives on this machine, no server and no phone number."))
                 .child(self.onboarding_body(t, cx)),
             Gate::Failed(e) => card.child(div().text_color(t.red).child(format!("The Jami daemon failed to start: {e}"))),
             Gate::Ready => card,
         };
         div().flex().flex_1().items_center().justify_center().child(card).into_any_element()
+    }
+
+    /// Restore accounts from the GitHub backup: pick them, type the password once.
+    pub(super) fn restore_card(&self, card: gpui::Div, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
+        let v = self.restoring.clone().unwrap_or_default();
+        let asking = self.password_ask.is_some();
+        let card = card
+            .child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child("Restore from your backup"))
+            .child(div().text_color(t.muted).child(
+                "Your accounts come back with the same Jami ID, contacts and username; messages return from your contacts and other devices. If an account still runs elsewhere, this machine joins it as a new device.",
+            ));
+        let here: Vec<String> = self.accounts.iter().filter_map(|(id, _)| joma_jami::account_uri(id).ok()).collect();
+        let body = if let Some(from) = &v.cli {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .child(div().text_color(t.muted).text_size(px(t.size - 2.)).child(format!("joma restore: from {from}")))
+                .when(asking, |d| d.child(self.input.clone()))
+                .when(v.working, |d| d.child(div().text_color(t.muted).child("restoring… the account opens by itself")))
+        } else if v.loading {
+            div().text_color(t.muted).child("reading github.com/…/joma-backup")
+        } else if v.working {
+            div().text_color(t.muted).child("restoring… the account opens by itself")
+        } else if v.entries.is_empty() && !asking {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .child(div().text_color(t.red).child(if v.error.is_empty() { "No accounts in the backup.".to_owned() } else { v.error.clone() }))
+                .child(div().text_color(t.muted).text_size(px(t.size - 2.)).child("Joma reads the backup through the GitHub CLI: run gh auth login in a terminal, then try again. A backup file: joma restore --file <path>."))
+                .child(div().flex().child(button("restore-retry", G_UNDO, "try again", t, false).on_click(cx.listener(|this, _, _, cx| this.start_restore(cx)))))
+        } else {
+            let mut list = div().flex().flex_col();
+            for e in &v.entries {
+                let on = v.picked.contains(&e.jami);
+                let present = here.contains(&e.jami);
+                let j = e.jami.clone();
+                list = list.child(
+                    div()
+                        .id(SharedString::from(format!("restore-{}", e.jami)))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .px(px(8.))
+                        .py(px(6.))
+                        .when(on, |d| d.bg(t.sel))
+                        .when(!present && !asking, |d| d.cursor_pointer().hover(|d| d.bg(t.sel)))
+                        .child(div().flex_none().w(px(14.)).text_color(if on { t.bright } else { t.muted }).child(if present { "·" } else if on { "✓" } else { "○" }))
+                        .child(div().flex_1().min_w(px(0.)).truncate().text_color(if on { t.bright } else { t.text }).child(e.label.clone()))
+                        .child(div().flex_none().text_color(t.muted).text_size(px(t.size - 2.)).child(if present { "already here".to_owned() } else { format!("{}…", &e.jami[..e.jami.len().min(8)]) }))
+                        .when(!present && !asking, |d| d.on_click(cx.listener(move |this, _, _, cx| this.toggle_restore_pick(&j, cx)))),
+                );
+            }
+            let mut col = div().flex().flex_col().gap(px(8.)).child(div().text_color(t.muted).text_size(px(t.size - 2.)).child(format!("github.com/{}/joma-backup", v.login))).child(list);
+            if !v.error.is_empty() {
+                col = col.child(div().text_color(t.red).child(v.error.clone()));
+            }
+            if asking {
+                col = col.child(self.input.clone()).child(div().text_color(t.muted).text_size(px(t.size - 2.)).child("The password you chose for the backup (the same for all accounts)."));
+            } else {
+                col = col.child(div().flex().child(button("restore-go", G_CHECK, "restore", t, true).on_click(cx.listener(|this, _, window, cx| this.restore_continue(window, cx)))));
+            }
+            col
+        };
+        card.child(body).child(div().flex().child(button("restore-back", G_BACK, "back", t, false).on_click(cx.listener(|this, _, window, cx| this.cancel_restore(window, cx)))))
     }
 
     /// The name and username steps, and joining from another device.
@@ -397,6 +464,14 @@ impl Joma {
                         .border_color(t.border)
                         .child(div().flex_1().text_color(t.muted).child("Already on Jami on another device?"))
                         .child(button("link-start", G_LINK, "link to your account", t, false).on_click(cx.listener(|this, _, _, cx| this.start_link(cx)))),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(div().flex_1().text_color(t.muted).child("Backed up on GitHub?"))
+                        .child(button("restore-start", G_DOWNLOAD, "restore from your backup", t, false).on_click(cx.listener(|this, _, _, cx| this.start_restore(cx)))),
                 )
     }
 }

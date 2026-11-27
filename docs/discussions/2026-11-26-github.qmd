@@ -150,6 +150,12 @@ more sign-in, or Joma opens the gist for you).
 
 - [ ] A: To be discussed better. One GitHub user can add multiple joma accounts. Remove
   one... But still the re could be other new, but it's different accounts...more complex
+  (User, 2026-11-27:) Someone added through GitHub is someone I want to stay in touch
+  with. If their gist later names a different Jami ID (they lost or replaced the
+  account, the old one may be inactive), Joma asks to add the new account: it is about
+  keeping the contact, not about trust. Rare, but it must work this way. And an account
+  can be backed up to GitHub without being public: the gist lists only the accounts
+  marked public, not every account in the backup.
 
 ## C. Backup
 

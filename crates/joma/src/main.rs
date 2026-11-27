@@ -20,6 +20,7 @@ mod media;
 mod model;
 mod player;
 mod presence;
+mod seen;
 mod setup;
 mod stage;
 mod sync;
@@ -56,6 +57,10 @@ const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); -
                                  prints the code to give that device
        joma link-device <code>   send your account to the new device showing <code>
        joma accounts             this machine's accounts (* the open one)
+       joma devices [--json]     this account's devices (this one, new ones to keep or
+                                 revoke in Joma's Devices tab)
+       joma devices keep <dev>   keep a new device (one restored from the backup or
+                                 linked elsewhere)
        joma account <name>       open another account (a name, username or ID)
        joma block <to>         block a contact: no messages, calls or requests from them
        joma unblock <to>         unblock a contact
@@ -169,6 +174,10 @@ fn cli(args: &[String]) -> Option<i32> {
             path: (args[1] != "--remove").then(|| std::fs::canonicalize(&args[1]).map_or_else(|_| args[1].clone(), |c| c.to_string_lossy().into_owned())),
         },
         Some("accounts") if args.len() == 1 => Request::Accounts,
+        Some("devices") if args.len() == 1 || (args.len() == 2 && args[1] == "--json") => {
+            Request::Devices { what: "list".into(), arg: None, json: args.len() == 2 }
+        }
+        Some("devices") if args.len() == 3 && args[1] == "keep" => Request::Devices { what: "keep".into(), arg: Some(args[2].clone()), json: false },
         Some("account") if args.len() == 2 => Request::UseAccount { to: args[1].clone() },
         Some("link-device") if args.len() == 2 => Request::LinkDevice { token: args[1].clone() },
         Some(b @ ("block" | "unblock")) if args.len() == 2 => Request::Block { to: args[1].clone(), block: b == "block" },

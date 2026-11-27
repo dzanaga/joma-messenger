@@ -112,7 +112,7 @@ impl Joma {
 
     pub(super) fn link_card(&self, card: gpui::Div, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
         let Some(l) = &self.linking else { return card };
-        let card = card.child(div().text_color(t.accent).font_weight(FontWeight::BOLD).child("Link this device to your account"));
+        let card = card.child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child("Link this device to your account"));
         if !l.error.is_empty() {
             return card
                 .child(div().text_color(t.red).child(l.error.clone()))
@@ -191,6 +191,31 @@ impl Joma {
     /// This account's devices, and linking a new one.
     pub(super) fn devices_group(&self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
         let mut group = div().flex().flex_col();
+        // Devices that joined without this machine linking them (a restore, a link made
+        // elsewhere): ours, or someone else's? Kept or revoked here.
+        for id in &self.new_devices {
+            let name = self.model.devices.get(id).cloned().filter(|n| !n.is_empty()).unwrap_or_else(|| format!("{}…", &id[..id.len().min(8)]));
+            let (k, r) = (id.clone(), id.clone());
+            group = group.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .mx(px(10.))
+                    .my(px(4.))
+                    .p(px(8.))
+                    .bg(t.raised)
+                    .child(div().text_color(t.bright).child(format!("New device {name} joined your account")))
+                    .child(div().text_color(t.muted).text_size(px(t.size - 2.)).child("Restored from your backup, or linked from another of your devices. If it is not yours, revoke it: it loses the account."))
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(6.))
+                            .child(button(SharedString::from(format!("dev-keep-{id}")), G_CHECK, "keep", t, true).on_click(cx.listener(move |this, _, _, cx| this.keep_device(&k, cx))))
+                            .child(button(SharedString::from(format!("dev-new-revoke-{id}")), G_BAN, if self.is_armed(&format!("revoke:{id}")) { "revoke?" } else { "revoke" }, t, false).on_click(cx.listener(move |this, _, _, cx| this.revoke_device(&r, cx)))),
+                    ),
+            );
+        }
         let mut ids: Vec<(String, String)> = self.model.devices.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         ids.sort_by_key(|(id, _)| *id != self.model.device);
         for (id, name) in ids {

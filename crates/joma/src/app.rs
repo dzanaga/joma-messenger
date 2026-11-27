@@ -101,6 +101,8 @@ pub enum AppMsg {
     SearchDone(String, anyhow::Result<String>),
     /// A link preview was fetched (or failed) for this video id.
     Preview(String),
+    /// The backup repo's accounts, for the restore screen (or why not).
+    RestoreList(Result<(String, Vec<joma_backup::Entry>), String>),
     /// A backup or restore finished: was it a restore, and what to tell the user.
     BackupDone(bool, Result<String, String>),
     /// Joma's Syncthing for this account started (or not).
@@ -242,6 +244,22 @@ pub struct PasswordAsk {
     /// Backup: the first entry, waiting to be typed again.
     pub first: Option<String>,
     pub reply: std::sync::mpsc::Sender<Reply>,
+}
+
+/// Restoring accounts from the GitHub backup on the welcome screen (D-24 step 2).
+#[derive(Clone, Default)]
+pub struct RestoreView {
+    /// Reading the backup repo.
+    pub loading: bool,
+    pub login: String,
+    pub entries: Vec<joma_backup::Entry>,
+    /// The Jami ids to restore.
+    pub picked: HashSet<String>,
+    /// Restoring now (after the password).
+    pub working: bool,
+    pub error: String,
+    /// Started by `joma restore`: where from (a file, or GitHub); the command gets the answer.
+    pub cli: Option<String>,
 }
 
 /// This machine joining an account that lives on another device.
@@ -512,6 +530,13 @@ pub struct Joma {
     pub sync: crate::sync::Sync,
     /// A backup or restore waiting for its password.
     pub password_ask: Option<PasswordAsk>,
+    /// The welcome screen's restore from the backup.
+    pub restoring: Option<RestoreView>,
+    /// Devices that joined the account without this machine linking them: keep / revoke.
+    pub new_devices: Vec<String>,
+    /// When this machine last linked a device, or an account arrived here: devices that
+    /// appear in the next minutes are not "new".
+    pub last_link: Option<Instant>,
     /// The devices tab's last sync report, refreshed in the background.
     pub sync_view: Option<crate::sync::Report>,
     sync_view_busy: bool,
@@ -795,6 +820,9 @@ impl Joma {
             conn_info: None,
             sync: Default::default(),
             password_ask: None,
+            restoring: None,
+            new_devices: Vec::new(),
+            last_link: None,
             sync_view: None,
             sync_view_busy: false,
             sync_view_at: None,
@@ -881,6 +909,10 @@ impl Joma {
     fn open_account(&mut self, account: String, cx: &mut Context<Self>) {
         self.gate = Gate::Ready;
         self.adding_account = None;
+        self.new_devices.clear();
+        if self.restoring.as_ref().is_some_and(|r| r.working) {
+            self.restoring = None;
+        }
         if self.quick.account != account {
             self.quick.account = account.clone();
             self.save_quick(cx);
@@ -963,8 +995,9 @@ impl Joma {
         if self.password_ask.is_some() {
             return refuse(p, "Joma is already asking for a backup password");
         }
-        if self.gate != Gate::Ready {
-            return refuse(p, "open an account first (restoring on a fresh install comes with the restore screen)");
+        let restoring = matches!(p.request, Request::Restore { .. });
+        if self.gate != Gate::Ready && !(restoring && self.gate == Gate::Onboarding && self.linking.is_none()) {
+            return refuse(p, if restoring { "Joma is busy linking a device" } else { "open an account first" });
         }
         self.load_accounts();
         let here: Vec<crate::backup::Account> = self
@@ -992,6 +1025,10 @@ impl Joma {
         }
         if !restore && accounts.is_empty() {
             return refuse(p, "no account matches (joma accounts)");
+        }
+        if restore && self.gate == Gate::Onboarding {
+            let from = file.clone().unwrap_or_else(|| "your GitHub backup".into());
+            self.restoring = Some(RestoreView { cli: Some(from), ..Default::default() });
         }
         self.password_ask = Some(PasswordAsk { restore, accounts, wanted, file, first: None, reply: p.reply });
         self.set_mode(Mode::Password, window, cx);
@@ -1022,6 +1059,10 @@ impl Joma {
         }
         let Some(ask) = self.password_ask.take() else { return };
         self.set_mode(Mode::Chat, window, cx);
+        if let Some(r) = self.restoring.as_mut() {
+            r.working = true;
+            r.error.clear();
+        }
         self.show_flash(if ask.restore { "restoring…" } else { "backing up…" }, cx);
         let present: Vec<String> = self.accounts.iter().filter_map(|(id, _)| joma_jami::account_uri(id).ok()).collect();
         let tx = self.tx.clone();
@@ -1121,6 +1162,93 @@ impl Joma {
             self.model.avatars.insert(self.model.me.clone(), p);
         }
         self.model.devices = joma_jami::known_devices(&acc).unwrap_or_default().into_iter().collect();
+        self.note_devices();
+    }
+
+    /// Devices that joined without this machine linking them become "new" (keep / revoke).
+    fn note_devices(&mut self) {
+        let acc = self.model.account.clone();
+        if acc.is_empty() || self.model.device.is_empty() || self.model.devices.is_empty() {
+            return;
+        }
+        let now: Vec<String> = self.model.devices.keys().cloned().collect();
+        let seen = crate::seen::load(&acc);
+        if seen.is_none() {
+            // The account is new here (created, linked or restored): the devices it
+            // learns about in the next minutes were there before this one.
+            self.last_link = Some(Instant::now());
+        }
+        let quiet = self.device_op.is_some() || self.last_link.is_some_and(|t| t.elapsed() < Duration::from_secs(300));
+        let fresh = crate::seen::fresh(seen.as_ref(), &now, &self.model.device, quiet);
+        self.new_devices.retain(|d| now.contains(d));
+        for d in fresh {
+            if !self.new_devices.contains(&d) {
+                let name = self.model.devices.get(&d).cloned().filter(|n| !n.is_empty()).unwrap_or_else(|| d.chars().take(8).collect());
+                self.flash = Some((format!("new device {name} joined your account: keep or revoke it in Devices"), Instant::now()));
+                self.new_devices.push(d);
+            }
+        }
+        let mut keep: std::collections::BTreeSet<String> = seen.unwrap_or_default();
+        keep.extend(now.into_iter().filter(|d| !self.new_devices.contains(d)));
+        crate::seen::save(&acc, &keep);
+    }
+
+    /// Keep a new device: it is ours.
+    pub fn keep_device(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.new_devices.retain(|d| d != id);
+        let acc = self.model.account.clone();
+        let mut seen = crate::seen::load(&acc).unwrap_or_default();
+        seen.insert(id.to_owned());
+        crate::seen::save(&acc, &seen);
+        cx.notify();
+    }
+
+    /// The welcome screen's "restore from your backup": read the repo off the UI thread.
+    pub fn start_restore(&mut self, cx: &mut Context<Self>) {
+        self.restoring = Some(RestoreView { loading: true, ..Default::default() });
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let r = (|| -> anyhow::Result<(String, Vec<joma_backup::Entry>)> {
+                let login = joma_backup::gh::login()?;
+                if joma_backup::gh::repo(&login)?.is_none() {
+                    anyhow::bail!("github.com/{login}/{} does not exist: nothing backed up yet", joma_backup::REPO);
+                }
+                Ok((login.clone(), joma_backup::gh::index(&login)?.accounts))
+            })()
+            .map_err(|e| format!("{e:#}"));
+            let _ = tx.unbounded_send(AppMsg::RestoreList(r));
+        });
+        cx.notify();
+    }
+
+    pub fn toggle_restore_pick(&mut self, jami: &str, cx: &mut Context<Self>) {
+        if let Some(v) = self.restoring.as_mut() {
+            if !v.picked.remove(jami) {
+                v.picked.insert(jami.to_owned());
+            }
+        }
+        cx.notify();
+    }
+
+    /// The accounts are picked: ask for the backup's password.
+    pub fn restore_continue(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(v) = self.restoring.as_ref() else { return };
+        if v.picked.is_empty() {
+            return self.show_flash("pick an account to restore", cx);
+        }
+        let wanted: Vec<String> = v.entries.iter().filter(|e| v.picked.contains(&e.jami)).map(|e| e.jami.clone()).collect();
+        let (reply, _) = std::sync::mpsc::channel();
+        self.password_ask = Some(PasswordAsk { restore: true, accounts: Vec::new(), wanted, file: None, first: None, reply });
+        self.set_mode(Mode::Password, window, cx);
+    }
+
+    pub fn cancel_restore(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.restoring = None;
+        if self.password_ask.is_some() {
+            self.cancel_password(window, cx);
+        }
+        self.configure_inputs(cx);
+        cx.notify();
     }
 
     /// The daemon's folder for this account.
@@ -1209,6 +1337,11 @@ impl Joma {
             c.set_allow_empty(true);
         });
         let (key, placeholder) = match (self.gate.clone(), self.mode) {
+            (_, Mode::Password) => match &self.password_ask {
+                Some(a) if a.restore => ("password", "The backup's password, then Enter"),
+                Some(a) if a.first.is_some() => ("password-again", "The same password again, then Enter"),
+                _ => ("password", "A password for the backup (the same for all accounts), then Enter"),
+            },
             (Gate::Onboarding, _) if self.linking.as_ref().is_some_and(|l| l.password_scheme.is_some()) => {
                 ("link-password", "The account's password, then Enter")
             }
@@ -1220,11 +1353,6 @@ impl Joma {
             (_, Mode::LinkDevice) => ("link", "The jami-auth:// code the new device shows, then Enter"),
             (_, Mode::DeviceName) => ("device-name", "A name for this device, then Enter"),
             (_, Mode::RemoveAccount) => ("remove-account", "Type delete, then Enter"),
-            (_, Mode::Password) => match &self.password_ask {
-                Some(a) if a.restore => ("password", "The backup's password, then Enter"),
-                Some(a) if a.first.is_some() => ("password-again", "The same password again, then Enter"),
-                _ => ("password", "A password for the backup (the same for all accounts), then Enter"),
-            },
             _ => ("idle", ""),
         };
         self.input.update(cx, |c, _| {
@@ -1397,7 +1525,44 @@ impl Joma {
                     let _ = p.reply.send(reply);
                 }
             },
+            AppMsg::RestoreList(r) => {
+                if let Some(v) = self.restoring.as_mut() {
+                    v.loading = false;
+                    match r {
+                        Ok((login, entries)) => {
+                            let here: Vec<String> = joma_jami::accounts().unwrap_or_default().iter().filter_map(|a| joma_jami::account_uri(a).ok()).collect();
+                            v.picked = entries.iter().filter(|e| !here.contains(&e.jami)).map(|e| e.jami.clone()).collect();
+                            v.login = login;
+                            v.entries = entries;
+                        }
+                        Err(e) if e.contains("not logged in") => {
+                            v.error = "GitHub is not connected on this machine (the GitHub CLI has no login).".into()
+                        }
+                        Err(e) => v.error = e,
+                    }
+                }
+                cx.notify();
+            }
+            AppMsg::BackupDone(true, Err(e)) if self.restoring.as_ref().is_some_and(|v| v.cli.is_some()) => {
+                // `joma restore` got the answer; back to the welcome screen.
+                self.restoring = None;
+                self.show_flash(format!("restore failed: {e}"), cx);
+            }
+            AppMsg::BackupDone(true, Err(e)) if self.restoring.is_some() => {
+                if let Some(v) = self.restoring.as_mut() {
+                    v.working = false;
+                    v.error = e.clone();
+                }
+                // A wrong password: type it again.
+                if e == "wrong password" {
+                    self.restore_continue(window, cx);
+                }
+                cx.notify();
+            }
             AppMsg::BackupDone(restore, r) => {
+                if restore {
+                    self.restoring = None;
+                }
                 match r {
                     Ok(text) => self.show_flash(text.lines().next().unwrap_or("done").to_owned(), cx),
                     Err(e) => self.show_flash(format!("{} failed: {e}", if restore { "restore" } else { "backup" }), cx),
@@ -1641,6 +1806,8 @@ impl Joma {
                 self.model.devices = devices.clone().into_iter().collect();
                 if self.model.device.is_empty() {
                     self.refresh_identity();
+                } else {
+                    self.note_devices();
                 }
                 cx.notify();
                 return;
@@ -3899,6 +4066,7 @@ impl Joma {
         }
         if state == joma_jami::AUTH_DONE {
             self.device_op = None;
+            self.last_link = Some(Instant::now());
             let error = detail.get("error").cloned().unwrap_or_default();
             self.show_flash(if error.is_empty() { "the new device is linked".to_owned() } else { format!("linking failed ({error})") }, cx);
             self.model.devices = joma_jami::known_devices(&self.model.account).unwrap_or_default().into_iter().collect();
@@ -4634,6 +4802,42 @@ impl Joma {
                     .accounts
                     .iter()
                     .map(|(id, name)| format!("{} {name}  {id}", if *id == self.model.account { "*" } else { " " }))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Reply::Text { text }
+            }
+            Request::Devices { what, arg, json } => {
+                if self.gate != Gate::Ready {
+                    return Reply::Error { message: "Joma is not on an account now".into() };
+                }
+                if what == "keep" {
+                    let want = arg.unwrap_or_default().to_lowercase();
+                    let found = self.new_devices.iter().find(|d| d.starts_with(want.as_str()) || self.model.devices.get(*d).is_some_and(|n| n.to_lowercase() == want)).cloned();
+                    return match found {
+                        Some(d) => {
+                            self.keep_device(&d, cx);
+                            Reply::Done
+                        }
+                        None => Reply::Error { message: format!("no new device {want}: see joma devices") },
+                    };
+                }
+                let rows: Vec<serde_json::Value> = self
+                    .model
+                    .devices
+                    .iter()
+                    .map(|(id, name)| {
+                        serde_json::json!({"id": id, "name": name, "this": *id == self.model.device, "new": self.new_devices.contains(id)})
+                    })
+                    .collect();
+                if json {
+                    return Reply::Text { text: serde_json::to_string(&rows).unwrap_or_default() };
+                }
+                let text = rows
+                    .iter()
+                    .map(|r| {
+                        let tag = if r["this"] == true { "  (this device)" } else if r["new"] == true { "  (new: keep or revoke)" } else { "" };
+                        format!("{}  {}{tag}", r["name"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""))
+                    })
                     .collect::<Vec<_>>()
                     .join("\n");
                 Reply::Text { text }
