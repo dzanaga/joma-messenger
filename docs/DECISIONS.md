@@ -63,6 +63,11 @@
   App, automatic backups. Open: re-checking and removal with several accounts (8),
   adding a machine while the old one works (13). (User, 2026-11-26,
   `docs/discussions/2026-11-26-github.qmd`.)
+- D-25 joma for Android starts as Jami Android reskinned (name, icon, palette, font, icons,
+  words; id `io.github.dzanaga.joma`), built from pinned sources with an overlay and
+  patches, no push (a background service), English only, arm64, debug-signed. joma's
+  own screens later. (Claude, 2026-11-27, to revisit after the phone test,
+  `docs/design/07-android.md`.)
 
 ## Decided
 

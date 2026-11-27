@@ -1,0 +1,61 @@
+--- a/app/src/main/java/cx/ring/views/MessageBubble.kt
++++ b/app/src/main/java/cx/ring/views/MessageBubble.kt
+@@ -60,6 +60,9 @@
+     @ColorInt
+     private var contrastedDefaultTextColor = context.getColor(R.color.colorOnSurface)
+ 
++    // joma: the terminal font in bubbles too (setTypeface(null, …) fell back to the system font).
++    private val jomaFont = androidx.core.content.res.ResourcesCompat.getFont(context, R.font.joma_mono)
++
+     private val messageText = WrapWidthTextView(context).apply {
+         id = R.id.bubble_message_text
+         autoLinkMask = Linkify.WEB_URLS
+@@ -130,7 +133,7 @@
+         messageEdited.isVisible = messageIsEdited
+         messageText.apply {
+             setTextSize(TypedValue.COMPLEX_UNIT_PX, defaultTextSize)
+-            setTypeface(null, Typeface.NORMAL)
++            setTypeface(jomaFont, Typeface.NORMAL)
+             setTextIsSelectable(true)
+             text = message
+         }
+@@ -145,7 +148,7 @@
+         messageEdited.visibility = GONE
+         messageTime.text = time
+         messageText.setTextSize(TypedValue.COMPLEX_UNIT_PX, defaultTextSize)
+-        messageText.setTypeface(null, Typeface.ITALIC)
++        messageText.setTypeface(jomaFont, Typeface.ITALIC)
+         messageText.text = String.format(context.getString(R.string.conversation_message_deleted), username)
+         messageText.setTextIsSelectable(false)
+ 
+@@ -159,7 +162,7 @@
+     fun updateEmoji(text: String, time: String, messageIsEdited: Boolean) {
+         messageEdited.isVisible = messageIsEdited
+         messageText.setTextSize(TypedValue.COMPLEX_UNIT_PX, emojiOnlyTextSize)
+-        messageText.setTypeface(null, Typeface.NORMAL)
++        messageText.setTypeface(jomaFont, Typeface.NORMAL)
+         messageText.text = text
+         messageText.setTextIsSelectable(true)
+         messageTime.text = time
+--- a/app/src/main/java/cx/ring/viewholders/SmartListViewHolder.kt
++++ b/app/src/main/java/cx/ring/viewholders/SmartListViewHolder.kt
+@@ -121,13 +121,13 @@
+                         binding.convLastItem.visibility = View.GONE
+                     }
+                     if (!lastEvent.isRead && lastEvent.isIncoming) {
+-                        binding.convParticipant.setTypeface(null, Typeface.BOLD)
+-                        binding.convLastTime.setTypeface(null, Typeface.BOLD)
+-                        binding.convLastItem.setTypeface(null, Typeface.BOLD)
++                        binding.convParticipant.setTypeface(androidx.core.content.res.ResourcesCompat.getFont(binding.root.context, R.font.joma_mono), Typeface.BOLD)
++                        binding.convLastTime.setTypeface(androidx.core.content.res.ResourcesCompat.getFont(binding.root.context, R.font.joma_mono), Typeface.BOLD)
++                        binding.convLastItem.setTypeface(androidx.core.content.res.ResourcesCompat.getFont(binding.root.context, R.font.joma_mono), Typeface.BOLD)
+                     } else {
+-                        binding.convParticipant.setTypeface(null, Typeface.NORMAL)
+-                        binding.convLastTime.setTypeface(null, Typeface.NORMAL)
+-                        binding.convLastItem.setTypeface(null, Typeface.NORMAL)
++                        binding.convParticipant.setTypeface(androidx.core.content.res.ResourcesCompat.getFont(binding.root.context, R.font.joma_mono), Typeface.NORMAL)
++                        binding.convLastTime.setTypeface(androidx.core.content.res.ResourcesCompat.getFont(binding.root.context, R.font.joma_mono), Typeface.NORMAL)
++                        binding.convLastItem.setTypeface(androidx.core.content.res.ResourcesCompat.getFont(binding.root.context, R.font.joma_mono), Typeface.NORMAL)
+                     }
+                     if (fade) {
+                         binding.convInfo.startAnimation(fadeIn())

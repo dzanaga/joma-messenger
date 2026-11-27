@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- joma: the blocky j with its lavender dot (assets/icon/joma.svg), the 512 grid mapped
+     onto the 72 dp an adaptive icon shows of its 108. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:translateX="18" android:translateY="18"
+        android:scaleX="0.140625" android:scaleY="0.140625">
+        <path android:fillColor="#C8D5E5"
+            android:pathData="M146.39,301.6L224.87,301.6L224.87,356.84L288.45,356.84L288.45,182.34L365.61,182.34L365.61,414.72L146.39,414.72Z" />
+        <path android:fillColor="#B193F7"
+            android:pathData="M288.45,97.28h77.17v71.47h-77.17z" />
+    </group>
+</vector>

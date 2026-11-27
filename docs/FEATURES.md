@@ -309,7 +309,24 @@ instead. **Channel**: stable releases only (the default), or pre-releases too
 `0.5.2.dev0`, `.dev1`, … (`0.5.2-dev.1` for Cargo and in the release tag); publish one
 with `scripts/release.sh "notes" --pre`.
 
+## On the phone (Android, first build)
+`android/build.sh` builds **joma for Android**: an APK (arm64) at
+`~/builds/joma-android/joma-debug.apk`, installed by hand (open it on the phone and allow
+installing from that app; Play Protect warns about an unknown developer). It is the
+Jami Android app with joma's name, icon, palette, font, icons and words, and its own id
+(`io.github.dzanaga.joma`), so it installs beside the Jami app. What Jami Android does,
+it does: an account created on the phone or linked from the desktop (desktop: Devices →
+paste the code the phone shows), chats with people and groups, requests, adding by
+Jami username or ID, voice and video messages, files and pictures, notifications, calls.
+Dark by default; it stays running in the background (a permanent notification) since it
+has no Google push. joma's own extras (desktop share, presence, watching together) are
+not there yet. Verified in an emulator (account, a chat between two local accounts,
+notifications); calls, voice messages and files not yet tried. Design:
+`docs/design/07-android.md`.
+
 ## Log
+- Android 0.1.0.dev1 (2026-11-27): the first APK, Jami Android with joma's skin (see
+  "On the phone").
 - 0.5.2.dev11 (2026-11-27): folder sync between your own devices (Joma's own Syncthing
   over Jami tunnels; built and unit-tested, not yet tried between two devices);
   connection info on contacts and devices and `joma

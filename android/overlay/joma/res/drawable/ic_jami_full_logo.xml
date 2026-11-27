@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- joma: the logo is the j (assets/joma-logo-v2.png), cropped to its shapes. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="100dp" android:height="100dp"
+    android:viewportWidth="320" android:viewportHeight="320">
+    <group android:translateX="-96" android:translateY="-96">
+        <path android:fillColor="#C8D5E5"
+            android:pathData="M146.39,301.6L224.87,301.6L224.87,356.84L288.45,356.84L288.45,182.34L365.61,182.34L365.61,414.72L146.39,414.72Z" />
+        <path android:fillColor="#B193F7"
+            android:pathData="M288.45,97.28h77.17v71.47h-77.17z" />
+    </group>
+</vector>
