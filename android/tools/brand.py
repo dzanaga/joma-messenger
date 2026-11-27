@@ -134,6 +134,8 @@ def day(p: dict) -> dict:
     acc = p["accent"]
     return {
         "color_primary_light": hx(acc),
+        # Jami's primary in the day theme, also the colour of notifications.
+        "color_primary_dark": hx(mix(acc, 0x000000, 0.40)),
         "color_primary_light_translucent": hx(acc, 0xB0),
         "fab_background_color": hx(acc),
         "jami_id_surface_color": hx(acc),
