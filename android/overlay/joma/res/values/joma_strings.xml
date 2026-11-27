@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- joma: the app's name and the desktop app's words over Jami Android's English
+     strings. "Jami" stays where it names the network (Jami username, Jami ID, a Jami
+     contact); where it names the app it says joma. -->
+<resources>
+    <string name="app_name" translatable="false">joma</string>
+
+    <!-- The desktop's words -->
+    <string name="navigation_item_conversation">Chats</string>
+    <string name="navigation_item_contact_request">Requests</string>
+    <string name="invitation_card_title">Requests</string>
+    <string name="new_invitation_request_title">New request</string>
+    <string name="accept_invitation">Accept</string>
+    <string name="decline_invitation">Decline</string>
+    <string name="no_invitations">No requests.</string>
+    <string name="invitation_message">%1$d contact requests</string>
+    <string name="searchbar_hint">Search, or add by Jami username or ID</string>
+    <string name="write_a_message">Message</string>
+    <string name="conversation_send_audio">Voice message</string>
+    <string name="conversation_send_video">Video message</string>
+    <string name="send_file">Send a file</string>
+    <string name="ab_action_audio_call">Call</string>
+    <string name="ab_action_video_call">Video call</string>
+    <string name="conversation_action_delete_this">Delete this chat</string>
+    <string name="start_conversation">Start a chat</string>
+    <string name="picker_search_hint">Search contacts</string>
+
+    <!-- Jami as the app -->
+    <string name="menu_item_about">About joma</string>
+    <string name="pip_title">joma call</string>
+    <string name="notif_background_service">joma is running in the background</string>
+    <string name="notif_reconnect_title">joma is syncing…</string>
+    <string name="start_error_title">joma could not start</string>
+    <string name="qr_code_not_contact">Not a contact\'s QR code</string>
+    <string name="ringtone_jami_tones">joma ringtones</string>
+    <string name="permission_dialog_read_contacts_message">joma needs the “Read contacts” permission. Enable it in the device settings to use this.</string>
+    <string name="permission_dialog_write_call_log_message">joma needs the “Write call log” permission. Enable it in the device settings to use this.</string>
+    <string name="permission_dialog_post_notifications_message">joma needs the notifications permission to tell you about calls and messages while it is in the background. Without it you may miss calls.</string>
+    <string name="permission_dialog_post_notifications_blocked_message">Notifications are off for joma: you will miss calls and messages. Turn them on in the device settings.</string>
+    <string name="permission_dialog_local_network_message">joma needs local network access to connect calls directly to devices on your network. Without it, calls may go through a relay at lower quality.</string>
+    <string name="permission_dialog_local_network_blocked_message">Local network access is off for joma: calls to devices on your network may go through a relay at lower quality. Turn it on in the device settings.</string>
+    <string name="account_create_title">Create an account</string>
+    <string name="help_password_choose">Choose a strong password you will remember to protect your account.</string>
+    <string name="help_password_enter">Enter your account password.</string>
+    <string name="share_message">Scan this code with joma or Jami</string>
+    <string name="audio_permission_rationale_message">joma needs the microphone for calls and voice messages. It will be asked next.</string>
+    <string name="camera_permission_rationale_message">joma needs the camera for video calls and video messages. It will be asked next.</string>
+    <string name="share_contact_intent_title">Add this contact on Jami</string>
+    <string name="jami_id_copy">Copy Jami ID</string>
+    <string name="jami_id_share">Share Jami ID</string>
+    <string name="welcome_jami_title">Welcome to joma</string>
+    <string name="welcome_jami_description">Share your username or Jami ID so people can reach you.</string>
+    <string name="donation_card_description">joma runs on Jami, free software by Savoir-faire Linux. If you enjoy it, consider a donation to Jami.</string>
+    <string name="notif_peer_tunnel_text">joma keeps your service connections alive in the background</string>
+    <string name="shared_services_settings_description">Expose local services to your contacts</string>
+    <string name="shared_services_empty_subtitle">Share local files or services with your contacts</string>
+    <string name="description">joma is a messenger on Jami: free software for private, peer-to-peer messages and calls, with no server in the middle.</string>
+
+    <!-- strings_preferences -->
+    <string name="pref_mobileData_summary">Use mobile data as well as Wi-Fi</string>
+    <string name="pref_systemDialer_title">Place system calls with joma</string>
+    <string name="pref_systemDialer_summary">Use joma to place system calls when possible.</string>
+    <string name="pref_startOnBoot_title">Start joma on startup</string>
+    <string name="pref_startOnBoot_summary">Run joma in the background when the phone starts.</string>
+    <string name="pref_connectivity_summary">How joma stays connected to receive calls and messages.</string>
+    <string name="pref_newGroup_summary">Enable creating groups.</string>
+
+    <!-- strings_account -->
+    <string name="ring_account_default_name">Account %1$s</string>
+    <string name="help_ring">An account lets you reach people privately, peer to peer, on the Jami network. It lives on your devices only.</string>
+    <string name="account_contact_me">Contact me on Jami</string>
+    <string name="account_migration">Your account can be updated.\nPlease enter your password.</string>
+    <string name="ring_account">Account</string>
+    <string name="account_cannot_be_found_message">Could not find the account on the Jami network. Check that the other device shows the code and that the password is right.</string>
+    <string name="account_no_network_message">A connection error happened while bringing the account onto the network. Check this device\'s connection.</string>
+    <string name="account_device_added_message">The account is set up on this device.</string>
+    <string name="account_device_updated_message">The account was updated.</string>
+    <string name="account_tv_about">About joma</string>
+    <string name="account_new_button">Create a new account</string>
+    <string name="account_creation_home">Welcome to joma</string>
+    <string name="account_creation_ring">Create your account</string>
+    <string name="rename_device_message">A name for this device, as your other devices see it</string>
+    <string name="account_link_info">On the new device (joma or the Jami app), scan the QR code or type the code.</string>
+    <string name="account_link_device_info">On a device that has the account, choose “Link a new device” (joma: Devices → paste the code) to see the QR code or the code.</string>
+    <string name="account_biometry_auth_title">Unlock your account</string>
+    <string name="account_biometry_enroll_auth_title">Add authentication for your account</string>
+</resources>

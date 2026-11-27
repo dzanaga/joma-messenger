@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- joma: the notification icon, the j in white (Jami's ring logo PNGs are per density,
+     so this sits in drawable-anydpi to win over them). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="320" android:viewportHeight="320">
+    <group android:translateX="-96" android:translateY="-96">
+        <path android:fillColor="#FFFFFFFF"
+            android:pathData="M146.39,301.6L224.87,301.6L224.87,356.84L288.45,356.84L288.45,182.34L365.61,182.34L365.61,414.72L146.39,414.72ZM288.45,97.28h77.17v71.47h-77.17z" />
+    </group>
+</vector>

@@ -1,0 +1,65 @@
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -21,10 +21,13 @@
+     buildToolsVersion = "37.0.0"
+     ndkVersion = "30.0.16248370"
+     defaultConfig {
++        // joma: its own id, so it installs next to the Jami app (cx.ring), and its
++        // own version (Jami Android 20261106-01 underneath).
++        applicationId = "io.github.dzanaga.joma"
+         minSdk = 26
+         targetSdk = 37
+-        versionCode = 507
+-        versionName = "20261106-01"
++        versionCode = 1
++        versionName = "0.1.0.dev1"
+         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+         externalNativeBuild {
+             cmake {
+@@ -37,7 +40,7 @@
+                     "-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON",
+                     "-DJAMI_JNI=ON",
+                     "-DJAMI_JNI_PACKAGEDIR="+rootProject.projectDir.resolve("libjamiclient/src/main/java"),
+-                    "-DJAMI_DATADIR=/data/data/$namespace/files",
++                    "-DJAMI_DATADIR=/data/data/io.github.dzanaga.joma/files",
+                 )
+             }
+             ndk {
+@@ -100,6 +103,15 @@
+     sourceSets.getByName("main") {
+         assets.srcDir(collabEditorAssets)
+     }
++    // joma: the brand (colours, font, icons, words). A flavor's resources win over
++    // main's, so these files only name what they change.
++    sourceSets.getByName("noPush") {
++        res.srcDir(rootProject.projectDir.resolve("joma/res"))
++    }
++    // joma: English only for now, like the desktop app (Jami's translations say Jami).
++    androidResources {
++        localeFilters += listOf("en")
++    }
+ }
+ 
+ /*
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -498,7 +498,7 @@
+ 
+         <provider
+             android:name="androidx.core.content.FileProvider"
+-            android:authorities="cx.ring.file_provider"
++            android:authorities="${applicationId}.file_provider"
+             android:exported="false"
+             android:grantUriPermissions="true">
+             <meta-data
+--- a/app/src/main/java/cx/ring/services/SharedPreferencesServiceImpl.kt
++++ b/app/src/main/java/cx/ring/services/SharedPreferencesServiceImpl.kt
+@@ -167,7 +167,7 @@
+         get() = videoPreferences.getBoolean(PREF_HW_ENCODING, true)
+ 
+     override var darkMode: Boolean
+-        get() = themePreferences.getBoolean(PREF_DARK_MODE, false)
++        get() = themePreferences.getBoolean(PREF_DARK_MODE, true) // joma: dark by default
+         set(enabled) {
+             themePreferences.edit().putBoolean(PREF_DARK_MODE, enabled).apply()
+             applyDarkMode(enabled)

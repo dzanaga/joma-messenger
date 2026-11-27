@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- joma: Jami's logo slot shows joma's icon (assets/icon/joma.svg as it is). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="116dp" android:height="116dp"
+    android:viewportWidth="512" android:viewportHeight="512">
+    <path android:fillColor="#FF000000"
+        android:pathData="M118.4,16h275.2a102.4,102.4 0 0 1 102.4,102.4v275.2a102.4,102.4 0 0 1 -102.4,102.4h-275.2a102.4,102.4 0 0 1 -102.4,-102.4v-275.2a102.4,102.4 0 0 1 102.4,-102.4z" />
+    <path android:fillColor="#C8D5E5"
+        android:pathData="M146.39,301.6L224.87,301.6L224.87,356.84L288.45,356.84L288.45,182.34L365.61,182.34L365.61,414.72L146.39,414.72Z" />
+    <path android:fillColor="#B193F7"
+        android:pathData="M288.45,97.28h77.17v71.47h-77.17z" />
+</vector>
