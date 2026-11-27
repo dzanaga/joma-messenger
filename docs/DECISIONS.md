@@ -69,6 +69,11 @@
   stable channel by default; transcription on click, local (whisper.cpp), never a
   cloud engine unless chosen; GIFs from a local folder, no online search; settings as
   a page; rounded corners and the version in the tab strip as settings (user asked).
+- D-23 joma for Android starts as Jami Android reskinned (name, icon, palette, font, icons,
+  words; id `io.github.dzanaga.joma`), built from pinned sources with an overlay and
+  patches, no push (a background service), English only, arm64, debug-signed. joma's
+  own screens later. (Claude, 2026-11-27, to revisit after the phone test,
+  `docs/design/07-android.md`.)
 
 ## Decided
 

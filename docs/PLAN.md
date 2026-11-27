@@ -14,6 +14,7 @@ to Jami's own screen share.
 | `joma-desk` | Joma desktop share: signalling over in-call or account messages (share without a call), gliff's capture → split → H.264 pipeline on the sharer, decode → BGRA on the viewer, carried over a Jami service tunnel; plus the Jami portal fallback |
 | `joma-quick` | Quick Messages config and the socket protocol (CLI) |
 | `joma` | The GPUI app and the CLI (`joma`, `joma send`, `joma share`, …) |
+| `android/` | joma for Android: overlay and patches on Jami Android (not a crate) |
 
 Design notes live in `docs/design/`. Decisions are in `docs/DECISIONS.md`.
 
@@ -46,3 +47,4 @@ Design notes live in `docs/design/`. Decisions are in `docs/DECISIONS.md`.
 | **U7** | Picture viewer; incoming-call overlay and the call bar | built in 0.5.2.dev6 / dev7; viewer, overlay and answering verified in the nest; the bar floating over video not yet seen (no camera in the nest run) |
 | **U8** | Transcription of voice messages (whisper.cpp local, superwhisper by choice) | built in 0.5.2.dev8; the flow verified with a stand-in `whisper-cli`; to try with whisper.cpp installed |
 | **U9** | GIFs from a local folder, filtered by name | built in 0.5.2.dev9, the picker verified in the nest |
+| **A0** | joma for Android: Jami Android with joma's name, icon, palette, font, icons and words, built from pinned sources with an overlay and patches (`android/`, `docs/design/07-android.md`) | in progress (0.1.0.dev1) |
