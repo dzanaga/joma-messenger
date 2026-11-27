@@ -300,7 +300,9 @@ paste the code the phone shows), chats with people and groups, requests, adding 
 Jami username or ID, voice and video messages, files and pictures, notifications, calls.
 Dark by default; it stays running in the background (a permanent notification) since it
 has no Google push. joma's own extras (desktop share, presence, watching together) are
-not there yet. Design: `docs/design/07-android.md`.
+not there yet. Verified in an emulator (account, a chat between two local accounts,
+notifications); calls, voice messages and files not yet tried. Design:
+`docs/design/07-android.md`.
 
 ## Log
 - Android 0.1.0.dev1 (2026-11-27): the first APK, Jami Android with joma's skin (see

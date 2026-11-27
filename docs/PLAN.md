@@ -47,4 +47,4 @@ Design notes live in `docs/design/`. Decisions are in `docs/DECISIONS.md`.
 | **U7** | Picture viewer; incoming-call overlay and the call bar | built in 0.5.2.dev6 / dev7; viewer, overlay and answering verified in the nest; the bar floating over video not yet seen (no camera in the nest run) |
 | **U8** | Transcription of voice messages (whisper.cpp local, superwhisper by choice) | built in 0.5.2.dev8; the flow verified with a stand-in `whisper-cli`; to try with whisper.cpp installed |
 | **U9** | GIFs from a local folder, filtered by name | built in 0.5.2.dev9, the picker verified in the nest |
-| **A0** | joma for Android: Jami Android with joma's name, icon, palette, font, icons and words, built from pinned sources with an overlay and patches (`android/`, `docs/design/07-android.md`) | in progress (0.1.0.dev1) |
+| **A0** | joma for Android: Jami Android with joma's name, icon, palette, font, icons and words, built from pinned sources with an overlay and patches (`android/`, `docs/design/07-android.md`) | built (0.1.0.dev1); verified in an emulator (account without username, chat and request between two local accounts, notification); to try on the phone |
