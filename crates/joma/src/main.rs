@@ -11,6 +11,7 @@
 mod app;
 mod avatar;
 mod composer;
+mod conninfo;
 mod desk;
 mod hypr;
 mod ipc;
@@ -57,6 +58,9 @@ const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); -
        joma unblock <to>         unblock a contact
        joma draw laser|pen|off|clear|shot
                                  on the screen you share: point, draw, wipe, screenshot
+       joma connections [<to>] [--json]
+                                 the devices this account is connected to and the path
+                                 each connection takes (relayed, Tailscale, local, direct)
        joma quit                 quit Joma (closing the window keeps it running)
        joma probe [--bench [--display-gpu]]
                                  the GPUs and codecs the desktop share can use
@@ -82,6 +86,14 @@ fn cli(args: &[String]) -> Option<i32> {
         Some("draw") if args.len() == 2 => Request::Draw { what: args[1].clone() },
         Some("ui") if args.len() == 2 => Request::Ui { what: args[1].clone() },
         Some("toggle") => Request::Toggle,
+        Some("connections") if args.len() <= 3 => {
+            let rest: Vec<&String> = args[1..].iter().filter(|a| *a != "--json").collect();
+            if rest.len() > 1 {
+                eprintln!("{USAGE}");
+                return Some(2);
+            }
+            Request::Connections { to: rest.first().map(|s| s.to_string()), json: args.iter().any(|a| a == "--json") }
+        }
         Some("quit") => Request::Quit,
         Some("chat") if args.len() >= 2 => Request::Chat { to: args[1].clone(), limit: args.get(2).and_then(|n| n.parse().ok()).unwrap_or(20) },
         Some("call") if args.len() >= 2 => Request::Call { to: args[1].clone(), video: args[2..].iter().any(|a| a == "--video") },

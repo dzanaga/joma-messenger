@@ -17,6 +17,7 @@ use serde_json::{json, Value};
 
 mod event;
 pub use event::Event;
+pub mod links;
 
 pub type Details = BTreeMap<String, String>;
 

@@ -96,6 +96,17 @@ on is off (tested: sender off, the second device delivered within seconds).
      line sends it without asking. An account with a password asks for it on the new
      device.
 
+## Connection info
+The signal button on a contact (Contacts) or on one of your devices (Devices) shows the
+live connections to that contact's or device's devices: the state (connected, TLS
+handshake, ICE negotiation, connecting, waiting), the address, the path, and the
+channels open on it (messages, conversation sync, file transfers, tunnels). The path is
+**relayed** (through the account's TURN server, turn.jami.net by default: shown in yellow,
+slow), **Tailscale** (or Tailscale through a DERP relay, also yellow), **local network** or
+**direct**. Devices connect when there is something to send, so "not connected now" is
+normal. `joma connections [<to>] [--json]` prints the same for every connection, or for one
+conversation's members.
+
 ## Removing chats
 The bin in a conversation's header takes it off the lists (window, bar, notifications);
 it stays in Jami, and its messages keep arriving quietly. The bin next to + in the chats
@@ -268,7 +279,7 @@ Ctrl+. and Alt+1…9 in the window or the panel; `joma send` and `joma send-quic
 
 ## Command line
 `joma chat <to> [n]` (JSON), `joma call <to> [--video]`, `joma share <to> [--source …]`, `joma watch <to>`,
-`joma send-file <to> [path]`, `joma open <to>`, `joma block <to>`, `joma unblock <to>`, `joma link`, `joma link-device <code>`, `joma accounts`, `joma account <name>`, `joma ui settings|profile|keys|menu|chat-menu|emoji|quick|close`, `joma quit`, `joma probe [--bench]` (the
+`joma send-file <to> [path]`, `joma open <to>`, `joma block <to>`, `joma unblock <to>`, `joma link`, `joma link-device <code>`, `joma accounts`, `joma account <name>`, `joma ui settings|profile|keys|menu|chat-menu|emoji|quick|close`, `joma connections [<to>] [--json]`, `joma quit`, `joma probe [--bench]` (the
 GPUs the desktop share can use).
 
 ## Install
@@ -290,8 +301,10 @@ instead. **Channel**: stable releases only (the default), or pre-releases too
 with `scripts/release.sh "notes" --pre`.
 
 ## Log
-- 0.5.2.dev11 (2026-11-27): received files up to 200 MB download by themselves (was
-  20 MB).
+- 0.5.2.dev11 (2026-11-27): connection info on contacts and devices and `joma
+  connections` (path: relayed, Tailscale, local, direct; tested between two throwaway
+  accounts, which connected over the local network); received files up to 200 MB
+  download by themselves (was 20 MB).
 - 0.5.2.dev10 (2026-11-17): the panel under the bar: pictures fit their bubble, settings
   show their sections as icons.
 - 0.5.2.dev9 (2026-11-17): a GIF picker from your own folder.

@@ -462,6 +462,9 @@ pub struct Joma {
     pub linking: Option<Linking>,
     /// Sending the account to a new device.
     pub device_op: Option<DeviceOp>,
+    /// The connection-info view open under a contact (`peer:<uri>`) or a device
+    /// (`device:<id>`), with the last rows read (None while reading).
+    pub conn_info: Option<(String, Option<Vec<crate::conninfo::Row>>)>,
     /// Our other devices' Joma presence, by device id.
     pub my_devices: HashMap<String, crate::presence::Peer>,
     /// When we last told our other devices, and what.
@@ -726,6 +729,7 @@ impl Joma {
             setup: SetupState::read(),
             linking: None,
             device_op: None,
+            conn_info: None,
             my_devices: HashMap::new(),
             self_told: None,
             accounts: Vec::new(),
@@ -4237,6 +4241,24 @@ impl Joma {
                     None => Reply::Error { message: format!("no account {to}: see joma accounts") },
                 }
             }
+            Request::Connections { to, json } => {
+                let conv = match to {
+                    Some(to) => match self.target(&to) {
+                        Ok(c) => c,
+                        Err(e) => return e,
+                    },
+                    None if self.gate != Gate::Ready => return Reply::Error { message: "Joma is not connected to Jami yet".into() },
+                    None => String::new(),
+                };
+                match joma_jami::links::list(&self.model.account, &conv) {
+                    Ok(links) => {
+                        let rows = crate::conninfo::rows(links, |p| self.model.name_of(p), |d| self.model.devices.get(d).cloned());
+                        let text = if json { serde_json::to_string(&rows).unwrap_or_default() } else { crate::conninfo::text(&rows) };
+                        Reply::Text { text }
+                    }
+                    Err(e) => Reply::Error { message: e.to_string() },
+                }
+            }
             Request::Quit => {
                 self.leave();
                 cx.defer(|cx| cx.quit());
@@ -4255,6 +4277,31 @@ impl Joma {
                 Err(e) => e,
             },
         }
+    }
+
+    /// Open or close the connection info under a contact or a device, reading the
+    /// connections off the UI thread (it resolves the TURN server's name).
+    pub fn toggle_conn_info(&mut self, key: String, cx: &mut Context<Self>) {
+        if self.conn_info.as_ref().is_some_and(|(k, _)| *k == key) {
+            self.conn_info = None;
+            cx.notify();
+            return;
+        }
+        self.conn_info = Some((key.clone(), None));
+        cx.notify();
+        let account = self.model.account.clone();
+        let read = cx.background_executor().spawn(async move { joma_jami::links::list(&account, "") });
+        cx.spawn(async move |this, cx| {
+            let links = read.await.unwrap_or_default();
+            let _ = this.update(cx, |j, cx| {
+                if j.conn_info.as_ref().is_some_and(|(k, _)| *k == key) {
+                    let rows = crate::conninfo::rows(links, |p| j.model.name_of(p), |d| j.model.devices.get(d).cloned());
+                    j.conn_info = Some((key, Some(rows)));
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 
     /// The conversation a socket request names.

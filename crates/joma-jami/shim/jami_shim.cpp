@@ -389,6 +389,10 @@ dispatch(const std::string& m, const Json::Value& a)
     if (m == "lookupAddress")
         return lookupAddress(str(a, 0), str(a, 1), str(a, 2));
     // Devices
+    if (m == "getConnectionList")
+        return toJson(getConnectionList(str(a, 0), str(a, 1)));
+    if (m == "getChannelList")
+        return toJson(getChannelList(str(a, 0), str(a, 1)));
     if (m == "getKnownRingDevices")
         return toJson(getKnownRingDevices(str(a, 0)));
     if (m == "addDevice")

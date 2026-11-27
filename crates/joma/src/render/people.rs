@@ -4,6 +4,42 @@ use super::*;
 
 impl Joma {
     /// Onboarding by joining an account from another device: the code, as text and QR.
+    /// The connection info under a contact or a device, when it is the open one.
+    fn conn_panel(&self, key: &str, matches: impl Fn(&crate::conninfo::Row) -> bool, t: &Theme) -> Option<gpui::Div> {
+        let (open, rows) = self.conn_info.as_ref()?;
+        if open != key {
+            return None;
+        }
+        let small = |s: String, c| div().text_size(px(t.size - 2.)).text_color(c).child(s);
+        let mut panel = div().flex().flex_col().gap(px(3.)).mx(px(10.)).my(px(2.)).p(px(6.)).border_1().border_color(t.border).rounded(px(radius()));
+        let Some(rows) = rows else { return Some(panel.child(small("reading the connections…".into(), t.muted))) };
+        let mine: Vec<&crate::conninfo::Row> = rows.iter().filter(|r| matches(r)).collect();
+        if mine.is_empty() {
+            return Some(panel.child(small("not connected now: devices connect when there is something to send".into(), t.muted)));
+        }
+        for r in mine {
+            let dev = if r.device_name.is_empty() { format!("device {}…", &r.device[..r.device.len().min(8)]) } else { r.device_name.clone() };
+            let (path_colour, note) = match r.path {
+                _ if r.relayed => (t.yellow, " · slow: through a relay"),
+                joma_jami::links::Path::Unknown => (t.muted, ""),
+                _ => (t.green, ""),
+            };
+            panel = panel
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap(px(6.))
+                        .child(div().text_color(t.text).child(dev))
+                        .child(div().text_color(t.muted).child(r.status.clone()))
+                        .child(div().text_color(path_colour).child(format!("{}{note}", r.path.label()))),
+                )
+                .when(!r.address.is_empty(), |d| d.child(small(r.address.clone(), t.muted)))
+                .when(!r.channels.is_empty(), |d| d.child(small(format!("channels: {}", r.channels.join(", ")), t.muted)));
+        }
+        Some(panel)
+    }
+
     pub(super) fn link_card(&self, card: gpui::Div, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
         let Some(l) = &self.linking else { return card };
         let card = card.child(div().text_color(t.accent).font_weight(FontWeight::BOLD).child("Link this device to your account"));
@@ -99,6 +135,9 @@ impl Joma {
                 (false, true) => format!("{name} · {}", &id[..id.len().min(6)]),
                 (false, false) => name,
             };
+            let (k, key) = (format!("device:{id}"), format!("device:{id}"));
+            let dev_id = id.clone();
+            let info = self.conn_panel(&key, |r| r.device == dev_id, t);
             group = group.child(
                 div()
                     .flex()
@@ -119,12 +158,20 @@ impl Joma {
                     })
                     .when(!this, |d| {
                         d.child(
+                            button(SharedString::from(format!("dev-conn-{id}")), G_SIGNAL, "", t, info.is_some())
+                                .text_color(t.muted)
+                                .on_click(cx.listener(move |this, _, _, cx| this.toggle_conn_info(k.clone(), cx))),
+                        )
+                        .child(
                             button(SharedString::from(format!("dev-revoke-{id}")), G_BAN, if armed { "revoke?" } else { "" }, t, armed)
                                 .text_color(if armed { t.red } else { t.muted })
                                 .on_click(cx.listener(move |this, _, _, cx| this.revoke_device(&i, cx))),
                         )
                     }),
             );
+            if let Some(p) = info {
+                group = group.child(p);
+            }
         }
         let op = self.device_op.clone();
         group.child(match op {
@@ -365,6 +412,10 @@ impl Joma {
                     }))
             };
             let (u_star, u_block, u_remove, u_open) = (uri.clone(), uri.clone(), uri.clone(), uri.clone());
+            let conn_key = format!("peer:{}", crate::model::bare_uri(&uri));
+            let bare = crate::model::bare_uri(&uri).to_string();
+            let info = self.conn_panel(&conn_key, |r| crate::model::bare_uri(&r.peer) == bare, t);
+            let info_open = info.is_some();
             let block_armed = self.is_armed(&format!("block:{uri}"));
             let remove_armed = self.is_armed(&format!("remove:{uri}"));
             let row = div()
@@ -429,6 +480,14 @@ impl Joma {
                         })
                         .child(div().flex_1())
                         .child(
+                            button(SharedString::from(format!("cq-conn-{uri}")), G_SIGNAL, "", t, info_open)
+                                .text_color(t.muted)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.toggle_conn_info(conn_key.clone(), cx);
+                                })),
+                        )
+                        .child(
                             button(SharedString::from(format!("cq-block-{uri}")), G_BAN, if block_armed { "block?" } else { "" }, t, block_armed)
                                 .text_color(if block_armed { t.red } else { t.muted })
                                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -444,7 +503,8 @@ impl Joma {
                                     this.remove_contact(&u_remove, cx);
                                 })),
                         ),
-                );
+                )
+                .when_some(info, |d, p| d.child(p));
             list = list.child(draggable(row, Dragged { tab: Tab::Contacts, id: uri.clone(), title: name }, t, cx));
         }
         let blocked = self.blocked();

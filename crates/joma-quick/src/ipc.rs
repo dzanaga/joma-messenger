@@ -61,6 +61,14 @@ pub enum Request {
     /// Open a part of the interface (`settings`, `profile`, `keys`, `menu`, `chat-menu`,
     /// `emoji`, `quick`, `close`): for scripts and screenshots.
     Ui { what: String },
+    /// The account's connections to other devices and the path each one takes (all, or
+    /// one conversation's members); `json` asks for the rows as JSON.
+    Connections {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to: Option<String>,
+        #[serde(default)]
+        json: bool,
+    },
     /// Quit Joma (closing its window only hides it).
     Quit,
 }
