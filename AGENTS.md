@@ -19,9 +19,14 @@
   discussion starts and brought up to date with the board's answers at every review.
   Pictures go to the board's assets and to `docs/discussions/img/`.
 - **Dev board** (experiment since 2026-11-24): <https://claude.ai/artifact/29FwBMrCPy8fhseivVL5Zs>,
-  read and written with the `ArtifactData` tool. Collections: `items` (features, todos,
-  ideas, designs, discussions with their `questions`), `decisions`, `scratch` (the user's
-  quick ideas), `notes` (per item, `by: "you" | "claude"`), `meta/state` (`lastReview`).
+  read and written with the `ArtifactData` tool. One column since 2026-11-27: inbox
+  (`scratch` and idea/todo items), discussions (with the decisions folded in), plan
+  (features by state: building, to test, next, done; the user ticks "works" to move a
+  to-test feature to done), links (`links`: the other Joma artifacts, `title`, `href`,
+  `text`, `order`; add new Joma pages there). Collections: `items` (features, todos,
+  ideas, designs, discussions with their `questions`; optional `order` sorts the plan),
+  `decisions`, `scratch` (the user's quick ideas), `notes` (per item, `by: "you" |
+  "claude"`), `links`, `meta/state` (`lastReview`).
   When the user says "review the dev board": read new scratch notes, notes from the user
   and items or decisions changed since `lastReview`; copy answers into the discussion
   files' `A:` lines, move decisions the user marked decided into **Decided**, rewrite
