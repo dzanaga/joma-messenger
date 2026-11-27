@@ -40,5 +40,20 @@ with `gh` or a file; step 2 built in 0.5.3.dev1: the restore screen and new devi
   device as new, `joma devices keep` keeps it; the restored profile shows none as new.
   The devices tab's card was not seen (the host's screen was off, so the nest did not
   draw).
-- **Next.** The badge and adding by GitHub name (step 3), automatic backups (5), the
-  GitHub App (4), restore on Android.
+- **Badge** (step 3, 0.5.3.dev2, `crates/joma/src/github.rs`). Our gist `joma.json` lists
+  only the accounts switched public (user, 2026-11-27: backed up is not public), written
+  with `gh api gists`; the profile line `X-JOMA-GITHUB:<login>` is written into
+  `profile.vcf` and sent with `updateProfile` (which keeps unknown lines), and put back
+  at start when missing (question 14). Contacts' claims are read with `curl` from the
+  public API without a login (60 calls an hour), matched on the numeric `github_id`,
+  cached per account in `$XDG_DATA_HOME/joma/github/<account>.json`, checked again
+  after 3 days. A contact added by GitHub name is pinned to the login; when its gist
+  lists other accounts, the conversation offers to add them (question 8, user
+  2026-11-27). `JOMA_GITHUB_API=http://127.0.0.1:…` points a test profile at a stand-in.
+- **Tested** (2026-11-27, test profile `links` with a local stand-in API): `joma github
+  find` (JSON, and an unknown user), `joma github add` pins and verifies the contact;
+  after the stand-in's gist listed another account, the restart's check dropped the
+  badge and offered the new one. Publishing to a real gist was not run (it would write
+  to your GitHub); the header, the add card and the banner were not seen on screen (the
+  host's screen was off).
+- **Next.** Automatic backups (5), the GitHub App (4), restore on Android.

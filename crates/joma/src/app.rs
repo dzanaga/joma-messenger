@@ -101,6 +101,16 @@ pub enum AppMsg {
     SearchDone(String, anyhow::Result<String>),
     /// A link preview was fetched (or failed) for this video id.
     Preview(String),
+    /// A contact's GitHub claim was checked: account, contact, login, and the login's id
+    /// and gist (`None`: no such login).
+    GithubChecked(String, String, String, Result<Option<(u64, Option<crate::github::Profile>)>, String>),
+    /// "gh:<login>" in the add field: what that login lists.
+    GithubFound(String, Result<Option<(u64, Option<crate::github::Profile>)>, String>),
+    /// Our account was listed in (Some label) or taken off (None) our gist: account, Jami
+    /// id, and our login or why not.
+    GithubPublished(String, String, bool, Result<String, String>),
+    /// A contact was added by GitHub name (from the command line): account, Jami id, login, id.
+    GithubPin(String, String, String, u64),
     /// The backup repo's accounts, for the restore screen (or why not).
     RestoreList(Result<(String, Vec<joma_backup::Entry>), String>),
     /// A backup or restore finished: was it a restore, and what to tell the user.
@@ -532,6 +542,14 @@ pub struct Joma {
     pub password_ask: Option<PasswordAsk>,
     /// The welcome screen's restore from the backup.
     pub restoring: Option<RestoreView>,
+    /// GitHub badges and pinned contacts of the open account.
+    pub gh: crate::github::Store,
+    /// Contacts being checked against GitHub now.
+    pub gh_checking: HashSet<String>,
+    /// "gh:<login>" in the add field: the login, its id and what its gist lists.
+    pub gh_found: Option<(String, u64, Vec<crate::github::Listed>)>,
+    /// Our gist is being written.
+    pub gh_busy: bool,
     /// Devices that joined the account without this machine linking them: keep / revoke.
     pub new_devices: Vec<String>,
     /// When this machine last linked a device, or an account arrived here: devices that
@@ -821,6 +839,10 @@ impl Joma {
             sync: Default::default(),
             password_ask: None,
             restoring: None,
+            gh: Default::default(),
+            gh_checking: HashSet::new(),
+            gh_found: None,
+            gh_busy: false,
             new_devices: Vec::new(),
             last_link: None,
             sync_view: None,
@@ -910,6 +932,8 @@ impl Joma {
         self.gate = Gate::Ready;
         self.adding_account = None;
         self.new_devices.clear();
+        self.gh = crate::github::Store::load(&account);
+        self.gh_found = None;
         if self.restoring.as_ref().is_some_and(|r| r.working) {
             self.restoring = None;
         }
@@ -985,6 +1009,79 @@ impl Joma {
     /// The sync report (folders, devices, paths), for the socket (blocking).
     pub fn sync_report(&self) -> crate::sync::Report {
         self.sync.snapshot().report(&self.model.account)
+    }
+
+    /// `joma github publish|unpublish|find|add`: GitHub is slow, so off the UI thread.
+    fn github_ipc(&mut self, p: crate::ipc::Pending, cx: &mut Context<Self>) {
+        let Request::Github { what, arg, label, json } = p.request.clone() else { return };
+        let reply = p.reply;
+        if self.gate != Gate::Ready {
+            let _ = reply.send(Reply::Error { message: "Joma is not on an account now".into() });
+            return;
+        }
+        let (tx, account, me) = (self.tx.clone(), self.model.account.clone(), self.model.me.clone());
+        match what.as_str() {
+            "publish" | "unpublish" => {
+                let on = what == "publish";
+                let name = if self.model.username.is_empty() { self.model.my_name.clone() } else { self.model.username.clone() };
+                let label = label.unwrap_or(name);
+                self.gh_busy = true;
+                std::thread::spawn(move || {
+                    let r = crate::github::publish(&me, on.then_some(label.as_str())).map_err(|e| format!("{e:#}"));
+                    let _ = reply.send(match &r {
+                        Ok((login, p)) => Reply::Text {
+                            text: format!("github.com/{login}: {}", if p.accounts.is_empty() { "no accounts listed".to_owned() } else { p.accounts.iter().map(|a| a.label.clone()).collect::<Vec<_>>().join(", ") }),
+                        },
+                        Err(e) => Reply::Error { message: e.clone() },
+                    });
+                    let _ = tx.unbounded_send(AppMsg::GithubPublished(account, me, on, r.map(|(l, _)| l)));
+                });
+            }
+            "find" | "add" => {
+                let login = arg.unwrap_or_default();
+                let add = what == "add";
+                let _ = cx;
+                std::thread::spawn(move || {
+                    let r = match crate::github::fetch(&login) {
+                        Err(e) => Reply::Error { message: format!("{e:#}") },
+                        Ok(None) => Reply::Error { message: format!("no GitHub user {login}") },
+                        Ok(Some((id, p))) => {
+                            let listed: Vec<crate::github::Listed> = p.filter(|p| p.github_id == id).map(|p| p.accounts).unwrap_or_default();
+                            if !add {
+                                if json {
+                                    Reply::Text { text: serde_json::json!({"login": login, "github_id": id, "accounts": listed}).to_string() }
+                                } else if listed.is_empty() {
+                                    Reply::Text { text: format!("github.com/{login} lists no Joma accounts") }
+                                } else {
+                                    Reply::Text { text: listed.iter().map(|a| format!("{}  {}", a.label, a.jami)).collect::<Vec<_>>().join("\n") }
+                                }
+                            } else {
+                                let pick: Vec<&crate::github::Listed> = match &label {
+                                    Some(l) => listed.iter().filter(|a| a.label.eq_ignore_ascii_case(l) || a.jami.starts_with(l.as_str())).collect(),
+                                    None => listed.iter().collect(),
+                                };
+                                match pick.as_slice() {
+                                    [] if listed.is_empty() => Reply::Error { message: format!("github.com/{login} lists no Joma accounts") },
+                                    [] => Reply::Error { message: "no listed account has that label (joma github find)".into() },
+                                    [one] => match joma_jami::add_contact(&account, &one.jami) {
+                                        Ok(()) => {
+                                            let _ = tx.unbounded_send(AppMsg::GithubPin(account.clone(), one.jami.clone(), login.clone(), id));
+                                            Reply::Text { text: format!("added {} (github.com/{login})", if one.label.is_empty() { &one.jami } else { &one.label }) }
+                                        }
+                                        Err(e) => Reply::Error { message: format!("could not add: {e}") },
+                                    },
+                                    _ => Reply::Error { message: format!("github.com/{login} lists several accounts: name one (joma github add {login} <label>)") },
+                                }
+                            }
+                        }
+                    };
+                    let _ = reply.send(r);
+                });
+            }
+            _ => {
+                let _ = reply.send(Reply::Error { message: "joma github publish|unpublish|find|add".into() });
+            }
+        }
     }
 
     /// A `joma backup` / `joma restore` arrived: ask for the password in the window.
@@ -1163,6 +1260,7 @@ impl Joma {
         }
         self.model.devices = joma_jami::known_devices(&acc).unwrap_or_default().into_iter().collect();
         self.note_devices();
+        self.github_upkeep();
     }
 
     /// Devices that joined without this machine linking them become "new" (keep / revoke).
@@ -1191,6 +1289,134 @@ impl Joma {
         let mut keep: std::collections::BTreeSet<String> = seen.unwrap_or_default();
         keep.extend(now.into_iter().filter(|d| !self.new_devices.contains(d)));
         crate::seen::save(&acc, &keep);
+    }
+
+    /// A profile arrived: check its GitHub line (our own: make sure it is there).
+    fn github_profile(&mut self, uri: String, vcard: &str) {
+        if uri == self.model.me || uri.is_empty() {
+            return;
+        }
+        let text = crate::model::vcard_text(vcard);
+        match crate::github::vcard_login(&text) {
+            Some(login) if self.gh.stale(&uri, &login) => self.github_check(uri, login),
+            Some(_) => {}
+            // The line is gone: so is the badge (a pinned contact keeps its login).
+            None => {
+                if let Some(k) = self.gh.contacts.get_mut(&uri) {
+                    if k.verified && !k.pinned {
+                        k.verified = false;
+                        self.gh.save(&self.model.account);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Check a contact's GitHub claim off the UI thread.
+    fn github_check(&mut self, uri: String, login: String) {
+        if !self.gh_checking.insert(uri.clone()) {
+            return;
+        }
+        let (tx, account) = (self.tx.clone(), self.model.account.clone());
+        std::thread::spawn(move || {
+            let r = crate::github::fetch(&login).map_err(|e| format!("{e:#}"));
+            let _ = tx.unbounded_send(AppMsg::GithubChecked(account, uri, login, r));
+        });
+    }
+
+    /// At start: our public account keeps its profile line (linking drops it), and
+    /// contacts are checked again every few days.
+    fn github_upkeep(&mut self) {
+        let me = self.model.me.clone();
+        if let Some(login) = self.gh.mine.get(&me).cloned() {
+            let has = self.account_dir().and_then(|d| std::fs::read_to_string(d.join("profile.vcf")).ok()).and_then(|v| crate::github::vcard_login(&v));
+            if has.as_deref() != Some(login.as_str()) {
+                self.set_github_line(Some(&login));
+            }
+        }
+        let due: Vec<(String, String)> = self
+            .gh
+            .contacts
+            .iter()
+            .filter(|(_, k)| (k.verified || k.pinned) && crate::github::now().saturating_sub(k.checked) > crate::github::RECHECK)
+            .map(|(u, k)| (u.clone(), k.login.clone()))
+            .collect();
+        for (uri, login) in due {
+            self.github_check(uri, login);
+        }
+    }
+
+    /// Put our `X-JOMA-GITHUB` line in the profile (or take it out) and send the profile
+    /// to contacts again.
+    fn set_github_line(&mut self, login: Option<&str>) {
+        let Some(path) = self.account_dir().map(|d| d.join("profile.vcf")) else { return };
+        let vcf = std::fs::read_to_string(&path).unwrap_or_else(|_| "BEGIN:VCARD\r\nVERSION:2.1\r\nEND:VCARD\r\n".into());
+        if std::fs::write(&path, crate::github::vcard_with(&vcf, login)).is_ok() {
+            let _ = joma_jami::update_profile(&self.model.account, &self.model.my_name);
+        }
+    }
+
+    /// The accounts tab's switch: list this account in our public gist, or not.
+    pub fn github_publish(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.gh_busy {
+            return;
+        }
+        self.gh_busy = true;
+        let (tx, account, uri) = (self.tx.clone(), self.model.account.clone(), self.model.me.clone());
+        let label = if self.model.username.is_empty() { self.model.my_name.clone() } else { self.model.username.clone() };
+        std::thread::spawn(move || {
+            let r = crate::github::publish(&uri, on.then_some(label.as_str())).map(|(login, _)| login).map_err(|e| format!("{e:#}"));
+            let _ = tx.unbounded_send(AppMsg::GithubPublished(account, uri, on, r));
+        });
+        self.show_flash(if on { "listing this account on GitHub…" } else { "taking this account off GitHub…" }, cx);
+    }
+
+    /// "gh:<login>" in the add field: look the login up.
+    fn github_lookup(&mut self, login: String, cx: &mut Context<Self>) {
+        if !crate::github::valid_login(&login) {
+            return self.show_flash(format!("{login} is not a GitHub name"), cx);
+        }
+        self.gh_found = None;
+        let tx = self.tx.clone();
+        let l = login.clone();
+        std::thread::spawn(move || {
+            let r = crate::github::fetch(&l).map_err(|e| format!("{e:#}"));
+            let _ = tx.unbounded_send(AppMsg::GithubFound(l, r));
+        });
+        self.show_flash(format!("looking up github.com/{login}…"), cx);
+    }
+
+    /// Add a contact found through GitHub, pinned to that login.
+    pub fn add_github(&mut self, login: &str, github_id: u64, uri: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if let Err(e) = joma_jami::add_contact(&self.model.account, uri) {
+            return self.show_flash(format!("could not add: {e}"), cx);
+        }
+        let acc = self.model.account.clone();
+        let k = self.gh.contacts.entry(uri.to_owned()).or_default();
+        k.login = login.to_owned();
+        k.github_id = github_id;
+        k.pinned = true;
+        k.verified = true;
+        k.checked = crate::github::now();
+        // A pinned contact that moved: the old account no longer waits for an answer.
+        for k in self.gh.contacts.values_mut() {
+            if k.login == login {
+                k.moved_to.retain(|l| l.jami != uri);
+            }
+        }
+        self.gh.save(&acc);
+        self.gh_found = None;
+        self.show_flash(format!("added github.com/{login} · the conversation starts when they accept"), cx);
+        self.set_mode(Mode::Chat, window, cx);
+    }
+
+    /// Leave a pinned contact on its old account.
+    pub fn dismiss_moved(&mut self, uri: &str, cx: &mut Context<Self>) {
+        if let Some(k) = self.gh.contacts.get_mut(uri) {
+            k.moved_to.clear();
+            self.gh.save(&self.model.account);
+        }
+        cx.notify();
     }
 
     /// Keep a new device: it is ours.
@@ -1348,7 +1574,7 @@ impl Joma {
             (Gate::Onboarding, _) if self.onboard_name.is_none() => ("onboarding", "Your name (shown to your contacts)"),
             (Gate::Onboarding, _) => ("onboarding-user", "A username, so contacts can find you (Enter alone skips)"),
             (_, Mode::Username) => ("username", "Your username, then Enter"),
-            (_, Mode::Add) => ("add", "Jami username or 40-digit ID, then Enter"),
+            (_, Mode::Add) => ("add", "Jami username, 40-digit ID or gh:<GitHub name>, then Enter"),
             (_, Mode::Search) => ("search", "Filter conversations"),
             (_, Mode::LinkDevice) => ("link", "The jami-auth:// code the new device shows, then Enter"),
             (_, Mode::DeviceName) => ("device-name", "A name for this device, then Enter"),
@@ -1505,6 +1731,7 @@ impl Joma {
             }
             AppMsg::Ipc(p) => match p.request {
                 Request::Backup { .. } | Request::Restore { .. } => self.ask_password(p, window, cx),
+                Request::Github { .. } => self.github_ipc(p, cx),
                 Request::BackupList | Request::GithubStatus => {
                     // gh talks to GitHub: off the UI thread.
                     let list = matches!(p.request, Request::BackupList);
@@ -1525,6 +1752,74 @@ impl Joma {
                     let _ = p.reply.send(reply);
                 }
             },
+            AppMsg::GithubChecked(account, uri, login, r) => {
+                self.gh_checking.remove(&uri);
+                if account != self.model.account {
+                    return;
+                }
+                let (id, v) = match r {
+                    Ok(Some((id, p))) => (id, crate::github::verdict(p.as_ref(), id, &uri)),
+                    Ok(None) => (0, crate::github::Verdict::Missing),
+                    Err(e) => {
+                        tracing::warn!("GitHub check of {login}: {e}");
+                        return;
+                    }
+                };
+                let was = self.gh.badge(&uri).is_some();
+                self.gh.record(&uri, &login, id, &v);
+                self.gh.save(&account);
+                let name = self.model.name_of(&uri);
+                if was && self.gh.badge(&uri).is_none() {
+                    self.show_flash(format!("{name}: the GitHub badge is gone (github.com/{login} no longer lists this account)"), cx);
+                }
+                if self.gh.contacts.get(&uri).is_some_and(|k| !k.moved_to.is_empty()) {
+                    self.show_flash(format!("{name}'s GitHub now names another Jami account: see the conversation"), cx);
+                }
+                cx.notify();
+            }
+            AppMsg::GithubFound(login, r) => {
+                match r {
+                    Ok(Some((id, Some(p)))) if p.github_id == id && !p.accounts.is_empty() => {
+                        self.gh_found = Some((login, id, p.accounts));
+                    }
+                    Ok(Some(_)) => self.show_flash(format!("github.com/{login} has no Joma accounts listed"), cx),
+                    Ok(None) => self.show_flash(format!("no GitHub user {login}"), cx),
+                    Err(e) => self.show_flash(e, cx),
+                }
+                cx.notify();
+            }
+            AppMsg::GithubPublished(account, uri, on, r) => {
+                self.gh_busy = false;
+                match r {
+                    Ok(login) => {
+                        if account == self.model.account {
+                            if on {
+                                self.gh.mine.insert(uri.clone(), login.clone());
+                            } else {
+                                self.gh.mine.remove(&uri);
+                            }
+                            self.gh.save(&account);
+                            self.set_github_line(on.then_some(login.as_str()));
+                        }
+                        self.show_flash(if on { format!("contacts now see ✓ github.com/{login}") } else { "the GitHub badge is off; github.com/… no longer lists this account".to_owned() }, cx);
+                    }
+                    Err(e) => self.show_flash(format!("GitHub: {e}"), cx),
+                }
+                cx.notify();
+            }
+            AppMsg::GithubPin(account, uri, login, id) => {
+                if account == self.model.account {
+                    let k = self.gh.contacts.entry(uri.clone()).or_default();
+                    k.login = login;
+                    k.github_id = id;
+                    k.pinned = true;
+                    k.verified = true;
+                    k.checked = crate::github::now();
+                    k.moved_to.clear();
+                    self.gh.save(&account);
+                }
+                cx.notify();
+            }
             AppMsg::RestoreList(r) => {
                 if let Some(v) = self.restoring.as_mut() {
                     v.loading = false;
@@ -1876,6 +2171,11 @@ impl Joma {
         if let Event::Presence { account, uri, online: false } = &ev {
             if *account == acc {
                 self.presence.gone(bare_uri(uri));
+            }
+        }
+        if let Event::ProfileReceived { account, from, vcard } = &ev {
+            if *account == acc {
+                self.github_profile(bare_uri(from).to_owned(), vcard);
             }
         }
         let changed = self.model.apply(&ev);
@@ -4294,7 +4594,9 @@ impl Joma {
         }
         match self.mode {
             Mode::Add => {
-                if text.len() == 40 && text.chars().all(|c| c.is_ascii_hexdigit()) {
+                if let Some(login) = text.strip_prefix("gh:").or_else(|| text.strip_prefix("github:")) {
+                    self.github_lookup(login.trim().to_owned(), cx);
+                } else if text.len() == 40 && text.chars().all(|c| c.is_ascii_hexdigit()) {
                     self.add_contact(text, window, cx);
                 } else if !text.is_empty() {
                     self.adding = Some(text.clone());
@@ -4858,7 +5160,7 @@ impl Joma {
                 }
             }
             // Answered from AppMsg::Ipc (a password or the network).
-            Request::Backup { .. } | Request::Restore { .. } | Request::BackupList | Request::GithubStatus => {
+            Request::Backup { .. } | Request::Restore { .. } | Request::BackupList | Request::GithubStatus | Request::Github { .. } => {
                 Reply::Error { message: "busy".into() }
             }
             Request::Connections { to, json } => {

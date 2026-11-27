@@ -3,6 +3,26 @@
 use super::*;
 
 impl Joma {
+    /// A contact added by GitHub name whose gist now names another Jami account: offer to
+    /// add that one (user, 2026-11-27: keep in touch with the person).
+    fn github_moved(&self, t: &Theme, conv: &Conversation, cx: &mut Context<Self>) -> Option<gpui::Div> {
+        let uri = conv.peers.first().filter(|_| conv.peers.len() == 1)?;
+        let k = self.gh.contacts.get(uri).filter(|k| !k.moved_to.is_empty())?;
+        let mut row = div().flex().flex_wrap().items_center().gap(px(6.)).px(px(S3 + 4.)).py(px(6.)).bg(t.raised).child(
+            div().flex_1().min_w(px(0.)).text_color(t.bright).child(format!("github.com/{} now names another Jami account", k.login)),
+        );
+        for l in &k.moved_to {
+            let (login, id, jami) = (k.login.clone(), k.github_id, l.jami.clone());
+            let label = if l.label.is_empty() { format!("{}…", &l.jami[..l.jami.len().min(8)]) } else { l.label.clone() };
+            row = row.child(
+                button(SharedString::from(format!("gh-moved-{}", l.jami)), G_USER_PLUS, &format!("add {label}"), t, true)
+                    .on_click(cx.listener(move |this, _, window, cx| this.add_github(&login, id, &jami, window, cx))),
+            );
+        }
+        let u = uri.clone();
+        Some(row.child(button("gh-moved-no", G_TIMES, "", t, false).on_click(cx.listener(move |this, _, _, cx| this.dismiss_moved(&u, cx)))))
+    }
+
     /// Above the message field while answering or editing: what, and a way out.
     pub(super) fn reply_strip(&self, t: &Theme, conv: &Conversation, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (id, editing) = match (&self.editing, &self.replying) {
@@ -662,7 +682,12 @@ impl Joma {
                     .when(fav, |d| d.child(div().flex_none().text_size(px(t.size - 3.)).text_color(t.yellow).child(G_STAR)))
                     .child(div().flex_1().min_w(px(0.)).truncate().text_size(px(t.size - 2.)).text_color(t.muted).child({
                         let who = if peers == conv.title { peer_ids } else { format!("{peers} · {peer_ids}") };
-                        status.unwrap_or(who)
+                        let line = status.unwrap_or(who);
+                        // The ✓ GitHub badge: the contact's gist lists this Jami account.
+                        match conv.peers.first().filter(|_| conv.peers.len() == 1).and_then(|p| self.gh.badge(p)) {
+                            Some(login) => format!("✓ github.com/{login} · {line}"),
+                            None => line,
+                        }
                     })),
             )
             .child(
@@ -741,6 +766,7 @@ impl Joma {
             .drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(accent_bg))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach(paths.paths().to_vec(), cx)))
             .child(header)
+            .children(self.github_moved(t, &conv, cx))
             .when_some(call_panel, |d, p| d.child(p))
             .children(direct)
             .children(watch)

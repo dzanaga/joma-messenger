@@ -133,6 +133,22 @@ password makes the backup useless. `joma backup list`, `joma github status`.
   **revoke** (also for a device linked from another of your devices), until you choose.
   `joma devices [--json]` lists them, `joma devices keep <name|id>` keeps one.
 
+## The ✓ GitHub badge
+- **Show yours:** Accounts → **show a GitHub badge** lists the open account in a public
+  gist `joma.json` on your GitHub (through your `gh` login) and puts your GitHub name in
+  the profile your contacts receive. Only the accounts you switch on are listed: one can
+  be backed up and stay private. **hide** takes it off again (the gist goes when it
+  lists nothing). `joma github publish [label]`, `joma github unpublish`.
+- **See theirs:** a contact whose profile names a GitHub user, and whose gist lists that
+  Jami account, shows **✓ github.com/<name>** in the conversation's header. Checked when
+  the profile arrives and again every 3 days, without a GitHub login.
+- **Add by GitHub name:** type `gh:<name>` in the add field: Joma shows the accounts that
+  user lists and adds the one you pick. `joma github find <name> [--json]`, `joma github
+  add <name> [label]`.
+- **When they move:** someone added by GitHub name stays tied to that name. If their gist
+  later lists another Jami account (a lost or new one), their conversation offers to add
+  it.
+
 ## Removing chats
 The bin in a conversation's header takes it off the lists (window, bar, notifications);
 it stays in Jami, and its messages keep arriving quietly. The bin next to + in the chats
@@ -315,7 +331,7 @@ Ctrl+. and Alt+1…9 in the window or the panel; `joma send` and `joma send-quic
 
 ## Command line
 `joma chat <to> [n]` (JSON), `joma call <to> [--video]`, `joma share <to> [--source …]`, `joma watch <to>`,
-`joma send-file <to> [path]`, `joma open <to>`, `joma block <to>`, `joma unblock <to>`, `joma link`, `joma link-device <code>`, `joma accounts`, `joma account <name>`, `joma devices [keep <dev>]`, `joma ui settings|profile|keys|menu|chat-menu|emoji|quick|close`, `joma connections [<to>] [--json]`, `joma sync status|on|off|add|remove`, `joma backup [list]`, `joma restore`, `joma github status`, `joma quit`, `joma probe [--bench]` (the
+`joma send-file <to> [path]`, `joma open <to>`, `joma block <to>`, `joma unblock <to>`, `joma link`, `joma link-device <code>`, `joma accounts`, `joma account <name>`, `joma devices [keep <dev>]`, `joma ui settings|profile|keys|menu|chat-menu|emoji|quick|close`, `joma connections [<to>] [--json]`, `joma sync status|on|off|add|remove`, `joma backup [list]`, `joma restore`, `joma github status|publish|unpublish|find|add`, `joma quit`, `joma probe [--bench]` (the
 GPUs the desktop share can use).
 
 ## Install
@@ -352,6 +368,10 @@ notifications); calls, voice messages and files not yet tried. Design:
 `docs/design/07-android.md`.
 
 ## Log
+- 0.5.3.dev2 (2026-11-27): the ✓ GitHub badge: show yours from Accounts (a public gist
+  lists only the accounts you choose), see your contacts' in the conversation header, add
+  people with `gh:<name>`, and an offer to add the new account when someone you added by
+  GitHub name moves; `joma github publish|unpublish|find|add`.
 - 0.5.3.dev1 (2026-11-27): restore from your GitHub backup on the welcome screen (pick
   the accounts, one password); devices that join your account from a backup or another
   device are shown as new, to keep or revoke; `joma devices`, `joma devices keep`; the

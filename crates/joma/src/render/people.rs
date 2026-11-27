@@ -186,6 +186,27 @@ impl Joma {
                         .on_click(cx.listener(|this, _, window, cx| this.remove_account(window, cx))),
                 ),
         )
+        // The ✓ GitHub badge: public, apart from the (private) backup.
+        .child({
+            let public = self.gh.mine.get(&self.model.me).cloned();
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .px(px(10.))
+                .py(px(4.))
+                .child(div().flex_1().min_w(px(0.)).text_size(px(t.size - 2.)).text_color(t.muted).child(match &public {
+                    Some(login) => format!("contacts see ✓ github.com/{login}"),
+                    None => "no GitHub badge: contacts don't see who you are on GitHub".to_owned(),
+                }))
+                .child(
+                    button("gh-publish", G_CHECK, if self.gh_busy { "…" } else if public.is_some() { "hide" } else { "show a GitHub badge" }, t, public.is_some())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            let on = !this.gh.mine.contains_key(&this.model.me);
+                            this.github_publish(on, cx);
+                        })),
+                )
+        })
     }
 
     /// This account's devices, and linking a new one.

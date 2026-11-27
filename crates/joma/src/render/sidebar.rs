@@ -195,7 +195,26 @@ impl Joma {
                             Mode::RemoveAccount => "type delete, then enter · esc: keep it",
                             Mode::Password => "enter: continue · esc: cancel",
                             _ => "",
-                        })),
+                        }))
+                        .when_some(self.gh_found.clone().filter(|_| self.mode == Mode::Add), |d, (login, id, listed)| {
+                            // What github.com/<login> lists: nothing is sent until one is chosen.
+                            let mut card = div().flex().flex_col().gap(px(4.)).mt(px(6.)).p(px(8.)).bg(t.raised).child(
+                                div().text_color(t.bright).child(format!("✓ github.com/{login}")),
+                            );
+                            for a in listed {
+                                let (l, j) = (login.clone(), a.jami.clone());
+                                let label = if a.label.is_empty() { "account".to_owned() } else { a.label.clone() };
+                                card = card.child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(6.))
+                                        .child(div().flex_1().min_w(px(0.)).truncate().child(format!("{label} · {}…", &a.jami[..a.jami.len().min(8)])))
+                                        .child(button(SharedString::from(format!("gh-add-{}", a.jami)), G_USER_PLUS, "add", t, true).on_click(cx.listener(move |this, _, window, cx| this.add_github(&l, id, &j, window, cx)))),
+                                );
+                            }
+                            d.child(card)
+                        }),
                 )
             })
             .child(match self.tab {

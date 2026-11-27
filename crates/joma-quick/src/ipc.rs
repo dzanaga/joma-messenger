@@ -103,6 +103,18 @@ pub enum Request {
     },
     /// The GitHub connection and the backup repo.
     GithubStatus,
+    /// The ✓ GitHub badge: `publish` / `unpublish` the open account in our public gist
+    /// (`label` its label), `find` a login's accounts (`arg`), `add` one as a contact
+    /// (`arg` the login, `label` which account when it lists several).
+    Github {
+        what: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        arg: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+        #[serde(default)]
+        json: bool,
+    },
     /// This account's devices (`list`, `json` for JSON), or `keep` a new one (`arg`: its
     /// name or id), one that joined without this machine linking it.
     Devices {
@@ -120,7 +132,7 @@ impl Request {
     /// Requests that wait for the user (a password typed in Joma's window) or for the
     /// network.
     pub fn slow(&self) -> bool {
-        matches!(self, Request::Backup { .. } | Request::Restore { .. } | Request::BackupList | Request::GithubStatus)
+        matches!(self, Request::Backup { .. } | Request::Restore { .. } | Request::BackupList | Request::GithubStatus | Request::Github { .. })
     }
 }
 

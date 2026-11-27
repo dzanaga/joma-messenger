@@ -14,6 +14,7 @@ mod backup;
 mod composer;
 mod conninfo;
 mod desk;
+mod github;
 mod hypr;
 mod ipc;
 mod media;
@@ -83,6 +84,13 @@ const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); -
        joma restore [ACCT…] [--file PATH]
                                  restore accounts from the repo or a file
        joma github status        the GitHub login and the backup repo
+       joma github publish [label] | unpublish
+                                 show contacts a ✓ GitHub badge on the open account (it is
+                                 listed in your public gist joma.json), or stop
+       joma github find <login> [--json]
+                                 the Joma accounts a GitHub user lists
+       joma github add <login> [label]
+                                 add a GitHub user's Joma account as a contact
        joma quit                 quit Joma (closing the window keeps it running)
        joma probe [--bench [--display-gpu]]
                                  the GPUs and codecs the desktop share can use
@@ -108,6 +116,20 @@ fn cli(args: &[String]) -> Option<i32> {
         Some("draw") if args.len() == 2 => Request::Draw { what: args[1].clone() },
         Some("ui") if args.len() == 2 => Request::Ui { what: args[1].clone() },
         Some("toggle") => Request::Toggle,
+        Some("github") if matches!(args.get(1).map(String::as_str), Some("publish" | "unpublish" | "find" | "add")) => {
+            let what = args[1].clone();
+            let rest: Vec<String> = args[2..].iter().filter(|a| *a != "--json").cloned().collect();
+            let json = args.iter().any(|a| a == "--json");
+            match what.as_str() {
+                "publish" => Request::Github { what, arg: None, label: rest.first().cloned(), json },
+                "unpublish" => Request::Github { what, arg: None, label: None, json },
+                _ if rest.is_empty() => {
+                    eprintln!("joma github {what} <login>");
+                    return Some(2);
+                }
+                _ => Request::Github { what, arg: rest.first().cloned(), label: rest.get(1).cloned(), json },
+            }
+        }
         Some("backup") if args.get(1).map(String::as_str) == Some("list") => Request::BackupList,
         Some(c @ ("backup" | "restore")) => {
             let (mut accounts, mut all, mut file) = (Vec::new(), false, None);

@@ -236,7 +236,7 @@ pub fn vcard_name(vcard: &str) -> Option<String> {
 }
 
 /// The vCard of a `ProfileReceived` event: the daemon passes the file's path.
-fn vcard_text(vcard: &str) -> String {
+pub fn vcard_text(vcard: &str) -> String {
     if !vcard.contains('\n') && std::path::Path::new(vcard).is_file() {
         std::fs::read_to_string(vcard).unwrap_or_default()
     } else {
