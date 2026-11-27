@@ -90,6 +90,8 @@ prepare() {
         patch -s -p1 --forward --no-backup-if-mismatch -d "$WORK/jami-android" < "$p"
     done
     echo "sdk.dir=$ANDROID_HOME" > "$WORK/jami-android/local.properties"
+    # The daemon's Java bindings (net.jami.daemon), as Jami's compile.sh makes them.
+    (cd "$SRC/daemon/bin/jni" && PACKAGEDIR="$WORK/jami-android/libjamiclient/src/main/java" ./make-swig.sh >/dev/null)
 }
 
 gradle() {
