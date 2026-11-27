@@ -106,8 +106,10 @@ impl Syncthing {
         std::fs::create_dir_all(home)?;
         if !home.join("config.xml").exists() {
             let out = Command::new("syncthing")
-                .args(["generate", "--no-default-folder"])
+                .arg("generate")
                 .arg(format!("--home={}", home.display()))
+                // v2 has no --no-default-folder flag; the variable does it.
+                .env("STNODEFAULTFOLDER", "1")
                 .output()
                 .context("syncthing is not installed")?;
             if !out.status.success() {

@@ -328,7 +328,8 @@ notifications); calls, voice messages and files not yet tried. Design:
 - Android 0.1.0.dev1 (2026-11-27): the first APK, Jami Android with joma's skin (see
   "On the phone").
 - 0.5.2.dev11 (2026-11-27): folder sync between your own devices (Joma's own Syncthing
-  over Jami tunnels; built and unit-tested, not yet tried between two devices);
+  over Jami tunnels; two real Syncthing instances sync a file in the test, Joma to Joma
+  over Jami not yet tried);
   connection info on contacts and devices and `joma
   connections` (path: relayed, Tailscale, local, direct; tested between two throwaway
   accounts, which connected over the local network); received files up to 200 MB
