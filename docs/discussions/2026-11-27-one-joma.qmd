@@ -1,0 +1,134 @@
+---
+title: "One Joma on every device"
+date: 2026-11-27
+lang: en
+---
+
+The goal (user, 2026-11-27): Joma replaces Signal, Telegram and Discord for you and
+your friends, on every device: messages, voice and video messages, calls, screen
+sharing. Desktop and phone (Android now, iOS to add) grow together as one app; the
+compact desktop panel looks like the phone, and the desktop adds what a phone does not
+need (desktop share, remote control, agents, the bar). The board's **Platforms**
+section holds the steps and the table of what runs where.
+
+Where we are: the desktop is Joma's own app (Rust, GPUI, libjami in process). Joma for
+Android is Jami Android with Joma's skin (0.1.0.dev2: the 0.5.2 look, square, the
+desktop's Omarchy palette, flat bubbles, white icons); its screens and service layer
+are Jami's. There is no iOS build. Joma's own protocols (desktop share, watching
+together, folder sync, transcripts to come) exist only on the desktop.
+
+# 1. The yardstick
+
+Proposal: a **daily bar** both desktop and Android must pass before anything else, the
+things that make you leave Signal: messages and groups, voice and video messages
+(record and play), pictures and files, audio and video calls (one to one and groups),
+notifications that arrive when the phone sleeps, history on a new device, and from the
+desktop a screen share the phone can watch. Joma 1.0 = the bar on desktop and Android.
+
+- [ ] A:
+
+# 2. One layout: compact desktop = phone
+
+Proposal: the panel under the bar becomes the phone's layout: one column, the list,
+then one conversation (back to return), a bottom bar with the rail's entries (chats,
+contacts, devices, settings), the same rows, bubbles, composer, voice bubble and call
+screen. The full window is that layout with the rail and the list beside the chat.
+Desktop-only actions (share, watch together, quick messages, agents) are extra icons
+the phone does not show.
+
+- [ ] A:
+
+# 3. Joma's own screens on the phone
+
+Today the phone shows Jami's screens with Joma's colours, so it cannot match the
+desktop's layout (bottom bar, voice bubble, transcripts, Joma's settings). Proposal:
+replace them one at a time with Joma's (Kotlin, Jetpack Compose) on Jami Android's
+service layer: the conversation list and the conversation first, then the call screen;
+Jami's stay for the account wizard and settings until their turn.
+
+- [ ] A:
+
+# 4. Shared code for Joma's own parts
+
+What only Joma has (the desktop share viewer, watching together, transcript records,
+device roles, the Joma conversation) would otherwise be written three times (Rust,
+Kotlin, Swift). Proposal: these move into Rust crates with a small API that Android
+and iOS call through UniFFI (Mozilla's bindings generator, used by Firefox and
+Matrix's apps); each platform keeps its own interface. GPUI does not run on phones, so
+the screens stay native.
+
+- [ ] A:
+
+# 5. Notifications on a sleeping phone
+
+Android keeps a background service today (a permanent notification, some battery).
+iOS allows nothing in the background: only Apple's push wakes an app. Jami's push goes
+through Savoir-faire Linux's proxy with their Apple and Google keys, which a renamed
+app cannot use. Proposal: your always-on mini PC runs a DHT proxy with push
+(OpenDHT's proxy does it) for your devices: UnifiedPush (through ntfy) for Android
+instead of the service, Apple's push for iOS (needs Joma's own key, so a paid Apple
+developer account).
+
+- [ ] A:
+
+# 6. iOS
+
+Like Android: Jami iOS (Swift, GPL) with Joma's skin, from pinned sources with an
+overlay. Limits: it builds only on a Mac with Xcode; installing needs an Apple account
+(free: the app must be re-signed every 7 days; paid, 99 USD a year: TestFlight, push).
+Questions: is there a Mac to build on (yours, a friend's, a CI runner)? A paid account?
+Proposal: after Android passes the daily bar.
+
+- [ ] A:
+
+# 7. Watching a desktop share from the phone
+
+Joma's desktop share (gliff's H.264 over a Jami tunnel) has no viewer on the phone;
+with a phone the share falls back to Jami's own. Proposal: a viewer on Android (the
+stream decoded by the phone's hardware, `MediaCodec`) with zoom and pan, later touch as
+the remote pointer. The phone shares its own screen with Jami's share, which it already
+has.
+
+- [ ] A:
+
+# 8. The Discord part
+
+Discord's core is communities with channels and voice rooms you drop into. Jami has
+groups (swarms) and group calls, but no channels or standing rooms, and its groups are
+meant to be small. Proposal: a discussion of its own once the daily bar holds; until
+then groups and group calls.
+
+- [ ] A:
+
+# 9. The phone's look
+
+The phone takes the theme of the desktop it was built on (today Omarchy's current
+theme, so the starship palette). Proposal: later the phone follows your desktop's
+theme through the Joma conversation (synced), with a light option; Jami's extras the
+desktop has not (feeds, SIP accounts, donations) are hidden.
+
+- [ ] A:
+
+# 10. Order
+
+Proposal:
+
+1. P1 The phone looks like 0.5.2 (done in Android 0.1.0.dev2).
+2. P2 The daily bar on your real phone: link with the desktop, calls, voice and video
+   messages, files, notifications; fix what fails.
+3. P3 Compact desktop = phone layout.
+4. P4 Joma's list and conversation on Android, with shared transcripts.
+5. P5 Push through the mini PC.
+6. P6 The desktop share viewer on Android.
+7. P7 iOS.
+
+- [ ] A:
+
+# 11. Keeping them in step
+
+Proposal: every feature has a row in the board's platforms table (desktop, compact,
+Android, iOS); a new feature gets its row when its discussion starts, and is only
+**done** when every platform it targets has it. Each release note says what changed
+per platform.
+
+- [ ] A:

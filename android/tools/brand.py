@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """Write joma's colours and font aliases as Android resources.
 
-The palette is the desktop's fallback theme (Tokyo Night, `Palette::default()` in
-crates/joma-theme/src/lib.rs, read from the source so the two never drift). Jami
+The palette is an Omarchy theme's `colors.toml` when one is given (the build passes the
+desktop's current theme, so the phone looks like the desktop it was built on), read like
+`Palette::parse` in crates/joma-theme; without one, the desktop's fallback (Tokyo Night,
+`Palette::default()`, read from the source so the two never drift). The roles follow
+the desktop's (crates/joma/src/theme.rs): flat fills, hairlines, the accent for state
+and the main action only, icons in the bright text colour. Jami
 Android's colour names are given Joma's values; the night set is the real look (joma
 is dark by default), the day set only takes the accent.
 
 Jami's fonts (Ubuntu, Mulish) are aliased to JetBrains Mono, the desktop's terminal
 font, so every screen that names them follows.
 
-Usage: brand.py <crates/joma-theme/src/lib.rs> <res dir>
+Usage: brand.py <crates/joma-theme/src/lib.rs> <res dir> [colors.toml]
 """
 import re
 import sys
@@ -20,6 +24,27 @@ def palette(src: str) -> dict:
     body = src[src.index("fn default()"):]
     body = body[:body.index("}\n    }")]
     return {k: int(v, 16) for k, v in re.findall(r"(\w+): 0x([0-9a-fA-F]{6})", body)}
+
+
+def parse_toml(text: str, p: dict) -> dict:
+    """Palette::parse: keys override the default; missing shades follow the background."""
+    p = dict(p)
+    seen = set()
+    for line in text.splitlines():
+        if "=" not in line:
+            continue
+        k, v = (x.strip() for x in line.split("=", 1))
+        v = v.strip('"').lstrip("#")
+        if k in p and re.fullmatch(r"[0-9a-fA-F]{6}", v):
+            p[k] = int(v, 16)
+            seen.add(k)
+    toward = 0x000000
+    for k, t in (("dark_background", 0.25), ("darker_background", 0.45)):
+        if k not in seen:
+            p[k] = mix(p["background"], toward, t)
+    if "lighter_background" not in seen:
+        p["lighter_background"] = mix(p["background"], p["foreground"], 0.08)
+    return p
 
 
 def mix(a: int, b: int, t: float) -> int:
@@ -34,14 +59,16 @@ def hx(c: int, alpha: int | None = None) -> str:
 def night(p: dict) -> dict:
     bg, fg, acc = p["background"], p["foreground"], p["accent"]
     border = mix(bg, fg, 0.12)  # the desktop's border token
-    mine = mix(bg, acc, 0.30)  # your bubbles: on the accent's tint
-    quiet = mix(fg, bg, 0.35)
+    hair = mix(bg, fg, 0.07)  # where two areas of one fill meet
+    mine = mix(p["dark_background"], acc, 0.10)  # the desktop's `sent`: a little accent
+    quiet = p["dark_foreground"]  # the desktop's `muted`
+    bright = p["bright_foreground"]  # icons: white and crisp, like the desktop's
     return {
         "background": hx(bg),
         "background_secondary": hx(p["dark_background"]),
         "background_on_surface": hx(p["lighter_background"]),
         "surface": hx(p["lighter_background"]),
-        "icon_tint": hx(fg),
+        "icon_tint": hx(bright),
         "colorPrimary": hx(acc),
         "colorPrimaryTranslucent": hx(acc, 0xC0),
         "colorOnPrimary": hx(bg),
@@ -57,16 +84,16 @@ def night(p: dict) -> dict:
         "call_accept": hx(p["green"]),
         "call_decline": hx(p["red"]),
         "conversation_primary_background": hx(mine),
-        "conversation_secondary_background": hx(p["lighter_background"]),
+        "conversation_secondary_background": hx(p["dark_background"]),
         "conversation_message_input_background": hx(p["lighter_background"]),
         "conversation_primary_selection": hx(p["selection"]),
         "online_indicator": hx(p["green"]),
         "available_indicator": hx(p["yellow"]),
-        "icon_color": hx(fg),
+        "icon_color": hx(bright),
         "edit_text_background": hx(p["lighter_background"]),
         "text_color": hx(p["bright_foreground"]),
         "text_hint": hx(quiet),
-        "button_border": hx(border),
+        "button_border": hx(hair),
         "chip_background": hx(p["selection"]),
         "settings_option_background": hx(p["lighter_background"]),
         "settings_submenu_header": hx(quiet),
@@ -89,7 +116,7 @@ def night(p: dict) -> dict:
         "invitation_drawable_p2_color": hx(acc),
         "jami_id_background_color": hx(p["lighter_background"]),
         "jami_id_surface_color": hx(acc),
-        "jami_id_edit_text_underline_color": hx(border),
+        "jami_id_edit_text_underline_color": hx(hair),
         "jami_id_validate_background_disabled_color": hx(acc, 0x4C),
         "jami_id_validate_background_enabled_color": hx(acc, 0xCC),
         "jami_id_validate_icon_enabled_color": hx(bg),
@@ -99,7 +126,7 @@ def night(p: dict) -> dict:
         "icon_background_color": hx(p["lighter_background"]),
         "link_peer_color": hx(p["cyan"]),
         "msg_display_name": hx(quiet),
-        "menu_conversation_icons": hx(fg),
+        "menu_conversation_icons": hx(bright),
         "accept_call_button": hx(p["green"]),
         "conversation_palette_dark_blue": hx(acc),
         "donation_card_background_color": hx(p["lighter_background"]),
@@ -124,9 +151,9 @@ def night(p: dict) -> dict:
         "joma_surface": hx(p["lighter_background"]),
         "joma_surface_high": hx(mix(bg, fg, 0.12)),
         "joma_surface_highest": hx(mix(bg, fg, 0.16)),
-        "joma_on_surface_variant": hx(fg),
-        "joma_outline": hx(mix(bg, fg, 0.30)),
-        "joma_outline_variant": hx(border),
+        "joma_on_surface_variant": hx(quiet),
+        "joma_outline": hx(border),
+        "joma_outline_variant": hx(hair),
     }
 
 
@@ -181,6 +208,9 @@ def font_alias(target: str, weight: int) -> str:
 
 def main():
     p = palette(Path(sys.argv[1]).read_text())
+    if len(sys.argv) > 3 and Path(sys.argv[3]).is_file():
+        p = parse_toml(Path(sys.argv[3]).read_text(), p)
+        print(f"palette: {sys.argv[3]}")
     res = Path(sys.argv[2])
     for d, colors in (("values", day(p)), ("values-night", night(p))):
         (res / d).mkdir(parents=True, exist_ok=True)

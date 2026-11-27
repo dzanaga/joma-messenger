@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- joma: the desktop's one radius (4 px) instead of Jami's round shapes; bubbles and
-     sheets a little rounder so they still read as shapes on a phone. -->
+<!-- joma: square like the desktop (0.5.2): no radius anywhere; the phone's own screen
+     corners are the only round ones, as Omarchy's are on the desktop. Drawables that
+     write their radius in place are squared by android/tools/square.py at build time. -->
 <resources>
-    <dimen name="button_corner_radius">4dp</dimen>
-    <dimen name="edit_text_radius">4dp</dimen>
-    <dimen name="file_background_radius">4dp</dimen>
-    <dimen name="reaction_chip_background_radius">4dp</dimen>
-    <dimen name="call_participant_corner_radius">6dp</dimen>
-    <dimen name="conversation_message_input_radius">6dp</dimen>
-    <dimen name="conversation_message_radius">8dp</dimen>
-    <dimen name="conversation_message_minor_radius">2dp</dimen>
-    <dimen name="bottom_sheet_radius">8dp</dimen>
+    <dimen name="button_corner_radius">0dp</dimen>
+    <dimen name="edit_text_radius">0dp</dimen>
+    <dimen name="file_background_radius">0dp</dimen>
+    <dimen name="reaction_chip_background_radius">0dp</dimen>
+    <dimen name="call_participant_corner_radius">0dp</dimen>
+    <dimen name="conversation_message_input_radius">0dp</dimen>
+    <dimen name="conversation_message_radius">0dp</dimen>
+    <dimen name="conversation_message_minor_radius">0dp</dimen>
+    <dimen name="bottom_sheet_radius">0dp</dimen>
+    <dimen name="account_unread_radius">0dp</dimen>
 </resources>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- joma: the chosen filter is a lighter fill, as the desktop's selection (not the accent). -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true" android:color="@color/conversation_primary_selection" />
+    <item android:color="@android:color/transparent" />
+</selector>

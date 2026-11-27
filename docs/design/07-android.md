@@ -25,9 +25,16 @@ it changes. The APK ends at `~/builds/joma-android/joma-debug.apk`.
 - **Identity:** `applicationId io.github.dzanaga.joma` (installs beside the Jami app,
   own data), name `joma`, the j icon (adaptive, with a themed-icon layer), the j in
   white as the notification icon.
-- **Look:** the desktop's fallback palette (Tokyo Night, read from `crates/joma-theme`
-  by `brand.py`), dark by default; JetBrains Mono (the desktop's terminal font, OFL)
-  everywhere, including Material's type scale; your bubbles on the accent's tint.
+- **Look (0.1.0.dev2, the desktop's 0.5.2):** the Omarchy theme of the machine that
+  builds it (`~/.local/state/omarchy/current/theme/colors.toml`, or
+  `JOMA_ANDROID_THEME=<colors.toml>`; the desktop's fallback, Tokyo Night, without one),
+  read by `brand.py` with the desktop's roles: flat fills, hairlines, your bubbles
+  `sent` (a little accent), theirs the panel's fill, icons in the bright text colour,
+  a chosen filter as the selection's fill, the accent for state and the main action
+  only. Square everywhere: radius dimens at 0, Material's corner styles (search bar,
+  pills, the main button) at 0, and `square.py` copies the drawables that write their
+  radius in place with 0 (avatars stay round). JetBrains Mono (the desktop's terminal
+  font, OFL) everywhere, including Material's type scale. Dark by default.
 - **Words:** English only (Jami's translations name Jami); chats, requests, voice
   message, video message, send a file, "add by Jami username or ID"; joma where Jami
   named the app, Jami where it names the network.
@@ -60,6 +67,9 @@ runs; settings; installing over keeps the data. Not tried: calls, voice and vide
 messages, files (the emulator has no audio and no files to pick), linking with the
 desktop, a real phone.
 
+0.1.0.dev2 (2026-11-27, emulator): the list, the filters and a conversation in the new
+look. The splash before the app starts still follows the system's light or dark.
+
 ## Decisions (to revisit after testing on the phone)
 
 - A-1 Build on Jami Android's whole app and reskin it, rather than new screens on its
@@ -71,8 +81,9 @@ desktop, a real phone.
   patches.
 - A-3 No push (no Firebase, no UnifiedPush): a background service instead; costs some
   battery. UnifiedPush is the next candidate if battery matters.
-- A-4 One palette (Tokyo Night) instead of following a theme: phones have no Omarchy
-  theme. Material You colours or a choice of Omarchy themes are possible later.
+- A-4 The palette of the building machine's Omarchy theme, fixed at build time: phones
+  have no Omarchy theme. Following the desktop's theme through sync, or a light
+  option, later (discussion 2026-11-27-one-joma, question 9).
 - A-5 English only, like the desktop.
 - A-6 arm64-v8a only, debug-signed (the Android SDK's debug key, `~/.android`,
   outside the repo: an APK built on another machine cannot update this one).

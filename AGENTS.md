@@ -22,7 +22,10 @@
   read and written with the `ArtifactData` tool. One column since 2026-11-27: inbox
   (`scratch` and idea/todo items), discussions (with the decisions folded in), plan
   (features by state: building, to test, next, done; the user ticks "works" to move a
-  to-test feature to done), links (`links`: the other Joma artifacts, `title`, `href`,
+  to-test feature to done), platforms (`milestones`: the P steps, `status`
+  done/now/next; `platforms`: one row per feature with `desktop`, `compact`,
+  `android`, `ios` = done/test/building/planned/no; update the row when a feature
+  lands on a platform, add one when a feature's discussion starts), links (`links`: the other Joma artifacts, `title`, `href`,
   `text`, `order`; add new Joma pages there). Collections: `items` (features, todos,
   ideas, designs, discussions with their `questions`; optional `order` sorts the plan),
   `decisions`, `scratch` (the user's quick ideas), `notes` (per item, `by: "you" |

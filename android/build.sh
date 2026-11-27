@@ -84,7 +84,11 @@ prepare() {
     rm -rf "$WORK/jami-android/joma"
     rsync -a "$HERE/overlay/" "$WORK/jami-android/"
     python3 -I "$HERE/tools/svg2vd.py" "$REPO/assets/icons" "$WORK/jami-android/joma/res/drawable" >/dev/null
-    python3 -I "$HERE/tools/brand.py" "$REPO/crates/joma-theme/src/lib.rs" "$WORK/jami-android/joma/res"
+    # The phone takes the desktop's current Omarchy theme (JOMA_ANDROID_THEME=<colors.toml>
+    # picks another, JOMA_ANDROID_THEME=default the fallback).
+    local theme="${JOMA_ANDROID_THEME:-$HOME/.local/state/omarchy/current/theme/colors.toml}"
+    python3 -I "$HERE/tools/brand.py" "$REPO/crates/joma-theme/src/lib.rs" "$WORK/jami-android/joma/res" "$theme"
+    python3 -I "$HERE/tools/square.py" "$WORK/jami-android/app/src/main/res" "$WORK/jami-android/joma/res"
     for p in "$HERE"/patches/*.patch; do
         [ -e "$p" ] || continue
         patch -s -p1 --forward --no-backup-if-mismatch -d "$WORK/jami-android" < "$p"

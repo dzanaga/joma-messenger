@@ -67,6 +67,15 @@
         <item name="textAppearanceLabelLarge">@style/TextAppearance.Joma.LabelLarge</item>
         <item name="textAppearanceLabelMedium">@style/TextAppearance.Joma.LabelMedium</item>
         <item name="textAppearanceLabelSmall">@style/TextAppearance.Joma.LabelSmall</item>
+        <!-- square, like the desktop -->
+        <item name="shapeAppearanceCornerExtraSmall">@style/ShapeAppearance.Joma.Square</item>
+        <item name="shapeAppearanceCornerSmall">@style/ShapeAppearance.Joma.Square</item>
+        <item name="shapeAppearanceCornerMedium">@style/ShapeAppearance.Joma.Square</item>
+        <item name="shapeAppearanceCornerLarge">@style/ShapeAppearance.Joma.Square</item>
+        <item name="shapeAppearanceCornerExtraLarge">@style/ShapeAppearance.Joma.Square</item>
+        <item name="shapeAppearanceSmallComponent">@style/ShapeAppearance.Joma.Square</item>
+        <item name="shapeAppearanceMediumComponent">@style/ShapeAppearance.Joma.Square</item>
+        <item name="shapeAppearanceLargeComponent">@style/ShapeAppearance.Joma.Square</item>
     </style>
 
     <!-- Jami forces a light theme on the account wizard; joma's is the same as the rest. -->
@@ -85,6 +94,15 @@
         <!-- joma -->
         <item name="android:fontFamily">@font/joma_mono</item>
         <item name="fontFamily">@font/joma_mono</item>
+        <!-- square, like the desktop -->
+        <item name="shapeAppearanceCornerExtraSmall">@style/ShapeAppearance.Joma.Square</item>
+        <item name="shapeAppearanceCornerSmall">@style/ShapeAppearance.Joma.Square</item>
+        <item name="shapeAppearanceCornerMedium">@style/ShapeAppearance.Joma.Square</item>
+        <item name="shapeAppearanceCornerLarge">@style/ShapeAppearance.Joma.Square</item>
+        <item name="shapeAppearanceCornerExtraLarge">@style/ShapeAppearance.Joma.Square</item>
+        <item name="shapeAppearanceSmallComponent">@style/ShapeAppearance.Joma.Square</item>
+        <item name="shapeAppearanceMediumComponent">@style/ShapeAppearance.Joma.Square</item>
+        <item name="shapeAppearanceLargeComponent">@style/ShapeAppearance.Joma.Square</item>
     </style>
 
     <style name="TextAppearance.Joma.DisplayLarge" parent="TextAppearance.Material3.DisplayLarge"><item name="fontFamily">@font/joma_mono</item><item name="android:fontFamily">@font/joma_mono</item></style>
@@ -102,4 +120,27 @@
     <style name="TextAppearance.Joma.LabelLarge" parent="TextAppearance.Material3.LabelLarge"><item name="fontFamily">@font/joma_mono</item><item name="android:fontFamily">@font/joma_mono</item></style>
     <style name="TextAppearance.Joma.LabelMedium" parent="TextAppearance.Material3.LabelMedium"><item name="fontFamily">@font/joma_mono</item><item name="android:fontFamily">@font/joma_mono</item></style>
     <style name="TextAppearance.Joma.LabelSmall" parent="TextAppearance.Material3.LabelSmall"><item name="fontFamily">@font/joma_mono</item><item name="android:fontFamily">@font/joma_mono</item></style>
+    <style name="ShapeAppearance.Joma.Square" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">0dp</item>
+    </style>
+
+    <!-- Jami's main action button (styles.xml, Savoir-faire Linux, GPL-3.0), square. -->
+    <style name="Widget.AppTheme.MainActionButton" parent="@style/Widget.Material3.ExtendedFloatingActionButton.Icon.Primary">
+        <item name="materialThemeOverlay">@style/ThemeOverlay.Material3Expressive.FloatingActionButton.Primary</item>
+        <item name="android:textAppearance">@style/TextAppearance.AppTheme.MainActionButton</item>
+        <item name="android:fontFamily">@font/ubuntu_regular</item>
+        <item name="shapeAppearanceOverlay">@style/ShapeAppearance.Joma.Square</item>
+    </style>
+
+    <!-- Material's own round shapes, square: the search bar and every "full" pill
+         (filters, buttons). Avatars keep their circle (ShapeAppearance.App.Circle). -->
+    <style name="ShapeAppearanceOverlay.Material3.SearchBar" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">0dp</item>
+    </style>
+    <style name="ShapeAppearance.Material3.Corner.Full" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">0dp</item>
+    </style>
 </resources>

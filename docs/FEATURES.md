@@ -338,7 +338,7 @@ Jami Android app with joma's name, icon, palette, font, icons and words, and its
 it does: an account created on the phone or linked from the desktop (desktop: Devices →
 paste the code the phone shows), chats with people and groups, requests, adding by
 Jami username or ID, voice and video messages, files and pictures, notifications, calls.
-Dark by default; it stays running in the background (a permanent notification) since it
+Square and flat like the desktop, in the colours of the desktop's Omarchy theme, dark by default; it stays running in the background (a permanent notification) since it
 has no Google push. joma's own extras (desktop share, presence, watching together) are
 not there yet. Verified in an emulator (account, a chat between two local accounts,
 notifications); calls, voice messages and files not yet tried. Design:
@@ -361,6 +361,9 @@ notifications); calls, voice messages and files not yet tried. Design:
   in the window; to your private GitHub repo through gh, or to a file; tested with files
   between two test profiles, not yet against GitHub); password fields show stars; a
   Syncthing left by a killed Joma is stopped at the next start.
+- Android 0.1.0.dev2 (2026-11-27): the desktop's 0.5.2 look on the phone: square
+  everywhere, the Omarchy theme of the desktop it was built on, flat bubbles (yours
+  with a little accent), white icons, a chosen filter as a lighter fill.
 - Android 0.1.0.dev1 (2026-11-27): the first APK, Jami Android with joma's skin (see
   "On the phone").
 - 0.5.2.dev11 (2026-11-27): folder sync between your own devices (Joma's own Syncthing
