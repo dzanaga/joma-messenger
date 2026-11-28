@@ -54,6 +54,14 @@ pub struct QuickConfig {
     /// "superwhisper" (that app, in whatever mode it is set to: it may be a cloud),
     /// "off". Empty: whisper when `whisper-cli` is installed, else off.
     pub transcribe: String,
+    /// What this device transcribes (discussion 2026-11-27-shared-transcription): ""
+    /// new voice and video messages for itself, "all" for all your devices (every
+    /// conversation; your own messages get their transcript attached, the others' reach
+    /// your devices), "off".
+    pub transcriber: String,
+    /// Attach the transcript to the voice and video messages you send (as a reply that
+    /// starts with 📝, readable in any Jami app).
+    pub send_transcripts: bool,
     /// The folder of GIFs the picker offers; empty: `~/Pictures/gifs`.
     pub gif_dir: String,
 }
@@ -85,6 +93,8 @@ impl Default for QuickConfig {
             show_version: true,
             prereleases: false,
             transcribe: String::new(),
+            transcriber: String::new(),
+            send_transcripts: true,
             gif_dir: String::new(),
         }
     }

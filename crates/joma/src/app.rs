@@ -546,6 +546,17 @@ pub struct Joma {
     /// Transcripts of voice messages by file id: `None` while one is being made.
     pub transcripts: HashMap<String, Option<Result<String, String>>>,
     transcripts_seen: std::collections::HashSet<String>,
+    /// When this run started: only messages after it are transcribed by themselves (the
+    /// older ones on demand, user 2026-11-27).
+    started_ts: i64,
+    /// Transcripts shown whole (the long ones are folded).
+    pub transcript_open: std::collections::HashSet<String>,
+    /// Videos whose subtitles are on (the cc button).
+    pub subs_on: std::collections::HashSet<String>,
+    /// Names of voice and video messages sent from this device.
+    sent_media: std::collections::HashSet<String>,
+    /// Transcripts to attach once made: file id → (conversation, message).
+    ship: HashMap<String, (String, String)>,
     /// Voice messages already fetched or transcribed by themselves (once each).
     voice_fetched: std::collections::HashSet<String>,
     voice_transcribed: std::collections::HashSet<String>,
@@ -886,6 +897,11 @@ impl Joma {
             gifs: None,
             transcripts: HashMap::new(),
             transcripts_seen: std::collections::HashSet::new(),
+            started_ts: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64),
+            transcript_open: std::collections::HashSet::new(),
+            subs_on: std::collections::HashSet::new(),
+            sent_media: std::collections::HashSet::new(),
+            ship: HashMap::new(),
             voice_fetched: std::collections::HashSet::new(),
             voice_transcribed: std::collections::HashSet::new(),
             play_after: None,
@@ -2196,6 +2212,7 @@ impl Joma {
         }
         self.tell_presence();
         self.auto_tick();
+        self.transcriber_tick(cx);
         if self.sync.st.is_some() && self.sync.last_hello.is_none_or(|t| t.elapsed() > crate::sync::HELLO_EVERY) {
             self.sync_hello(false);
         }
@@ -2588,6 +2605,9 @@ impl Joma {
                 if let Some(c) = crate::media::cached_cues(&id) {
                     self.cues.insert(id.clone(), c);
                 }
+                if let Some(text) = r.as_ref().ok().filter(|t| !t.trim().is_empty()).cloned() {
+                    self.after_transcript(&id, &text);
+                }
                 self.transcripts.insert(id, Some(r));
                 cx.notify();
             }
@@ -2663,6 +2683,20 @@ impl Joma {
                     }
                     self.after(after, cx);
                     cx.notify();
+                }
+                return;
+            }
+            Event::AccountMessage { account, from, payloads } if *account == acc && payloads.contains_key(crate::media::TRANSCRIPT_MIME) => {
+                if bare_uri(from) == self.model.me {
+                    if let Some(v) = payloads.get(crate::media::TRANSCRIPT_MIME).and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok()) {
+                        if let (Some(file), Some(text)) = (v["file"].as_str(), v["text"].as_str()) {
+                            crate::media::save_transcript(file, text);
+                            if !matches!(self.transcripts.get(file), Some(Some(Ok(_)))) {
+                                self.transcripts.insert(file.to_owned(), Some(Ok(text.to_owned())));
+                            }
+                            cx.notify();
+                        }
+                    }
                 }
                 return;
             }
@@ -3937,12 +3971,26 @@ impl Joma {
     pub fn voice_messages(&mut self, cx: &mut Context<Self>) {
         let Some(conv) = self.selected.as_ref().and_then(|s| self.model.conversations.get(s)) else { return };
         let conv_id = conv.id.clone();
-        let voices: Vec<(String, FileRef)> =
-            conv.messages.iter().filter_map(|m| Some((m.id.clone(), m.file.clone()?))).filter(|(_, f)| media_name(&f.name)).collect();
-        let auto = self.quick.transcribe != "off" && crate::media::transcriber(&self.quick.transcribe).is_some();
+        self.absorb_transcripts(&conv_id);
+        let Some(conv) = self.model.conversations.get(&conv_id) else { return };
+        let voices: Vec<(String, FileRef, i64)> =
+            conv.messages.iter().filter_map(|m| Some((m.id.clone(), m.file.clone()?, m.ts))).filter(|(_, f, _)| media_name(&f.name)).collect();
+        let auto = self.quick.transcriber != "off" && self.quick.transcribe != "off" && crate::media::transcriber(&self.quick.transcribe).is_some();
         let mut busy = self.transcripts.values().any(Option::is_none);
-        for (msg, f) in voices {
+        for (msg, f, ts) in voices {
             self.want_transcript(&f.id);
+            // Only what arrives from now on is transcribed by itself; the cc button does
+            // the older ones.
+            if ts < self.started_ts - 120 {
+                if self.saved_file(&conv_id, &f.id).is_none() && f.size > 0 && f.size <= AUTO_DOWNLOAD && !self.downloads.contains_key(&f.id) && self.voice_fetched.insert(f.id.clone()) {
+                    self.download(&conv_id, &msg, &f, cx);
+                }
+                if let Some(path) = self.saved_file(&conv_id, &f.id) {
+                    self.want_media(&f.id, &path);
+                }
+                continue;
+            }
+            self.maybe_ship(&conv_id, &msg, &f);
             match self.saved_file(&conv_id, &f.id) {
                 None => {
                     if f.size > 0 && f.size <= AUTO_DOWNLOAD && !self.downloads.contains_key(&f.id) && self.voice_fetched.insert(f.id.clone()) {
@@ -3958,6 +4006,138 @@ impl Joma {
                 }
             }
         }
+    }
+
+    /// Replies that carry a voice or video message's transcript (📝): the words go under
+    /// that message (and into the cache).
+    fn absorb_transcripts(&mut self, conv: &str) {
+        let Some(c) = self.model.conversations.get(conv) else { return };
+        let found: Vec<(String, String)> = c
+            .messages
+            .iter()
+            .filter_map(|m| {
+                let text = m.text.strip_prefix(crate::media::MARK)?;
+                let parent = c.messages.iter().find(|p| Some(&p.id) == m.reply_to.as_ref())?;
+                Some((parent.file.as_ref()?.id.clone(), text.trim().to_owned()))
+            })
+            .collect();
+        for (file, text) in found {
+            if !matches!(self.transcripts.get(&file), Some(Some(Ok(_)))) {
+                crate::media::save_transcript(&file, &text);
+                self.transcripts.insert(file, Some(Ok(text)));
+            }
+        }
+    }
+
+    /// Is `m` a transcript reply (hidden: its words show under the message it answers)?
+    pub fn is_transcript_reply(conv: &crate::model::Conversation, m: &crate::model::Msg) -> bool {
+        m.text.starts_with(crate::media::MARK) && m.reply_to.as_ref().is_some_and(|r| conv.messages.iter().any(|p| p.id == *r && p.file.is_some()))
+    }
+
+    /// Our own new voice or video message: attach its transcript once it is made (sent
+    /// from this device, or from any of ours when this one transcribes for all).
+    fn maybe_ship(&mut self, conv: &str, msg: &str, f: &FileRef) {
+        if !self.quick.send_transcripts || self.ship.contains_key(&f.id) {
+            return;
+        }
+        let Some(c) = self.model.conversations.get(conv) else { return };
+        let Some(m) = c.messages.iter().find(|m| m.id == msg) else { return };
+        if bare_uri(&m.author) != self.model.me {
+            return;
+        }
+        let here = self.sent_media.contains(&f.name);
+        let all = self.quick.transcriber == "all";
+        let answered = c.messages.iter().any(|r| r.reply_to.as_deref() == Some(msg) && r.text.starts_with(crate::media::MARK));
+        if answered || !(here || all) {
+            return;
+        }
+        self.ship.insert(f.id.clone(), (conv.to_owned(), msg.to_owned()));
+    }
+
+    /// A transcript was made: attach it to our own message, or bring it to our other
+    /// devices when this one transcribes for all of them.
+    fn after_transcript(&mut self, file: &str, text: &str) {
+        let acc = self.model.account.clone();
+        if let Some((conv, msg)) = self.ship.get(file).cloned() {
+            let answered = self.model.conversations.get(&conv).is_some_and(|c| c.messages.iter().any(|r| r.reply_to.as_deref() == Some(msg.as_str()) && r.text.starts_with(crate::media::MARK)));
+            if !answered {
+                if let Err(e) = joma_jami::send_message(&acc, &conv, &format!("{}{}", crate::media::MARK, text.trim()), &msg) {
+                    tracing::warn!(error = %e, "could not attach the transcript");
+                }
+            }
+            return;
+        }
+        if self.quick.transcriber == "all" {
+            let mut p = joma_jami::Details::new();
+            p.insert(crate::media::TRANSCRIPT_MIME.into(), serde_json::json!({"file": file, "text": text, "by": self.model.device}).to_string());
+            let me = self.model.me.clone();
+            let _ = joma_jami::send_account_message(&acc, &me, &p, false);
+        }
+    }
+
+    /// A device that transcribes for all: every conversation's new voice and video
+    /// messages, one at a time.
+    fn transcriber_tick(&mut self, cx: &mut Context<Self>) {
+        if self.quick.transcriber != "all" || self.transcripts.values().any(Option::is_none) || crate::media::transcriber(&self.quick.transcribe).is_none() {
+            return;
+        }
+        let since = self.started_ts - 120;
+        let todo: Vec<(String, String, FileRef)> = self
+            .model
+            .conversations
+            .values()
+            .flat_map(|c| c.messages.iter().filter(|m| m.ts >= since).filter_map(move |m| Some((c.id.clone(), m.id.clone(), m.file.clone()?))))
+            .filter(|(_, _, f)| media_name(&f.name))
+            .collect();
+        for (conv, msg, f) in todo {
+            self.want_transcript(&f.id);
+            self.absorb_transcripts(&conv);
+            if self.transcripts.contains_key(&f.id) || self.voice_transcribed.contains(&f.id) {
+                continue;
+            }
+            match self.saved_file(&conv, &f.id) {
+                None => {
+                    if f.size > 0 && f.size <= AUTO_DOWNLOAD && !self.downloads.contains_key(&f.id) && self.voice_fetched.insert(f.id.clone()) {
+                        self.download(&conv, &msg, &f, cx);
+                    }
+                }
+                Some(path) => {
+                    self.maybe_ship(&conv, &msg, &f);
+                    self.voice_transcribed.insert(f.id.clone());
+                    self.transcribe(&f.id, &path, cx);
+                    return;
+                }
+            }
+        }
+    }
+
+    /// The cc button: transcribe this message now (an older one), or show a video's
+    /// subtitles.
+    pub fn cc(&mut self, conv: &str, file: &FileRef, video: bool, cx: &mut Context<Self>) {
+        let made = matches!(self.transcripts.get(&file.id), Some(Some(Ok(_))));
+        if video && made {
+            if !self.subs_on.remove(&file.id) {
+                self.subs_on.insert(file.id.clone());
+            }
+            return cx.notify();
+        }
+        if video {
+            self.subs_on.insert(file.id.clone());
+        }
+        match self.saved_file(conv, &file.id) {
+            Some(path) => self.transcribe(&file.id, &path, cx),
+            None => self.show_flash("the message is still arriving", cx),
+        }
+    }
+
+    pub fn set_transcriber(&mut self, role: &str, cx: &mut Context<Self>) {
+        self.quick.transcriber = role.to_owned();
+        self.save_quick(cx);
+    }
+
+    pub fn set_send_transcripts(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.quick.send_transcripts = on;
+        self.save_quick(cx);
     }
 
     /// Transcribe a voice message, in the background. The first time with whisper.cpp
@@ -5754,6 +5934,43 @@ impl Joma {
                     .join("\n");
                 Reply::Text { text }
             }
+            Request::Transcription { what, arg, n, json } => {
+                if self.gate != Gate::Ready {
+                    return Reply::Error { message: "Joma is not on an account now".into() };
+                }
+                if what == "role" {
+                    match arg.as_deref() {
+                        Some("self") => self.set_transcriber("", cx),
+                        Some(r @ ("all" | "off")) => self.set_transcriber(r, cx),
+                        Some("send") => self.set_send_transcripts(true, cx),
+                        Some("nosend") => self.set_send_transcripts(false, cx),
+                        _ => {}
+                    }
+                    let role = match self.quick.transcriber.as_str() {
+                        "all" => "for all your devices",
+                        "off" => "off",
+                        _ => "for itself",
+                    };
+                    let engine = crate::media::transcriber(&self.quick.transcribe).unwrap_or("none");
+                    return Reply::Text {
+                        text: if json {
+                            serde_json::json!({"role": if self.quick.transcriber.is_empty() { "self" } else { self.quick.transcriber.as_str() }, "engine": engine, "send": self.quick.send_transcripts}).to_string()
+                        } else {
+                            format!("this device transcribes {role} · engine {engine} · your voice messages {}", if self.quick.send_transcripts { "carry their transcript" } else { "go alone" })
+                        },
+                    };
+                }
+                let conv = match self.target(arg.as_deref().unwrap_or("")) {
+                    Ok(c) => c,
+                    Err(e) => return e,
+                };
+                let Some(f) = self.model.conversations.get(&conv).and_then(|c| c.messages.iter().rev().filter_map(|m| m.file.clone()).filter(|f| media_name(&f.name)).nth(n.max(1) - 1)) else {
+                    return Reply::Error { message: "no voice or video message there".into() };
+                };
+                let video = crate::media::is_video(std::path::Path::new(&f.name));
+                self.cc(&conv, &f, video, cx);
+                Reply::Text { text: format!("transcribing {}", f.name) }
+            }
             Request::Files { what, arg, path, json } => {
                 if self.gate != Gate::Ready {
                     return Reply::Error { message: "Joma is not on an account now".into() };
@@ -6106,6 +6323,9 @@ impl Joma {
             return Reply::Error { message: format!("{} is not a file", path.display()) };
         }
         let abs = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        if let Some(n) = abs.file_name().map(|n| n.to_string_lossy().into_owned()).filter(|n| media_name(n)) {
+            self.sent_media.insert(n);
+        }
         if let Err(e) = self.share_conv_file(conv, &abs, message) {
             tracing::warn!(error = %e, "the file did not go into the conversation's folder");
         }

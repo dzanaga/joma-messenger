@@ -396,6 +396,22 @@ fn cache_path(file_id: &str, ext: &str) -> Option<PathBuf> {
     Some(cache.join("joma/transcripts").join(format!("{safe}.{ext}")))
 }
 
+/// A transcript attached to a voice or video message: a reply to it that starts with this.
+pub const MARK: &str = "📝 ";
+
+/// The account message that brings a transcript to our other devices.
+pub const TRANSCRIPT_MIME: &str = "application/x-joma-transcript+json";
+
+/// Keep a transcript that came from elsewhere (the sender, or our transcriber device).
+pub fn save_transcript(file_id: &str, text: &str) {
+    if let Some(p) = cache_path(file_id, "txt") {
+        if let Some(d) = p.parent() {
+            let _ = std::fs::create_dir_all(d);
+        }
+        let _ = std::fs::write(p, text);
+    }
+}
+
 /// A transcript made earlier.
 pub fn cached_transcript(file_id: &str) -> Option<String> {
     std::fs::read_to_string(cache_path(file_id, "txt")?).ok()

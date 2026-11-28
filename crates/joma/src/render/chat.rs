@@ -488,6 +488,10 @@ impl Joma {
         let mut last_day = None;
         let mut last_author = String::new();
         for m in &conv.messages {
+            // A transcript attached to a voice or video message shows under it.
+            if Joma::is_transcript_reply(conv, m) {
+                continue;
+            }
             let (hm, day, day_label) = local_time(m.ts);
             if last_day != Some(day) {
                 last_day = Some(day);

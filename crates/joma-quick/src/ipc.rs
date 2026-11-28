@@ -142,6 +142,18 @@ pub enum Request {
         #[serde(default)]
         json: bool,
     },
+    /// Transcription: `role` shows or sets this device's (""/"all"/"off", with
+    /// `send`), `transcribe` one message (`arg`: the conversation; the newest voice or
+    /// video message, or the `n`th from the end).
+    Transcription {
+        what: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        arg: Option<String>,
+        #[serde(default)]
+        n: usize,
+        #[serde(default)]
+        json: bool,
+    },
     /// Quit Joma (closing its window only hides it).
     Quit,
 }

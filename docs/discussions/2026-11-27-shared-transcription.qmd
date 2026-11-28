@@ -129,3 +129,16 @@ here), `joma transcription` (the devices and their roles, `--json`), `joma
 transcription on|off|all` (this device's role).
 
 - [ ] A:
+
+## Built (2026-11-28, 0.5.3.dev5)
+
+From the answers: no 7-day catch-up, only new messages by themselves, older ones with
+**cc** (and video subtitles behind cc); the sender's transcript travels with the voice
+message as a reply that starts with 📝 (readable in every Jami app; Joma folds it under
+the message), on by default; a device set to **for all my devices** transcribes every
+conversation's new messages, attaches transcripts to your own messages (also those sent
+from the phone) and brings the others' words to your devices that are on (an account
+message). Not built yet: the private Joma conversation that keeps transcripts for
+devices that were off (question 1), the device records and their list in settings
+(question 3), the phone reading them (Android). Step 5 (cloud key, model on the phone)
+is skipped, as answered; superwhisper stays the desktop's engine.

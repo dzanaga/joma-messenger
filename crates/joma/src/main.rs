@@ -92,6 +92,11 @@ const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); -
                                  a folder's files (folder: its name, id or conversation)
        joma files show <folder>  show a folder in Joma's files view
        joma files open <file>    open a file with the system's app
+       joma transcribe <to> [n]  transcribe the newest (or nth newest) voice or video
+                                 message of a conversation now
+       joma transcription [self|all|off|send|nosend] [--json]
+                                 this device's role: transcribes for itself, for all your
+                                 devices, or not; send transcripts with your voice messages
        joma sync join <folder> [path] | decline <folder> | leave <folder>
        joma sync write <folder> <contact> on|off
                                  let a member add and change files, or not
@@ -248,6 +253,20 @@ fn cli(args: &[String]) -> Option<i32> {
         }
         Some("devices") if args.len() == 3 && args[1] == "keep" => Request::Devices { what: "keep".into(), arg: Some(args[2].clone()), json: false },
         Some("account") if args.len() == 2 => Request::UseAccount { to: args[1].clone() },
+        Some("transcribe") if (2..=3).contains(&args.len()) => {
+            Request::Transcription { what: "transcribe".into(), arg: Some(args[1].clone()), n: args.get(2).and_then(|n| n.parse().ok()).unwrap_or(1), json: false }
+        }
+        Some("transcription") => {
+            let json = args.iter().any(|a| a == "--json");
+            match args.get(1).map(String::as_str).filter(|a| *a != "--json") {
+                None => Request::Transcription { what: "role".into(), arg: None, n: 0, json },
+                Some(r @ ("self" | "all" | "off" | "send" | "nosend")) => Request::Transcription { what: "role".into(), arg: Some(r.into()), n: 0, json },
+                _ => {
+                    eprintln!("joma transcription [self|all|off|send|nosend] [--json]");
+                    return Some(2);
+                }
+            }
+        }
         Some("files") => {
             let json = args.iter().any(|a| a == "--json");
             let rest: Vec<String> = args[1..].iter().filter(|a| *a != "--json").cloned().collect();

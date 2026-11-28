@@ -55,6 +55,29 @@ impl Joma {
                         |j, x, cx| j.set_transcribe(x, cx),
                     ),
                 ))
+                .child(row(
+                    label("this device"),
+                    chips(
+                        t,
+                        cx,
+                        "trole",
+                        vec![("".into(), "transcribes for itself".into()), ("all".into(), "for all my devices".into()), ("off".into(), "does not transcribe".into())],
+                        &self.quick.transcriber,
+                        |j, x, cx| j.set_transcriber(x, cx),
+                    ),
+                ))
+                .child(row(
+                    label("my voice messages"),
+                    chips(
+                        t,
+                        cx,
+                        "trsend",
+                        vec![("on".into(), "send the transcript with them".into()), ("off".into(), "send them alone".into())],
+                        if self.quick.send_transcripts { "on" } else { "off" },
+                        |j, x, cx| j.set_send_transcripts(x == "on", cx),
+                    ),
+                ))
+                .child(note("New voice and video messages are transcribed as they arrive; older ones with cc. A device that transcribes for all your devices (an always-on one) does every conversation and brings the words to your other devices; your own voice messages then get their transcript attached even when sent from the phone. The transcript you send goes as a reply starting with 📝: every Jami app shows it, Joma shows it under the message."))
                 .child(note(match crate::media::transcriber(&self.quick.transcribe) {
                     Some("whisper") => "Voice messages are transcribed by themselves on this machine with whisper.cpp (language detected) and kept in Joma's cache. The model (about 150 MB) is downloaded at the first one.",
                     Some(_) if self.quick.transcribe.is_empty() => "Voice messages are transcribed by themselves with superwhisper, which is set to work offline: they stay on this machine. Language: superwhisper's (automatic by default).",

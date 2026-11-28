@@ -122,16 +122,58 @@ impl Joma {
             .child(round(SharedString::from(format!("play-{msg}")), if playing { G_PAUSE } else { G_PLAY }, 32., t.bright, t.bar).on_click(self.play_click(conv, msg, file, saved.clone(), cx)))
             .child(wave)
             .child(div().min_w(px(34.)).text_size(px(t.size - 2.)).text_color(t.muted).child(time));
-        div().flex().flex_col().child(player).children(self.transcript_line(t, msg, &file.id, saved.as_deref(), 300., cx)).into_any_element()
+        div().flex().flex_col().child(player).children(self.transcript_line(t, conv, msg, file, saved.as_deref(), 300., cx)).into_any_element()
     }
 
     /// The words under a voice message: being made, made, or why not (with a retry).
-    fn transcript_line(&self, t: &Theme, msg: &str, file_id: &str, saved: Option<&std::path::Path>, width: f32, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let path = saved?.to_owned();
+    #[allow(clippy::too_many_arguments)]
+    fn transcript_line(&self, t: &Theme, conv: &str, msg: &str, file: &FileRef, saved: Option<&std::path::Path>, width: f32, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let file_id = file.id.as_str();
         let small = |d: gpui::Div| d.mt(px(S1)).w(px(width)).text_size(px(t.size - 2.));
+        if let Some(Some(Ok(text))) = self.transcripts.get(file_id) {
+            // Long ones are folded to a line; a click shows them whole and folds them back.
+            let long = text.chars().count() > 140;
+            let open = !long || self.transcript_open.contains(file_id);
+            let shown = if open { text.clone() } else { format!("{}…", text.chars().take(120).collect::<String>().trim_end()) };
+            let fid = file_id.to_owned();
+            return Some(
+                div()
+                    .id(SharedString::from(format!("trl-{msg}")))
+                    .mt(px(S1))
+                    .w(px(width))
+                    .text_color(t.bright)
+                    .when(long, |d| d.cursor_pointer())
+                    .child(shown)
+                    .when(long, |d| d.child(div().text_size(px(t.size - 2.5)).text_color(t.muted).child(if open { "fold" } else { "more" })))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        if !this.transcript_open.remove(&fid) {
+                            this.transcript_open.insert(fid.clone());
+                        }
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+            );
+        }
+        if self.transcripts.get(file_id).is_none() {
+            // Not transcribed (an older message): cc does it now.
+            saved?;
+            crate::media::transcriber(&self.quick.transcribe)?;
+            let (c, f) = (conv.to_owned(), file.clone());
+            return Some(
+                small(div())
+                    .flex()
+                    .child(button(SharedString::from(format!("cc-{msg}")), G_COMMENT, "cc", t, false).on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.cc(&c, &f, false, cx);
+                    })))
+                    .into_any_element(),
+            );
+        }
+        let path = saved?.to_owned();
         match self.transcripts.get(file_id) {
             Some(None) => Some(small(div()).text_color(t.muted).italic().child("transcribing…").into_any_element()),
-            Some(Some(Ok(text))) => Some(div().mt(px(S1)).w(px(width)).text_color(t.bright).child(text.clone()).into_any_element()),
+            Some(Some(Ok(_))) => None,
             Some(Some(Err(e))) => {
                 let fid = file_id.to_owned();
                 Some(
@@ -188,7 +230,12 @@ impl Joma {
             _ if arriving => "arriving…".into(),
             _ => String::new(),
         };
-        let sub = if ours { self.subtitle(&file.id, pos) } else { None };
+        // Subtitles only with cc on (user 2026-11-27: transcribed in the background, the
+        // overlay on demand).
+        let subs = self.subs_on.contains(&file.id);
+        let sub = if ours && subs { self.subtitle(&file.id, pos) } else { None };
+        let can_cc = saved.is_some() && (matches!(self.transcripts.get(&file.id), Some(Some(Ok(_)))) || crate::media::transcriber(&self.quick.transcribe).is_some());
+        let (cc_conv, cc_file) = (conv.to_owned(), file.clone());
         let (fid, path) = (file.id.clone(), saved.clone());
         let video = div()
             .id(SharedString::from(format!("video-{msg}")))
@@ -234,6 +281,25 @@ impl Joma {
                 )
             })
             .when(!time.is_empty(), |d| d.child(div().absolute().top(px(6.)).left(px(6.)).child(chip(time))))
+            .when(can_cc, |d| {
+                d.child(
+                    div().absolute().bottom(px(8.)).right(px(6.)).child(
+                        div()
+                            .id(SharedString::from(format!("vcc-{msg}")))
+                            .px(px(5.))
+                            .py(px(1.))
+                            .bg(if subs { gpui::white() } else { gpui::black().opacity(0.55) })
+                            .text_color(if subs { gpui::black() } else { gpui::white() })
+                            .text_size(px(t.size - 2.5))
+                            .cursor_pointer()
+                            .child("cc")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                cx.stop_propagation();
+                                this.cc(&cc_conv, &cc_file, true, cx);
+                            })),
+                    ),
+                )
+            })
             .when_some(sub, |d, s| {
                 d.child(
                     div().absolute().bottom(px(10.)).left_0().right_0().flex().justify_center().px(px(8.)).child(

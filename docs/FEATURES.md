@@ -234,18 +234,30 @@ Beside the message box:
 ## Transcribing voice and video messages
 Voice and video messages (`.ogg`, `.m4a` from Jami for Android, …) in the open conversation come
 by themselves, also ones sent before this device joined, and have **play** even before
-they are here (it fetches, then plays). Once here they are **transcribed by
-themselves** (a video's sound too), one at a time: the words appear under them and stay in Joma's cache
-(`~/.cache/joma/transcripts`); nothing is sent into the conversation. **transcribe**
-tries again. **Settings → audio → voice messages** chooses the engine:
-- **automatic** (default): superwhisper when it is installed and set to work offline
-  (nothing more to install; its language setting applies, automatic by default), else
-  whisper.cpp when `whisper-cli` is installed;
-- **superwhisper**: in whatever mode it is set to. In a cloud mode the voice message
-  leaves this machine, so automatic never picks it then;
-- **whisper.cpp**: on this machine, language detected. The model (`base`, about
-  150 MB) is downloaded at the first transcription into `~/.local/share/joma/models`;
-- **off**.
+they are here (it fetches, then plays). New ones (arrived since Joma started) are
+**transcribed by themselves** (a video's sound too), one at a time: the words appear
+under them (a long transcript is folded to a line: click for all of it) and stay in
+Joma's cache (`~/.cache/joma/transcripts`). Older ones are not: **cc** under a voice
+message, or on a video's corner, transcribes it now. A video's subtitles show only with
+**cc** on. `joma transcribe <to> [n]` does the newest (or nth newest) one.
+- **Your voice messages carry their transcript** (Settings → audio → my voice messages,
+  on by default): once made, it is sent as a reply to the message that starts with 📝.
+  Any Jami app shows it as a reply; Joma shows it under the voice message instead.
+- **This device** (Settings → audio): transcribes **for itself** (default), **for all
+  my devices** (an always-on machine: every conversation's new voice and video
+  messages, also without opening them; the words reach your other devices that are on,
+  and your own voice messages get their transcript attached even when sent from the
+  phone), or **does not transcribe**. `joma transcription [self|all|off|send|nosend]
+  [--json]`.
+- **Settings → audio → voice messages** chooses the engine:
+  - **automatic** (default): superwhisper when it is installed and set to work offline
+    (nothing more to install; its language setting applies, automatic by default), else
+    whisper.cpp when `whisper-cli` is installed;
+  - **superwhisper**: in whatever mode it is set to. In a cloud mode the voice message
+    leaves this machine, so automatic never picks it then;
+  - **whisper.cpp**: on this machine, language detected. The model (`base`, about
+    150 MB) is downloaded at the first transcription into `~/.local/share/joma/models`;
+  - **off**.
 
 ## Watching together
 Type `@youtube epic fails` (the YouTube button beside the message box writes `@youtube `
@@ -402,6 +414,10 @@ notifications); calls, voice messages and files not yet tried. Design:
 `docs/design/07-android.md`.
 
 ## Log
+- 0.5.3.dev5 (2026-11-28): transcription as agreed: new messages by themselves, older ones
+  with cc, video subtitles behind cc, long transcripts folded; your voice messages carry
+  their transcript (a 📝 reply); a device can transcribe for all your devices; `joma
+  transcribe`, `joma transcription`.
 - 0.5.3.dev4 (2026-11-28): folders shared with contacts and conversations (offers, join,
   readers and writers, a conversation's files sorted into sub-folders); the files view
   (Ctrl+7); `joma files`, `joma sync share|offers|join|write|device|leave`, `joma add|
