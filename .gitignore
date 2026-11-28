@@ -3,3 +3,4 @@
 TODO.md
 /.cargo/config.toml
 /.claude/worktrees/
+__pycache__/
