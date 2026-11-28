@@ -111,6 +111,16 @@ pub enum AppMsg {
     GithubPublished(String, String, bool, Result<String, String>),
     /// A contact was added by GitHub name (from the command line): account, Jami id, login, id.
     GithubPin(String, String, String, u64),
+    /// The GitHub sign-in has a code to show.
+    GithubCode(crate::signin::After, joma_backup::device::Code),
+    /// The GitHub sign-in finished: the token and our login, or why not.
+    GithubSignedIn(crate::signin::After, Result<(joma_backup::device::Token, String), String>),
+    /// Whether GitHub can be reached without signing in (gh, or a token).
+    GithubReady(crate::signin::After, bool),
+    /// An automatic backup finished.
+    AutoBackupDone(Result<String, String>),
+    /// Turning automatic backups on kept the password (or could not).
+    AutoKept(Result<(), String>),
     /// The backup repo's accounts, for the restore screen (or why not).
     RestoreList(Result<(String, Vec<joma_backup::Entry>), String>),
     /// A backup or restore finished: was it a restore, and what to tell the user.
@@ -253,6 +263,8 @@ pub struct PasswordAsk {
     pub file: Option<String>,
     /// Backup: the first entry, waiting to be typed again.
     pub first: Option<String>,
+    /// Turning automatic backups on: keep the password in the keyring once it worked.
+    pub remember: bool,
     pub reply: std::sync::mpsc::Sender<Reply>,
 }
 
@@ -550,6 +562,14 @@ pub struct Joma {
     pub gh_found: Option<(String, u64, Vec<crate::github::Listed>)>,
     /// Our gist is being written.
     pub gh_busy: bool,
+    /// Signing in with the Joma GitHub App: the card with the code.
+    pub gh_signin: Option<crate::signin::SignIn>,
+    /// The app's token for this run (also given to `joma_backup::gh`).
+    pub gh_token: Option<joma_backup::device::Token>,
+    gh_cancel: Arc<std::sync::atomic::AtomicBool>,
+    /// Automatic backups (off unless turned on) and when the last backup worked.
+    pub auto: crate::signin::Auto,
+    auto_running: bool,
     /// Devices that joined the account without this machine linking them: keep / revoke.
     pub new_devices: Vec<String>,
     /// When this machine last linked a device, or an account arrived here: devices that
@@ -843,6 +863,11 @@ impl Joma {
             gh_checking: HashSet::new(),
             gh_found: None,
             gh_busy: false,
+            gh_signin: None,
+            gh_token: None,
+            gh_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            auto: crate::signin::Auto::load(),
+            auto_running: false,
             new_devices: Vec::new(),
             last_link: None,
             sync_view: None,
@@ -1012,9 +1037,38 @@ impl Joma {
     }
 
     /// `joma github publish|unpublish|find|add`: GitHub is slow, so off the UI thread.
-    fn github_ipc(&mut self, p: crate::ipc::Pending, cx: &mut Context<Self>) {
+    fn github_ipc(&mut self, p: crate::ipc::Pending, window: &mut Window, cx: &mut Context<Self>) {
         let Request::Github { what, arg, label, json } = p.request.clone() else { return };
         let reply = p.reply;
+        match (what.as_str(), arg.as_deref().unwrap_or("")) {
+            ("signin", _) => {
+                self.github_signin(crate::signin::After::Nothing, cx);
+                raise(window);
+                let _ = reply.send(Reply::Text { text: "Joma's window shows the code to type at github.com/login/device".into() });
+                return;
+            }
+            ("auto", "on") if self.gate == Gate::Ready => {
+                self.auto_switch(true, window, cx);
+                let _ = reply.send(Reply::Text { text: "Joma asks for the backup password in its window".into() });
+                return;
+            }
+            ("auto", "off") => {
+                self.auto_switch(false, window, cx);
+                let _ = reply.send(Reply::Text { text: "automatic backups are off; the keyring entries are deleted".into() });
+                return;
+            }
+            ("auto", _) => {
+                let last = if self.auto.last == 0 { "never".to_owned() } else { format!("{} h ago", crate::github::now().saturating_sub(self.auto.last) / 3600) };
+                let text = if json {
+                    serde_json::json!({"auto": self.auto.on, "last": self.auto.last}).to_string()
+                } else {
+                    format!("automatic backups {} · last backup {last}", if self.auto.on { "on" } else { "off" })
+                };
+                let _ = reply.send(Reply::Text { text });
+                return;
+            }
+            _ => {}
+        }
         if self.gate != Gate::Ready {
             let _ = reply.send(Reply::Error { message: "Joma is not on an account now".into() });
             return;
@@ -1127,7 +1181,7 @@ impl Joma {
             let from = file.clone().unwrap_or_else(|| "your GitHub backup".into());
             self.restoring = Some(RestoreView { cli: Some(from), ..Default::default() });
         }
-        self.password_ask = Some(PasswordAsk { restore, accounts, wanted, file, first: None, reply: p.reply });
+        self.password_ask = Some(PasswordAsk { restore, accounts, wanted, file, first: None, remember: false, reply: p.reply });
         self.set_mode(Mode::Password, window, cx);
         raise(window);
     }
@@ -1163,6 +1217,7 @@ impl Joma {
         self.show_flash(if ask.restore { "restoring…" } else { "backing up…" }, cx);
         let present: Vec<String> = self.accounts.iter().filter_map(|(id, _)| joma_jami::account_uri(id).ok()).collect();
         let tx = self.tx.clone();
+        let token = self.gh_token.clone();
         std::thread::spawn(move || {
             let file = ask.file.as_deref().map(std::path::Path::new);
             let r = if ask.restore {
@@ -1175,7 +1230,11 @@ impl Joma {
                 Ok(t) => Reply::Text { text: t.clone() },
                 Err(e) => Reply::Error { message: e.clone() },
             });
+            let ok = r.is_ok();
             let _ = tx.unbounded_send(AppMsg::BackupDone(ask.restore, r));
+            if ask.remember && ok {
+                let _ = tx.unbounded_send(AppMsg::AutoKept(crate::signin::remember(&text, token.as_ref()).map_err(|e| format!("{e:#}"))));
+            }
         });
     }
 
@@ -1372,6 +1431,97 @@ impl Joma {
     }
 
     /// "gh:<login>" in the add field: look the login up.
+    /// Sign in with the Joma GitHub App: show a code, poll in the background.
+    pub fn github_signin(&mut self, after: crate::signin::After, cx: &mut Context<Self>) {
+        if self.gh_signin.as_ref().is_some_and(|s| s.error.is_none()) {
+            return;
+        }
+        self.gh_cancel.store(false, Ordering::SeqCst);
+        self.gh_signin = Some(crate::signin::SignIn { after, code: None, error: None });
+        let (tx, tx2, cancel) = (self.tx.clone(), self.tx.clone(), self.gh_cancel.clone());
+        std::thread::spawn(move || {
+            let r = crate::signin::run(move |c| drop(tx2.unbounded_send(AppMsg::GithubCode(after, c))), move || cancel.load(Ordering::SeqCst));
+            let _ = tx.unbounded_send(AppMsg::GithubSignedIn(after, r));
+        });
+        cx.notify();
+    }
+
+    pub fn cancel_github_signin(&mut self, cx: &mut Context<Self>) {
+        self.gh_cancel.store(true, Ordering::SeqCst);
+        self.gh_signin = None;
+        cx.notify();
+    }
+
+    /// Make sure GitHub can be reached (gh or the app's token), signing in if not, then
+    /// do `after`.
+    pub fn need_github(&mut self, after: crate::signin::After, window: &mut Window, cx: &mut Context<Self>) {
+        if joma_backup::gh::has_token() {
+            return self.github_continue(after, window, cx);
+        }
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.unbounded_send(AppMsg::GithubReady(after, crate::signin::ready()));
+        });
+    }
+
+    fn github_continue(&mut self, after: crate::signin::After, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::signin::After;
+        match after {
+            After::Nothing => {}
+            After::Restore => self.start_restore(cx),
+            After::Backup => self.backup_now(false, window, cx),
+            After::Auto => self.backup_now(true, window, cx),
+            After::Publish(on) => self.github_publish(on, cx),
+        }
+    }
+
+    /// "back up now" on the accounts tab: every account here, the password asked in the
+    /// window (`remember`: then kept for automatic backups).
+    fn backup_now(&mut self, remember: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let (reply, _) = std::sync::mpsc::channel();
+        self.ask_password(crate::ipc::Pending { request: Request::Backup { accounts: Vec::new(), all: true, file: None }, reply }, window, cx);
+        if let Some(a) = self.password_ask.as_mut() {
+            a.remember = remember;
+        }
+    }
+
+    pub fn backup_button(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.need_github(crate::signin::After::Backup, window, cx);
+    }
+
+    /// The accounts tab's "automatic backups" switch.
+    pub fn auto_switch(&mut self, on: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if on {
+            if !crate::keyring::available() {
+                return self.show_flash("automatic backups need the system keyring (secret-tool, from libsecret)", cx);
+            }
+            self.need_github(crate::signin::After::Auto, window, cx);
+        } else {
+            crate::signin::forget();
+            self.auto.on = false;
+            self.auto.save();
+            self.show_flash("automatic backups are off; the password is no longer kept", cx);
+        }
+        cx.notify();
+    }
+
+    /// Once a day, when automatic backups are on.
+    fn auto_tick(&mut self) {
+        if self.auto_running || self.gate != Gate::Ready || self.password_ask.is_some() || !self.auto.due(crate::github::now()) {
+            return;
+        }
+        self.auto_running = true;
+        let accounts: Vec<crate::backup::Account> = self
+            .accounts
+            .iter()
+            .filter_map(|(id, name)| Some(crate::backup::Account { id: id.clone(), uri: joma_jami::account_uri(id).ok()?, label: name.clone() }))
+            .collect();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.unbounded_send(AppMsg::AutoBackupDone(crate::signin::auto_backup(&accounts)));
+        });
+    }
+
     fn github_lookup(&mut self, login: String, cx: &mut Context<Self>) {
         if !crate::github::valid_login(&login) {
             return self.show_flash(format!("{login} is not a GitHub name"), cx);
@@ -1464,7 +1614,7 @@ impl Joma {
         }
         let wanted: Vec<String> = v.entries.iter().filter(|e| v.picked.contains(&e.jami)).map(|e| e.jami.clone()).collect();
         let (reply, _) = std::sync::mpsc::channel();
-        self.password_ask = Some(PasswordAsk { restore: true, accounts: Vec::new(), wanted, file: None, first: None, reply });
+        self.password_ask = Some(PasswordAsk { restore: true, accounts: Vec::new(), wanted, file: None, first: None, remember: false, reply });
         self.set_mode(Mode::Password, window, cx);
     }
 
@@ -1644,6 +1794,7 @@ impl Joma {
             }
         }
         self.tell_presence();
+        self.auto_tick();
         if self.sync.st.is_some() && self.sync.last_hello.is_none_or(|t| t.elapsed() > crate::sync::HELLO_EVERY) {
             self.sync_hello(false);
         }
@@ -1731,7 +1882,7 @@ impl Joma {
             }
             AppMsg::Ipc(p) => match p.request {
                 Request::Backup { .. } | Request::Restore { .. } => self.ask_password(p, window, cx),
-                Request::Github { .. } => self.github_ipc(p, cx),
+                Request::Github { .. } => self.github_ipc(p, window, cx),
                 Request::BackupList | Request::GithubStatus => {
                     // gh talks to GitHub: off the UI thread.
                     let list = matches!(p.request, Request::BackupList);
@@ -1803,7 +1954,65 @@ impl Joma {
                         }
                         self.show_flash(if on { format!("contacts now see ✓ github.com/{login}") } else { "the GitHub badge is off; github.com/… no longer lists this account".to_owned() }, cx);
                     }
+                    Err(e) if joma_backup::gh::not_signed_in(&e) => self.github_signin(crate::signin::After::Publish(on), cx),
                     Err(e) => self.show_flash(format!("GitHub: {e}"), cx),
+                }
+                cx.notify();
+            }
+            AppMsg::GithubCode(after, code) => {
+                if let Some(s) = self.gh_signin.as_mut().filter(|s| s.after == after) {
+                    s.code = Some(code);
+                }
+                cx.notify();
+            }
+            AppMsg::GithubSignedIn(after, r) => {
+                match r {
+                    Ok((token, login)) => {
+                        self.gh_signin = None;
+                        self.gh_token = Some(token);
+                        self.show_flash(format!("signed in to GitHub as {login}"), cx);
+                        self.github_continue(after, window, cx);
+                    }
+                    Err(e) if e == "cancelled" => self.gh_signin = None,
+                    Err(e) => {
+                        if let Some(s) = self.gh_signin.as_mut() {
+                            s.error = Some(e);
+                            s.code = None;
+                        }
+                    }
+                }
+                cx.notify();
+            }
+            AppMsg::GithubReady(after, ready) => {
+                if ready {
+                    self.github_continue(after, window, cx);
+                } else {
+                    self.github_signin(after, cx);
+                }
+            }
+            AppMsg::AutoBackupDone(r) => {
+                self.auto_running = false;
+                match r {
+                    Ok(_) => {
+                        self.auto.last = crate::github::now();
+                        self.auto.save();
+                    }
+                    Err(e) => {
+                        // Try again in an hour, not at every tick.
+                        self.auto.last = crate::github::now().saturating_sub(crate::signin::EVERY - 3600);
+                        self.show_flash(format!("automatic backup failed: {e}"), cx);
+                    }
+                }
+                cx.notify();
+            }
+            AppMsg::AutoKept(r) => {
+                match r {
+                    Ok(()) => {
+                        self.auto.on = true;
+                        self.auto.save();
+                        self.show_flash("automatic backups are on: once a day, the password is in the system keyring", cx);
+                    }
+                    Err(e) => self.show_flash(format!("automatic backups stay off: {e}"), cx),
                 }
                 cx.notify();
             }
@@ -1830,9 +2039,7 @@ impl Joma {
                             v.login = login;
                             v.entries = entries;
                         }
-                        Err(e) if e.contains("not logged in") => {
-                            v.error = "GitHub is not connected on this machine (the GitHub CLI has no login).".into()
-                        }
+                        Err(e) if joma_backup::gh::not_signed_in(&e) => v.error = "Not signed in to GitHub on this machine.".into(),
                         Err(e) => v.error = e,
                     }
                 }
@@ -1854,9 +2061,17 @@ impl Joma {
                 }
                 cx.notify();
             }
+            AppMsg::BackupDone(false, Err(e)) if joma_backup::gh::not_signed_in(&e) => {
+                self.show_flash("backup: not signed in to GitHub", cx);
+                self.github_signin(crate::signin::After::Backup, cx);
+            }
             AppMsg::BackupDone(restore, r) => {
                 if restore {
                     self.restoring = None;
+                }
+                if !restore && r.is_ok() {
+                    self.auto.last = crate::github::now();
+                    self.auto.save();
                 }
                 match r {
                     Ok(text) => self.show_flash(text.lines().next().unwrap_or("done").to_owned(), cx),

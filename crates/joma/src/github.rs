@@ -143,26 +143,15 @@ pub fn fetch(login: &str) -> Result<Option<(u64, Option<Profile>)>> {
 
 // ---- Writing our own gist (through gh) ----------------------------------------------
 
+/// Through gh, or the Joma GitHub App's token once signed in.
 fn gh(args: &[&str], input: Option<&str>) -> Result<serde_json::Value> {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-    let mut c = Command::new("gh");
-    c.arg("api").args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
-    c.stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() });
-    let mut child = c.spawn().context("gh is not installed")?;
-    if let Some(i) = input {
-        child.stdin.take().expect("piped").write_all(i.as_bytes())?;
-    }
-    let out = child.wait_with_output()?;
-    if !out.status.success() {
-        bail!("gh api {}: {}", args.first().unwrap_or(&""), String::from_utf8_lossy(&out.stderr).trim());
-    }
-    Ok(serde_json::from_slice(&out.stdout).unwrap_or_default())
+    let out = joma_backup::gh::api(args, input.map(str::as_bytes))?;
+    Ok(serde_json::from_slice(&out).unwrap_or_default())
 }
 
 /// Our login, numeric id, and our gist (id and content) if there is one.
 fn mine() -> Result<(String, u64, Option<(String, Profile)>)> {
-    let me = gh(&["user"], None).context("gh is not logged in (gh auth login)")?;
+    let me = gh(&["user"], None).context("not signed in to GitHub")?;
     let login = me["login"].as_str().ok_or_else(|| anyhow!("gh gave no login"))?.to_owned();
     let id = me["id"].as_u64().ok_or_else(|| anyhow!("gh gave no id"))?;
     let gists = gh(&["gists?per_page=100"], None)?;

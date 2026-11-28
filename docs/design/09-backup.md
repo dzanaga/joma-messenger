@@ -56,4 +56,27 @@ with `gh` or a file; step 2 built in 0.5.3.dev1: the restore screen and new devi
   badge and offered the new one. Publishing to a real gist was not run (it would write
   to your GitHub); the header, the add card and the banner were not seen on screen (the
   host's screen was off).
-- **Next.** Automatic backups (5), the GitHub App (4), restore on Android.
+- **The GitHub App** (step 4, 0.5.3.dev3). Registered by the user on 2026-11-28 from a
+  manifest (`scripts/github-app.sh`: a local page posts it to GitHub, GitHub sends the
+  browser back with a code, the script keeps the app id, slug and client ID in
+  `crates/joma/github-app.json` and drops the private key and secret). Permissions:
+  Gists write, Contents write, Metadata read. Device flow in `joma_backup::device`
+  (curl, form through stdin); the token goes to `joma_backup::gh::set_token` and every
+  `gh api`-style call then goes through curl with the token in a private header file
+  (`-H @file`), never on a command line. gh still wins when it is logged in. The app
+  cannot create repos (no Administration permission, as agreed): Joma names
+  `github.com/new?name=joma-backup&visibility=private` and the app's install page.
+- **Automatic backups** (step 5, user 2026-11-28: a password prompt by default, the
+  keyring as an option). `crates/joma/src/keyring.rs` (`secret-tool`, secrets through
+  stdin; a test profile uses private files under its folder instead), `signin.rs`
+  (`Auto` in `$XDG_CONFIG_HOME/joma/backup.toml`: on, last). Turning on asks the password
+  (twice), backs up all accounts, then keeps password and refresh token; the tick runs
+  one backup a day (a failure retries after an hour); turning off clears both.
+- **Tested** (2026-11-28, profile `sa`, `JOMA_GITHUB_WEB`/`JOMA_GITHUB_API` at a local
+  stand-in without gh): sign-in (pending twice, then the token), a backup refused with
+  the create-it-yourself message when the stand-in refuses `user/repos`, automatic
+  backups on (repo created, account and index written, password and refresh token
+  kept), after a restart the daily backup ran with a refreshed token, off cleared both.
+  The device flow against the real GitHub waits on "Enable Device Flow" in the app's
+  settings (checked: GitHub answers `device_flow_disabled`).
+- **Next.** Restore on Android (A1).

@@ -207,6 +207,34 @@ impl Joma {
                         })),
                 )
         })
+        // The encrypted backup in the private repo joma-backup: the password asked each
+        // time, or kept in the keyring for a daily automatic backup.
+        .child({
+            let last = match self.auto.last {
+                0 => "not backed up from this machine yet".to_owned(),
+                l => {
+                    let h = crate::github::now().saturating_sub(l) / 3600;
+                    format!("last backup {}", if h < 1 { "less than an hour ago".to_owned() } else if h < 48 { format!("{h} h ago") } else { format!("{} days ago", h / 24) })
+                }
+            };
+            div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap(px(6.))
+                .px(px(10.))
+                .py(px(4.))
+                .child(div().flex_1().min_w(px(0.)).text_size(px(t.size - 2.)).text_color(t.muted).child(format!("{last} · {}", if self.auto.on { "automatic, daily" } else { "by hand" })))
+                .child(button("backup-now", G_DOWNLOAD, "back up now", t, false).on_click(cx.listener(|this, _, window, cx| this.backup_button(window, cx))))
+                .child(
+                    button("backup-auto", G_CHECK, if self.auto.on { "automatic: on" } else { "automatic: off" }, t, self.auto.on)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            let on = !this.auto.on;
+                            this.auto_switch(on, window, cx)
+                        })),
+                )
+        })
+        .children(self.github_signin_card(t, cx).map(|c| c.mx(px(10.)).my(px(4.))))
     }
 
     /// This account's devices, and linking a new one.

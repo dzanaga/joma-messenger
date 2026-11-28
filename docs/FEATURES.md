@@ -132,6 +132,17 @@ password makes the backup useless. `joma backup list`, `joma github status`.
   devices then show "new device … joined your account" in Devices with **keep** and
   **revoke** (also for a device linked from another of your devices), until you choose.
   `joma devices [--json]` lists them, `joma devices keep <name|id>` keeps one.
+- **Without gh**: Joma signs in with its own GitHub App (Joma Messenger). It shows a code
+  (copy it, open github.com/login/device, type it); the app may write only your badge
+  gist and the repo `joma-backup`. Joma keeps the token in memory until it quits. The
+  app cannot create the repo: Joma says where to create it (private) and where to give
+  the app that repo. `joma github signin` shows the code in the window.
+- **Back up now** in Accounts asks the password each time (twice) and backs up every
+  account on this machine; the line says when the last backup worked.
+- **Automatic backups** (off unless you turn them on, Accounts → automatic): Joma asks
+  the password once and keeps it, with the GitHub App's refresh token when there is no
+  gh, in the system keyring (libsecret); then it backs up all accounts once a day.
+  Turning it off deletes both from the keyring. `joma backup auto [on|off] [--json]`.
 
 ## The ✓ GitHub badge
 - **Show yours:** Accounts → **show a GitHub badge** lists the open account in a public
@@ -368,6 +379,9 @@ notifications); calls, voice messages and files not yet tried. Design:
 `docs/design/07-android.md`.
 
 ## Log
+- 0.5.3.dev3 (2026-11-28): sign in with Joma's GitHub App when there is no gh (a code
+  to type on GitHub); back up now from Accounts; optional automatic daily backups with
+  the password in the system keyring; `joma github signin`, `joma backup auto`.
 - 0.5.3.dev2 (2026-11-27): the ✓ GitHub badge: show yours from Accounts (a public gist
   lists only the accounts you choose), see your contacts' in the conversation header, add
   people with `gh:<name>`, and an offer to add the new account when someone you added by

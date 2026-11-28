@@ -72,7 +72,17 @@ pub fn backup(accounts: &[Account], password: &str, file: Option<&Path>) -> Resu
         return Ok(done.join("\n"));
     }
     let login = gh::login()?;
-    gh::ensure_repo(&login)?;
+    if let Err(e) = gh::ensure_repo(&login) {
+        // The app's token may not create repos, and reaches only the repos it was given.
+        if gh::has_token() && !e.to_string().contains("is public") {
+            bail!(
+                "Joma's GitHub App cannot reach github.com/{login}/{repo}: create it (private) at https://github.com/new?name={repo}&visibility=private, then give the app that repo at {} ({e:#})",
+                crate::signin::install_url(),
+                repo = joma_backup::REPO
+            );
+        }
+        return Err(e);
+    }
     let mut index = gh::index(&login)?;
     let mut done = Vec::new();
     for a in accounts {

@@ -185,20 +185,139 @@ impl Index {
     }
 }
 
-// ---- GitHub through gh ------------------------------------------------------------
+// ---- GitHub: through gh, or the Joma GitHub App's token ----------------------------
 
-/// GitHub reached through the user's `gh` login (step 1 of D-24; the GitHub App comes
-/// next). Joma never reads gh's token: it runs `gh api` each time.
+/// GitHub's REST API, reached through the user's `gh` login or, once the user signed in
+/// with the Joma GitHub App ([`device`]), through that app's token. Joma never reads gh's
+/// token: it runs `gh api` each time. The app's token stays in memory ([`gh::set_token`]).
 pub mod gh {
     use super::*;
     use std::io::Write;
     use std::process::{Command, Stdio};
+    use std::sync::Mutex;
 
-    fn api(args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
+    static TOKEN: Mutex<Option<String>> = Mutex::new(None);
+
+    /// Use the GitHub App's user token from now on (`None`: back to gh).
+    pub fn set_token(token: Option<String>) {
+        *TOKEN.lock().unwrap_or_else(|e| e.into_inner()) = token;
+    }
+
+    pub fn has_token() -> bool {
+        TOKEN.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+    }
+
+    fn token() -> Option<String> {
+        TOKEN.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// gh is installed and logged in.
+    pub fn cli_ready() -> bool {
+        Command::new("gh").args(["auth", "status"]).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success())
+    }
+
+    /// GitHub's API; a test profile may point it at a local stand-in (`JOMA_GITHUB_API`).
+    pub fn api_base() -> String {
+        match (std::env::var_os("JOMA_PROFILE"), std::env::var("JOMA_GITHUB_API")) {
+            (Some(_), Ok(url)) if url.starts_with("http://127.0.0.1:") => url.trim_end_matches('/').to_owned(),
+            _ => "https://api.github.com".into(),
+        }
+    }
+
+    /// `gh api`'s arguments as used here: `[-X METHOD] [-H header]… path [--input -]`.
+    struct Call {
+        method: String,
+        headers: Vec<String>,
+        path: String,
+    }
+
+    fn parse(args: &[&str]) -> Call {
+        let mut c = Call { method: String::new(), headers: Vec::new(), path: String::new() };
+        let mut i = 0;
+        while i < args.len() {
+            match args[i] {
+                "-X" => {
+                    c.method = args.get(i + 1).unwrap_or(&"GET").to_string();
+                    i += 1;
+                }
+                "-H" => {
+                    c.headers.push(args.get(i + 1).unwrap_or(&"").to_string());
+                    i += 1;
+                }
+                "--input" => i += 1,
+                a => c.path = a.trim_start_matches('/').to_owned(),
+            }
+            i += 1;
+        }
+        c
+    }
+
+    /// The same call with the app's token, through curl. The token goes to curl in a
+    /// private file (never on its command line).
+    fn with_token(token: &str, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
+        let c = parse(args);
+        let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
+        let hdr = dir.join(format!("joma-gh-{}-{}", std::process::id(), B64.encode(random(6)?).replace(['/', '+', '='], "x")));
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&hdr)?;
+            writeln!(f, "Authorization: Bearer {token}")?;
+        }
+        let url = format!("{}/{}", api_base(), c.path);
+        let mut cmd = Command::new("curl");
+        cmd.args(["-sS", "-L", "--max-time", "60", "-H", "User-Agent: joma", "-H", "X-GitHub-Api-Version: 2022-11-28", "-w", "\n%{http_code}"]);
+        cmd.arg("-H").arg(format!("@{}", hdr.display()));
+        if !c.headers.iter().any(|h| h.to_ascii_lowercase().starts_with("accept:")) {
+            cmd.args(["-H", "Accept: application/vnd.github+json"]);
+        }
+        for h in &c.headers {
+            cmd.args(["-H", h]);
+        }
+        if !c.method.is_empty() {
+            cmd.args(["-X", &c.method]);
+        }
+        if input.is_some() {
+            cmd.args(["-H", "Content-Type: application/json", "--data-binary", "@-"]);
+        }
+        cmd.arg(&url).stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() });
+        let run = (|| -> Result<std::process::Output> {
+            let mut child = cmd.spawn().context("curl is not installed")?;
+            if let Some(i) = input {
+                child.stdin.take().expect("piped").write_all(i)?;
+            }
+            Ok(child.wait_with_output()?)
+        })();
+        let _ = std::fs::remove_file(&hdr);
+        let out = run?;
+        if !out.status.success() {
+            bail!("cannot reach GitHub: {}", String::from_utf8_lossy(&out.stderr).trim());
+        }
+        let mut body = out.stdout;
+        let pos = body.iter().rposition(|b| *b == b'\n').unwrap_or(0);
+        let code: u16 = String::from_utf8_lossy(&body[pos + 1..]).trim().parse().unwrap_or(0);
+        body.truncate(pos);
+        match code {
+            200..=299 => Ok(body),
+            401 => bail!("GitHub access was removed or expired: sign in with GitHub again"),
+            404 => bail!("{}: Not Found (HTTP 404)", c.path),
+            c2 => {
+                let msg = serde_json::from_slice::<serde_json::Value>(&body).ok().and_then(|v| v["message"].as_str().map(str::to_owned)).unwrap_or_default();
+                bail!("GitHub answered {c2} for {}: {msg}", c.path)
+            }
+        }
+    }
+
+    /// One GitHub API call with `gh api`'s arguments: through the app's token when the
+    /// user signed in with it, else through gh.
+    pub fn api(args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
+        if let Some(t) = token() {
+            return with_token(&t, args, input);
+        }
         let mut c = Command::new("gh");
         c.arg("api").args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
         c.stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() });
-        let mut child = c.spawn().context("gh is not installed")?;
+        let mut child = c.spawn().context("not signed in to GitHub (no gh, no GitHub sign-in)")?;
         if let Some(i) = input {
             child.stdin.take().expect("piped").write_all(i)?;
         }
@@ -209,9 +328,14 @@ pub mod gh {
         Ok(out.stdout)
     }
 
+    /// Calls failed because nobody is signed in: offer "sign in with GitHub".
+    pub fn not_signed_in(e: &str) -> bool {
+        e.contains("not logged in") || e.contains("not signed in") || e.contains("access was removed") || e.contains("auth login")
+    }
+
     /// The login gh is signed in as, or why not.
     pub fn login() -> Result<String> {
-        let v: serde_json::Value = serde_json::from_slice(&api(&["user"], None).context("gh is not logged in (gh auth login)")?)?;
+        let v: serde_json::Value = serde_json::from_slice(&api(&["user"], None).context("not signed in to GitHub (sign in with GitHub, or gh auth login)")?)?;
         v["login"].as_str().map(str::to_owned).ok_or_else(|| anyhow!("gh gave no login"))
     }
 
@@ -272,6 +396,136 @@ pub mod gh {
             Some((b, _)) => serde_json::from_slice(&b).context("index.json is damaged")?,
             None => Index::default(),
         })
+    }
+}
+
+// ---- Signing in with the Joma GitHub App (device flow) ------------------------------
+
+/// The device flow of the Joma GitHub App: no client secret, nothing secret in the
+/// binary. Joma shows the code, the user types it at github.com/login/device.
+pub mod device {
+    use super::*;
+
+    /// Where the device flow lives; a test profile may point it at a local stand-in
+    /// (`JOMA_GITHUB_WEB`).
+    pub fn web_base() -> String {
+        match (std::env::var_os("JOMA_PROFILE"), std::env::var("JOMA_GITHUB_WEB")) {
+            (Some(_), Ok(url)) if url.starts_with("http://127.0.0.1:") => url.trim_end_matches('/').to_owned(),
+            _ => "https://github.com".into(),
+        }
+    }
+
+    #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+    pub struct Code {
+        pub device_code: String,
+        pub user_code: String,
+        pub verification_uri: String,
+        #[serde(default = "five")]
+        pub interval: u64,
+        #[serde(default)]
+        pub expires_in: u64,
+    }
+
+    fn five() -> u64 {
+        5
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum Poll {
+        Pending,
+        /// Wait this many seconds more between polls.
+        SlowDown(u64),
+        Token(Token),
+        /// Denied, expired, or the app has the device flow off: the message says.
+        Failed(String),
+    }
+
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    pub struct Token {
+        pub access: String,
+        /// Empty when the app's tokens do not expire.
+        #[serde(default)]
+        pub refresh: String,
+        /// Unix seconds; 0: does not expire.
+        #[serde(default)]
+        pub expires: u64,
+    }
+
+    fn post(path: &str, form: &[(&str, &str)]) -> Result<serde_json::Value> {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        // The form goes through stdin: a refresh token never shows on a command line.
+        let body: Vec<String> = form.iter().map(|(k, v)| format!("{k}={}", v.replace('%', "%25").replace('&', "%26").replace('+', "%2B").replace('=', "%3D"))).collect();
+        let mut child = Command::new("curl")
+            .args(["-sS", "--max-time", "30", "-H", "Accept: application/json", "-H", "User-Agent: joma", "-X", "POST", "--data-binary", "@-"])
+            .arg(format!("{}/{path}", web_base()))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .context("curl is not installed")?;
+        child.stdin.take().expect("piped").write_all(body.join("&").as_bytes())?;
+        let out = child.wait_with_output()?;
+        if !out.status.success() {
+            bail!("cannot reach GitHub: {}", String::from_utf8_lossy(&out.stderr).trim());
+        }
+        serde_json::from_slice(&out.stdout).context("GitHub's answer is not JSON")
+    }
+
+    fn explain(v: &serde_json::Value) -> String {
+        match v["error"].as_str().unwrap_or("") {
+            "device_flow_disabled" => "the Joma GitHub App has the device flow off (its settings: Enable Device Flow)".into(),
+            "expired_token" => "the code expired: sign in again".into(),
+            "access_denied" => "you cancelled the sign-in on GitHub".into(),
+            "incorrect_client_credentials" => "GitHub does not know Joma's app".into(),
+            e => format!("GitHub: {} {}", e, v["error_description"].as_str().unwrap_or("")).trim().to_owned(),
+        }
+    }
+
+    /// Ask GitHub for a code to show the user.
+    pub fn start(client_id: &str) -> Result<Code> {
+        let v = post("login/device/code", &[("client_id", client_id)])?;
+        if v.get("error").is_some() {
+            bail!("{}", explain(&v));
+        }
+        serde_json::from_value(v).context("GitHub gave no code")
+    }
+
+    fn token_of(v: &serde_json::Value, now: u64) -> Option<Token> {
+        let access = v["access_token"].as_str()?.to_owned();
+        let refresh = v["refresh_token"].as_str().unwrap_or("").to_owned();
+        let expires = v["expires_in"].as_u64().map_or(0, |s| now + s);
+        Some(Token { access, refresh, expires })
+    }
+
+    fn now() -> u64 {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+    }
+
+    /// Ask once whether the user typed the code yet.
+    pub fn poll(client_id: &str, code: &Code) -> Result<Poll> {
+        let v = post(
+            "login/oauth/access_token",
+            &[("client_id", client_id), ("device_code", &code.device_code), ("grant_type", "urn:ietf:params:oauth:grant-type:device_code")],
+        )?;
+        Ok(answer(&v, now()))
+    }
+
+    pub(crate) fn answer(v: &serde_json::Value, now: u64) -> Poll {
+        if let Some(t) = token_of(v, now) {
+            return Poll::Token(t);
+        }
+        match v["error"].as_str().unwrap_or("") {
+            "authorization_pending" => Poll::Pending,
+            "slow_down" => Poll::SlowDown(v["interval"].as_u64().unwrap_or(10)),
+            _ => Poll::Failed(explain(v)),
+        }
+    }
+
+    /// A new token from a refresh token (no client secret needed with the device flow).
+    pub fn refresh(client_id: &str, refresh: &str) -> Result<Token> {
+        let v = post("login/oauth/access_token", &[("client_id", client_id), ("grant_type", "refresh_token"), ("refresh_token", refresh)])?;
+        token_of(&v, now()).ok_or_else(|| anyhow!("{}", explain(&v)))
     }
 }
 
@@ -339,5 +593,15 @@ mod tests {
         assert_eq!(i.pick(&["HOME".into()])[0].jami, "bbbbbbbb22");
         assert_eq!(i.pick(&["aaaaaaaa".into()])[0].label, "work2");
         assert!(i.pick(&["aaa".into()]).is_empty());
+    }
+
+    #[test]
+    fn device_answers() {
+        use device::{answer, Poll};
+        assert_eq!(answer(&serde_json::json!({"error":"authorization_pending"}), 0), Poll::Pending);
+        assert_eq!(answer(&serde_json::json!({"error":"slow_down","interval":10}), 0), Poll::SlowDown(10));
+        assert!(matches!(answer(&serde_json::json!({"error":"device_flow_disabled"}), 0), Poll::Failed(m) if m.contains("Enable Device Flow")));
+        let t = answer(&serde_json::json!({"access_token":"ghu_x","refresh_token":"ghr_y","expires_in":28800}), 100);
+        assert_eq!(t, Poll::Token(device::Token { access: "ghu_x".into(), refresh: "ghr_y".into(), expires: 28900 }));
     }
 }

@@ -17,12 +17,14 @@ mod desk;
 mod github;
 mod hypr;
 mod ipc;
+mod keyring;
 mod media;
 mod model;
 mod player;
 mod presence;
 mod seen;
 mod setup;
+mod signin;
 mod stage;
 mod sync;
 mod tray;
@@ -84,6 +86,8 @@ const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); -
        joma restore [ACCT…] [--file PATH]
                                  restore accounts from the repo or a file
        joma github status        the GitHub login and the backup repo
+       joma github signin        sign in with Joma's GitHub App (the code shows in the window)
+       joma backup auto [on|off] automatic daily backups (the password kept in the keyring)
        joma github publish [label] | unpublish
                                  show contacts a ✓ GitHub badge on the open account (it is
                                  listed in your public gist joma.json), or stop
@@ -131,6 +135,15 @@ fn cli(args: &[String]) -> Option<i32> {
             }
         }
         Some("backup") if args.get(1).map(String::as_str) == Some("list") => Request::BackupList,
+        Some("backup") if args.get(1).map(String::as_str) == Some("auto") => match args.get(2).map(String::as_str) {
+            Some(w @ ("on" | "off")) => Request::Github { what: "auto".into(), arg: Some(w.into()), label: None, json: false },
+            None | Some("--json") => Request::Github { what: "auto".into(), arg: None, label: None, json: args.iter().any(|a| a == "--json") },
+            _ => {
+                eprintln!("joma backup auto [on|off] [--json]");
+                return Some(2);
+            }
+        },
+        Some("github") if args.get(1).map(String::as_str) == Some("signin") => Request::Github { what: "signin".into(), arg: None, label: None, json: false },
         Some(c @ ("backup" | "restore")) => {
             let (mut accounts, mut all, mut file) = (Vec::new(), false, None);
             let mut it = args[1..].iter();

@@ -376,6 +376,51 @@ impl Joma {
         div().flex().flex_1().items_center().justify_center().child(card).into_any_element()
     }
 
+    /// Signing in with the Joma GitHub App: the code to type on GitHub.
+    pub(super) fn github_signin_card(&self, t: &Theme, cx: &mut Context<Self>) -> Option<gpui::Div> {
+        let s = self.gh_signin.as_ref()?;
+        let mut card = div().flex().flex_col().gap(px(8.)).p(px(10.)).bg(t.raised).child(div().text_color(t.bright).font_weight(FontWeight::BOLD).child("Sign in with GitHub"));
+        if let Some(e) = &s.error {
+            card = card.child(div().text_color(t.red).child(e.clone())).child(
+                div()
+                    .flex()
+                    .gap(px(6.))
+                    .child(button("gh-signin-again", G_UNDO, "try again", t, true).on_click(cx.listener({
+                        let after = s.after;
+                        move |this, _, _, cx| {
+                            this.gh_signin = None;
+                            this.github_signin(after, cx)
+                        }
+                    })))
+                    .child(button("gh-signin-close", G_TIMES, "close", t, false).on_click(cx.listener(|this, _, _, cx| this.cancel_github_signin(cx)))),
+            );
+            return Some(card);
+        }
+        let Some(code) = &s.code else {
+            return Some(card.child(div().text_color(t.muted).child("asking GitHub for a code…")));
+        };
+        let (url, user_code) = (code.verification_uri.clone(), code.user_code.clone());
+        Some(
+            card.child(div().text_color(t.muted).child(format!("On GitHub ({url}), type this code:")))
+                .child(div().text_size(px(t.size + 10.)).text_color(t.bright).font_weight(FontWeight::BOLD).child(user_code.clone()))
+                .child(div().text_color(t.muted).text_size(px(t.size - 2.)).child(
+                    "Joma's GitHub App may then write your ✓ badge gist and the private joma-backup repo, nothing else. Joma keeps no token after it quits, unless automatic backups are on.",
+                ))
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap(px(6.))
+                        .child(button("gh-signin-open", G_LINK, "copy the code and open GitHub", t, true).on_click(cx.listener(move |_, _, _, cx| {
+                            cx.write_to_clipboard(gpui::ClipboardItem::new_string(user_code.clone()));
+                            cx.open_url(&url);
+                        })))
+                        .child(button("gh-signin-cancel", G_TIMES, "cancel", t, false).on_click(cx.listener(|this, _, _, cx| this.cancel_github_signin(cx)))),
+                )
+                .child(div().text_color(t.muted).text_size(px(t.size - 2.)).child("waiting for GitHub…")),
+        )
+    }
+
     /// Restore accounts from the GitHub backup: pick them, type the password once.
     pub(super) fn restore_card(&self, card: gpui::Div, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
         let v = self.restoring.clone().unwrap_or_default();
@@ -386,7 +431,9 @@ impl Joma {
                 "Your accounts come back with the same Jami ID, contacts and username; messages return from your contacts and other devices. If an account still runs elsewhere, this machine joins it as a new device.",
             ));
         let here: Vec<String> = self.accounts.iter().filter_map(|(id, _)| joma_jami::account_uri(id).ok()).collect();
-        let body = if let Some(from) = &v.cli {
+        let body = if let Some(card) = self.github_signin_card(t, cx) {
+            card
+        } else if let Some(from) = &v.cli {
             div()
                 .flex()
                 .flex_col()
@@ -404,8 +451,14 @@ impl Joma {
                 .flex_col()
                 .gap(px(6.))
                 .child(div().text_color(t.red).child(if v.error.is_empty() { "No accounts in the backup.".to_owned() } else { v.error.clone() }))
-                .child(div().text_color(t.muted).text_size(px(t.size - 2.)).child("Joma reads the backup through the GitHub CLI: run gh auth login in a terminal, then try again. A backup file: joma restore --file <path>."))
-                .child(div().flex().child(button("restore-retry", G_UNDO, "try again", t, false).on_click(cx.listener(|this, _, _, cx| this.start_restore(cx)))))
+                .child(div().text_color(t.muted).text_size(px(t.size - 2.)).child("Sign in with GitHub (or run gh auth login in a terminal), then try again. A backup file: joma restore --file <path>."))
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(6.))
+                        .child(button("restore-signin", G_LINK, "sign in with GitHub", t, true).on_click(cx.listener(|this, _, _, cx| this.github_signin(crate::signin::After::Restore, cx))))
+                        .child(button("restore-retry", G_UNDO, "try again", t, false).on_click(cx.listener(|this, _, _, cx| this.start_restore(cx)))),
+                )
         } else {
             let mut list = div().flex().flex_col();
             for e in &v.entries {
