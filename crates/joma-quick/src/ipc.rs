@@ -131,6 +131,17 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         arg: Option<String>,
     },
+    /// The files view: `list` the folders, `ls` one (`arg`: folder, `path`: inside it),
+    /// `show` one in Joma's window, `open` a file with the system's app.
+    Files {
+        what: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        arg: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+        #[serde(default)]
+        json: bool,
+    },
     /// Quit Joma (closing its window only hides it).
     Quit,
 }

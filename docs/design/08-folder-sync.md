@@ -27,5 +27,29 @@ D-23, discussion `docs/discussions/2026-11-24-folder-sync.qmd`.
 - **Tested** (2026-11-27): two test profiles linked as two devices of one account, sync
   on in both, a folder added on one: its files reached the other's `~/joma-sync/` in
   5 s and an edit came back in 12 s, over a Jami tunnel on the local network.
-- **Not yet.** Contacts (folders shared in a conversation), Tailscale straight to the
-  other Syncthing without a tunnel, the folder list in the GitHub backup, agents.
+- **Contacts and conversations** (0.5.3.dev4, `crates/joma/src/shares.rs`; discussion
+  `2026-11-27-files`, question 2). One model: a share is a Syncthing folder with an
+  owner and members (`write`, `admin`), kept in `$XDG_DATA_HOME/joma/shares/<account>.json`.
+  A member who reads has a `receiveonly` folder. A conversation's files are one share
+  per member who sent files (`jc-<conv>-<member>`, under
+  `~/joma-sync/conversations/<conversation>/<member>/`, sub-folders by kind), so each
+  writes their own. Wire (account messages, same MIME, with `kind`): `offer` (owner to
+  members), `join` (a device that holds it: its Syncthing id and the `joma-sync-peers`
+  service, exposed to the members only; every member's device that holds it pairs and
+  answers), `members`, `leave`. Contacts' devices are added with `autoAcceptFolders`
+  off, so nothing arrives without joining; own devices keep accepting everything except
+  folders switched off for them. Staggered versioning, 30 days. Joining syncs through
+  the joining device; your other devices get it from that one.
+- **Not enforced by the other side.** Readers are `receiveonly` because their Joma sets
+  it; a modified client could still send changes, which the owner's Syncthing (a
+  `sendreceive` folder) would take. Honest members only, for now.
+- **Tested** (2026-11-28, two test accounts that are contacts, profiles `fa` and `fb`):
+  files sent in the conversation landed in `documents/` and `images/`, the offer reached
+  the other side, joining synced 2 MB over a Jami tunnel; deleting and editing on the
+  reading side left the owner's files alone; write permission given, a file written by
+  the member reached the owner; the reverse direction joined by itself after a restart
+  (once the fix that auto-joins conversations we take part in was in); a plain folder
+  shared with the contact (`joma sync share`) arrived as `receiveonly`. The files view
+  was not seen on screen (the host's screen was off at night).
+- **Not yet.** Tailscale straight to the other Syncthing without a tunnel, the folder
+  list in the GitHub backup, agents, the phone browsing a home device's folder.

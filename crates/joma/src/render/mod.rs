@@ -164,6 +164,7 @@ mod stage_view;
 mod chat;
 mod overlays;
 mod media;
+mod files;
 
 impl Joma {
     /// Copy new pictures (remote video, the desktop share) into images to paint.
@@ -327,6 +328,24 @@ impl Render for Joma {
             full
         } else if let Some(page) = settings {
             page
+        } else if self.gate == Gate::Ready && self.narrow && self.tab == Tab::Files {
+            div()
+                .flex()
+                .flex_1()
+                .min_w(px(0.))
+                .min_h(px(0.))
+                .when(self.files.open && self.files.key.is_some(), |d| d.child(tile(&t, true).flex_1().bg(t.bg).child(self.files_browser(&t, cx))))
+                .when(!(self.files.open && self.files.key.is_some()), |d| d.child(self.sidebar(&t, cx)))
+                .into_any_element()
+        } else if self.gate == Gate::Ready && self.tab == Tab::Files {
+            div()
+                .flex()
+                .flex_1()
+                .min_w(px(0.))
+                .min_h(px(0.))
+                .child(self.sidebar(&t, cx))
+                .child(tile(&t, true).flex_1().bg(t.bg).child(self.files_browser(&t, cx)))
+                .into_any_element()
         } else if self.gate == Gate::Ready && self.narrow {
             let chat = self.narrow_chat && self.selected.is_some();
             div()
@@ -463,6 +482,7 @@ impl Render for Joma {
             .on_action(cx.listener(|this, _: &TabDevices, window, cx| this.set_tab(Tab::Devices, window, cx)))
             .on_action(cx.listener(|this, _: &TabAccounts, window, cx| this.set_tab(Tab::Accounts, window, cx)))
             .on_action(cx.listener(|this, _: &TabAgents, window, cx| this.set_tab(Tab::Agents, window, cx)))
+            .on_action(cx.listener(|this, _: &TabFiles, window, cx| this.set_tab(Tab::Files, window, cx)))
             .on_action(cx.listener(|this, _: &ToggleQuick, _, cx| {
                 this.quick_open = !this.quick_open;
                 cx.notify();

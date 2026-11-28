@@ -76,6 +76,7 @@ impl Joma {
                     .child(item(2, Tab::Calls, G_PHONE, "calls", None, live))
                     .child(item(3, Tab::Contacts, G_USERS, "contacts", None, false))
                     .child(item(4, Tab::Devices, G_LAPTOP, "devices", None, self.device_op.is_some()))
+                    .child(item(7, Tab::Files, G_FOLDER, "files", (!self.sync.store.offers.is_empty()).then(|| self.sync.store.offers.len().to_string()), false))
                     .child(item(5, Tab::Accounts, G_USER_CIRCLE, "accounts", None, false))
                     .child(item(6, Tab::Agents, G_ROBOT, "agents", None, false)),
             )

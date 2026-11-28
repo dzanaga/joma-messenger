@@ -3,6 +3,57 @@
 use super::*;
 
 impl Joma {
+    /// Folders offered in this conversation (its members' files, or a folder the contact
+    /// shares): join, or not now (discussion 2026-11-27-files, mock-up 3).
+    fn share_offer_card(&self, t: &Theme, conv: &Conversation, cx: &mut Context<Self>) -> Option<gpui::Div> {
+        let peer = conv.peers.first().filter(|_| conv.peers.len() == 1);
+        let offers: Vec<&crate::shares::Offer> = self
+            .sync
+            .store
+            .offers
+            .values()
+            .filter(|o| o.conv.as_deref() == Some(conv.id.as_str()) || (o.conv.is_none() && peer == Some(&o.owner)))
+            .collect();
+        let has_files = self.sync.store.of_conv(&conv.id).next().is_some();
+        if offers.is_empty() && !has_files {
+            return None;
+        }
+        let mut card = div().flex().flex_col().gap(px(4.)).px(px(S3 + 4.)).py(px(6.)).bg(t.raised);
+        for o in offers {
+            let from = self.model.name_of(&o.owner);
+            let text = if o.conv.is_some() { format!("{from} shares this conversation's files with you") } else { format!("{from} shares the folder {}", o.label) };
+            let (j, d) = (o.folder.clone(), o.folder.clone());
+            card = card.child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(div().text_color(t.muted).child(G_FOLDER))
+                    .child(div().flex_1().min_w(px(0.)).text_color(t.bright).child(text))
+                    .child(div().text_size(px(t.size - 2.)).text_color(t.muted).child(if self.sync.st.is_some() { "you read it; it syncs into ~/joma-sync" } else { "turn sync on to join" }))
+                    .child(button(SharedString::from(format!("chat-join-{}", o.folder)), G_CHECK, "join", t, true).on_click(cx.listener(move |this, _, _, cx| this.join_share_ui(&j, cx))))
+                    .child(button(SharedString::from(format!("chat-nojoin-{}", o.folder)), G_TIMES, "not now", t, false).on_click(cx.listener(move |this, _, _, cx| this.decline_share(&d, cx)))),
+            );
+        }
+        if has_files {
+            let c = conv.id.clone();
+            card = card.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(div().flex_1().text_size(px(t.size - 2.)).text_color(t.muted).child("Files sent here also sync in this conversation's folder."))
+                    .child(button("chat-files", G_FOLDER, "files", t, false).on_click(cx.listener(move |this, _, _, cx| {
+                        this.tab = Tab::Files;
+                        this.refresh_sync_view();
+                        this.files_open(crate::app::FilesKey::Conversation(c.clone()), cx);
+                    }))),
+            );
+        }
+        Some(card)
+    }
+
     /// A contact added by GitHub name whose gist now names another Jami account: offer to
     /// add that one (user, 2026-11-27: keep in touch with the person).
     fn github_moved(&self, t: &Theme, conv: &Conversation, cx: &mut Context<Self>) -> Option<gpui::Div> {
@@ -767,6 +818,7 @@ impl Joma {
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach(paths.paths().to_vec(), cx)))
             .child(header)
             .children(self.github_moved(t, &conv, cx))
+            .children(self.share_offer_card(t, &conv, cx))
             .when_some(call_panel, |d, p| d.child(p))
             .children(direct)
             .children(watch)

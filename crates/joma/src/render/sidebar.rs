@@ -141,6 +141,7 @@ impl Joma {
                             div().pl(px(S3)).text_color(t.bright).font_weight(FontWeight::BOLD).child(match tab {
                                 Tab::Calls => "Calls",
                                 Tab::Devices => "Devices",
+                                Tab::Files => "Files",
                                 Tab::Accounts => "Accounts",
                                 _ => "Agents",
                             }),
@@ -179,6 +180,7 @@ impl Joma {
                             Mode::Username => "choose your username (contacts find you by it)",
                             Mode::LinkDevice => "link a device: on the new one choose \"link to an account\"",
                             Mode::DeviceName => "rename this device",
+                            Mode::ShareWith => "share the folder with a contact or a conversation's members (they read it; you choose who writes)",
                             Mode::RemoveAccount => "remove this account: only this device has it, so it is lost for good",
                             Mode::Password if self.password_ask.as_ref().is_some_and(|a| a.restore) => "restore: the backup's password",
                             Mode::Password if self.password_ask.as_ref().is_some_and(|a| a.first.is_some()) => "backup: type the same password again",
@@ -192,6 +194,7 @@ impl Joma {
                             Mode::Username => "enter: register · esc: cancel",
                             Mode::LinkDevice => "enter: link · esc: cancel",
                             Mode::DeviceName => "enter: rename · esc: cancel",
+                            Mode::ShareWith => "enter: offer it · esc: cancel",
                             Mode::RemoveAccount => "type delete, then enter · esc: keep it",
                             Mode::Password => "enter: continue · esc: cancel",
                             _ => "",
@@ -221,7 +224,8 @@ impl Joma {
                 Tab::Chats => list.into_any_element(),
                 Tab::Calls => self.calls_list(t, cx),
                 Tab::Contacts => self.contacts_list(t, cx),
-                Tab::Devices => div().id("devices").flex().flex_col().flex_1().overflow_y_scroll().child(self.devices_group(t, cx)).child(self.sync_group(t, cx)).into_any_element(),
+                Tab::Devices => div().id("devices").flex().flex_col().flex_1().overflow_y_scroll().child(self.devices_group(t, cx)).child(self.sync_summary(t, cx)).into_any_element(),
+                Tab::Files => self.files_list(t, cx),
                 Tab::Accounts => self.accounts_list(t, cx),
                 Tab::Agents => self.agents_list(t, cx),
             })

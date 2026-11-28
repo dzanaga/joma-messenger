@@ -39,7 +39,7 @@ icons! {
     G_CROSSHAIRS = "crosshair", G_ZOOM_IN = "zoom-in", G_ZOOM_OUT = "zoom-out", G_SIGNAL = "signal",
     // Drawn for the restyle, not used yet.
     G_MORE = "more", G_SEND = "send", G_EYE_OFF = "eye-off", G_TRAY = "tray", G_CAMERA = "camera",
-    G_DOWNLOAD = "download", G_REPLY = "reply", G_BELL = "bell",
+    G_DOWNLOAD = "download", G_REPLY = "reply", G_BELL = "bell", G_FOLDER = "folder", G_FILE = "file",
 }
 
 impl Icon {

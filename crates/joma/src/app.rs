@@ -67,6 +67,7 @@ actions!(
         TabDevices,
         TabAccounts,
         TabAgents,
+        TabFiles,
         AcceptRequest,
         DeclineRequest,
     ]
@@ -252,6 +253,8 @@ pub enum Mode {
     RemoveAccount,
     /// The input takes the backup password (`joma backup` / `joma restore`), masked.
     Password,
+    /// The input takes a contact or conversation to share a folder with.
+    ShareWith,
 }
 
 /// A backup or restore waiting for its password in the window.
@@ -331,6 +334,69 @@ pub enum Tab {
     Accounts,
     /// Agent accounts (a placeholder for now).
     Agents,
+    /// Synced folders and their files (discussion 2026-11-27-files).
+    Files,
+}
+
+/// What the files view shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FilesKey {
+    /// A Syncthing folder (ours, or shared).
+    Folder(String),
+    /// A conversation's files: every member's folder.
+    Conversation(String),
+    /// Files received in conversations (the download folder).
+    Received,
+}
+
+impl FilesKey {
+    pub fn id(&self) -> String {
+        match self {
+            FilesKey::Folder(f) => format!("f-{f}"),
+            FilesKey::Conversation(c) => format!("c-{c}"),
+            FilesKey::Received => "received".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FileEntry {
+    pub name: String,
+    pub path: std::path::PathBuf,
+    pub dir: bool,
+    pub size: u64,
+    pub modified: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct FilesView {
+    pub key: Option<FilesKey>,
+    /// The folder shown (inside the chosen one); None: its top.
+    pub dir: Option<std::path::PathBuf>,
+    pub entries: Vec<FileEntry>,
+    pub picked: Option<std::path::PathBuf>,
+    /// The narrow window shows the folder instead of the list.
+    pub open: bool,
+    pub read_at: Option<Instant>,
+    /// The folder `share…` asks a name for.
+    pub share_for: Option<String>,
+}
+
+/// Folders first, then by name; dot files hidden (Syncthing's own among them).
+pub fn read_dir(dir: &std::path::Path) -> Vec<FileEntry> {
+    let mut out: Vec<FileEntry> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+        .filter_map(|e| {
+            let m = e.metadata().ok()?;
+            let modified = m.modified().ok().and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs() as i64);
+            Some(FileEntry { name: e.file_name().to_string_lossy().into_owned(), path: e.path(), dir: m.is_dir(), size: m.len(), modified })
+        })
+        .collect();
+    out.sort_by(|a, b| (!a.dir, a.name.to_lowercase()).cmp(&(!b.dir, b.name.to_lowercase())));
+    out
 }
 
 /// A desktop share that took place, for the Calls tab (kept per account).
@@ -579,6 +645,8 @@ pub struct Joma {
     pub sync_view: Option<crate::sync::Report>,
     sync_view_busy: bool,
     sync_view_at: Option<Instant>,
+    /// The files view.
+    pub files: FilesView,
     /// Our other devices' Joma presence, by device id.
     pub my_devices: HashMap<String, crate::presence::Peer>,
     /// When we last told our other devices, and what.
@@ -626,7 +694,7 @@ pub fn media_name(name: &str) -> bool {
 const AUTO_DOWNLOAD: u64 = 200 * 1024 * 1024;
 
 /// Where received files go: `~/Downloads/joma` (the XDG download dir, if set).
-fn download_dir() -> std::path::PathBuf {
+pub fn download_dir() -> std::path::PathBuf {
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
     let base = std::process::Command::new("xdg-user-dir")
         .arg("DOWNLOAD")
@@ -686,7 +754,7 @@ fn restart() -> std::io::Error {
 }
 
 /// Is this a test profile (its own XDG data dir), where the Qt client cannot interfere?
-fn own_profile() -> bool {
+pub fn own_profile() -> bool {
     std::env::var_os("JOMA_PROFILE").is_some()
 }
 
@@ -873,6 +941,7 @@ impl Joma {
             sync_view: None,
             sync_view_busy: false,
             sync_view_at: None,
+            files: FilesView::default(),
             my_devices: HashMap::new(),
             self_told: None,
             accounts: Vec::new(),
@@ -1044,6 +1113,235 @@ impl Joma {
             }
             crate::sync::Heard::Changed(text) => self.show_flash(text, cx),
         }
+        cx.notify();
+    }
+
+    /// A folder by its id, label, path or conversation (for the command line).
+    fn files_key(&self, name: &str) -> Option<FilesKey> {
+        if name == "received" {
+            return Some(FilesKey::Received);
+        }
+        let low = name.to_lowercase();
+        let folders = self.sync.st.as_ref().and_then(|s| s.folders().ok()).unwrap_or_default();
+        if let Some(f) = folders.iter().find(|f| f.id == name || f.label.to_lowercase() == low || f.path == name) {
+            return Some(FilesKey::Folder(f.id.clone()));
+        }
+        self.sync.store.shares.values().filter_map(|s| s.conv.clone()).find(|c| *c == name || self.conv_title(c).to_lowercase() == low).map(FilesKey::Conversation)
+    }
+
+    fn files_request(&mut self, what: &str, arg: &str, path: Option<&str>, json: bool, cx: &mut Context<Self>) -> Reply {
+        match what {
+            "list" => {
+                let r = self.sync_report();
+                let me = self.model.me.clone();
+                let mut rows = Vec::new();
+                for f in &r.folders {
+                    let s = r.shares.iter().find(|s| s.id == f.id);
+                    let (kind, with) = match s {
+                        None => ("yours", "your devices".to_owned()),
+                        Some(s) if s.conv.is_some() => ("conversation", self.conv_title(s.conv.as_deref().unwrap_or(""))),
+                        Some(s) => ("shared", s.others(&me).map(|u| self.model.name_of(u)).collect::<Vec<_>>().join(", ")),
+                    };
+                    let access = if f.kind == "receiveonly" { "read" } else { "write" };
+                    rows.push(serde_json::json!({"id": f.id, "label": f.label, "path": f.path, "kind": kind, "with": with, "you": access, "state": f.state, "files": f.files, "bytes": f.bytes, "need_files": f.need_files}));
+                }
+                let offers: Vec<serde_json::Value> = r.offers.iter().map(|o| serde_json::json!({"id": o.folder, "label": o.label, "from": self.model.name_of(&o.owner), "conversation": o.conv})).collect();
+                if json {
+                    return Reply::Text { text: serde_json::json!({"folders": rows, "offered": offers, "received": download_dir()}).to_string() };
+                }
+                let mut out: Vec<String> = rows.iter().map(|r| format!("{}  {} ({}, {}; you {})  {} · {} files", r["id"].as_str().unwrap_or(""), r["label"].as_str().unwrap_or(""), r["kind"].as_str().unwrap_or(""), r["with"].as_str().unwrap_or(""), r["you"].as_str().unwrap_or(""), r["state"].as_str().unwrap_or(""), r["files"])).collect();
+                if out.is_empty() {
+                    out.push(if r.on { "no synced folders".into() } else { "sync is off (joma sync on)".into() });
+                }
+                for o in &offers {
+                    out.push(format!("offered: {}  {} from {} (joma sync join {})", o["id"].as_str().unwrap_or(""), o["label"].as_str().unwrap_or(""), o["from"].as_str().unwrap_or(""), o["id"].as_str().unwrap_or("")));
+                }
+                out.push(format!("received: {}", download_dir().display()));
+                Reply::Text { text: out.join("\n") }
+            }
+            "ls" | "show" => {
+                let Some(key) = self.files_key(arg) else { return Reply::Error { message: format!("no folder {arg} (joma files)") } };
+                if what == "show" {
+                    self.tab = Tab::Files;
+                    self.refresh_sync_view();
+                    self.files_open(key, cx);
+                    return Reply::Done;
+                }
+                let saved = (self.files.key.clone(), self.files.dir.clone());
+                self.files.key = Some(key);
+                let root = self.files_root();
+                self.files.key = saved.0;
+                self.files.dir = saved.1;
+                let Some(root) = root else { return Reply::Error { message: "that folder is not on this machine".into() } };
+                let dir = path.map(|p| root.join(p)).unwrap_or(root.clone());
+                if !dir.starts_with(&root) || !dir.is_dir() {
+                    return Reply::Error { message: format!("{} is not a folder in it", dir.display()) };
+                }
+                let entries = read_dir(&dir);
+                if json {
+                    let v: Vec<serde_json::Value> = entries.iter().map(|e| serde_json::json!({"name": e.name, "path": e.path, "dir": e.dir, "size": e.size, "modified": e.modified})).collect();
+                    return Reply::Text { text: serde_json::Value::Array(v).to_string() };
+                }
+                Reply::Text { text: if entries.is_empty() { "empty".into() } else { entries.iter().map(|e| if e.dir { format!("{}/", e.name) } else { format!("{}  {}", e.name, crate::sync::size(e.size)) }).collect::<Vec<_>>().join("\n") } }
+            }
+            "open" => {
+                let p = std::path::PathBuf::from(arg);
+                if !p.exists() {
+                    return Reply::Error { message: format!("{arg} does not exist") };
+                }
+                if own_profile() {
+                    return Reply::Text { text: format!("would open {arg} (skipped in a test profile)") };
+                }
+                Joma::open_outside(&p);
+                Reply::Done
+            }
+            other => Reply::Error { message: format!("joma files: unknown {other}") },
+        }
+    }
+
+    pub fn conv_title_of(&self, conv: &str) -> String {
+        self.conv_title(conv)
+    }
+
+    /// Show a folder in the files view.
+    pub fn files_open(&mut self, key: FilesKey, cx: &mut Context<Self>) {
+        if self.files.key.as_ref() != Some(&key) {
+            self.files.dir = None;
+            self.files.picked = None;
+        }
+        self.files.key = Some(key);
+        self.files.open = true;
+        self.files_read();
+        cx.notify();
+    }
+
+    pub fn files_close(&mut self, cx: &mut Context<Self>) {
+        self.files.open = false;
+        cx.notify();
+    }
+
+    /// The chosen folder's top on this machine.
+    pub fn files_root(&self) -> Option<std::path::PathBuf> {
+        let r = self.sync_view.as_ref();
+        match self.files.key.as_ref()? {
+            FilesKey::Received => Some(download_dir()),
+            FilesKey::Folder(id) => r
+                .and_then(|r| r.folders.iter().find(|f| f.id == *id).map(|f| std::path::PathBuf::from(&f.path)))
+                .or_else(|| self.sync.store.shares.get(id).map(|s| std::path::PathBuf::from(&s.path)))
+                .or_else(|| self.sync.st.as_ref()?.folders().ok()?.into_iter().find(|f| f.id == *id).map(|f| std::path::PathBuf::from(f.path))),
+            FilesKey::Conversation(c) => self.sync.store.of_conv(c).next().and_then(|s| std::path::Path::new(&s.path).parent().map(|p| p.to_path_buf())),
+        }
+    }
+
+    /// Read the folder shown (on opening it and now and then).
+    pub fn files_read(&mut self) {
+        let Some(root) = self.files_root() else {
+            self.files.entries.clear();
+            return;
+        };
+        let dir = self.files.dir.clone().filter(|d| d.starts_with(&root)).unwrap_or(root);
+        self.files.entries = read_dir(&dir);
+        self.files.read_at = Some(Instant::now());
+    }
+
+    pub fn files_enter(&mut self, dir: &std::path::Path, cx: &mut Context<Self>) {
+        self.files.dir = Some(dir.to_path_buf());
+        self.files.picked = None;
+        self.files_read();
+        cx.notify();
+    }
+
+    pub fn files_up(&mut self, cx: &mut Context<Self>) {
+        if let Some(d) = self.files.dir.take() {
+            let root = self.files_root();
+            self.files.dir = d.parent().map(|p| p.to_path_buf()).filter(|p| root.as_ref().is_some_and(|r| p.starts_with(r) && p != r));
+        }
+        self.files_read();
+        cx.notify();
+    }
+
+    /// Open a file: pictures in Joma's viewer, the rest with the system's app.
+    pub fn files_activate(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        if crate::render::is_picture(path) {
+            self.viewer = Some(path.to_path_buf());
+            return cx.notify();
+        }
+        self.open_outside_checked(path, cx);
+    }
+
+    /// xdg-open, but never on the real desktop from a test profile.
+    pub fn open_outside_checked(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        if own_profile() {
+            return self.show_flash(format!("would open {} (skipped in a test profile)", path.display()), cx);
+        }
+        Joma::open_outside(path);
+    }
+
+    /// Files dropped on the folder shown: copied in.
+    pub fn files_drop(&mut self, paths: Vec<std::path::PathBuf>, cx: &mut Context<Self>) {
+        let Some(root) = self.files_root() else { return };
+        let dir = self.files.dir.clone().unwrap_or(root);
+        let mut n = 0;
+        for p in paths.iter().filter(|p| p.is_file()) {
+            let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into());
+            match std::fs::copy(p, crate::shares::free_name(&dir, &name)) {
+                Ok(_) => n += 1,
+                Err(e) => self.show_flash(format!("{name}: {e}"), cx),
+            }
+        }
+        if n > 0 {
+            self.show_flash(format!("{n} {} copied into {}", if n == 1 { "file" } else { "files" }, dir.display()), cx);
+        }
+        self.files_read();
+        cx.notify();
+    }
+
+    pub fn ask_share_with(&mut self, folder: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.files.share_for = Some(folder.to_owned());
+        self.set_mode(Mode::ShareWith, window, cx);
+    }
+
+    pub fn leave_share_ui(&mut self, folder: &str, cx: &mut Context<Self>) {
+        if !self.armed(&format!("leave:{folder}"), "click again to leave the folder (its files stay here)", cx) {
+            return;
+        }
+        let (acc, me) = (self.model.account.clone(), self.model.me.clone());
+        match self.sync.leave(&acc, &me, folder) {
+            Ok(()) => {
+                self.files.key = None;
+                self.show_flash("left; the files stay where they are", cx);
+            }
+            Err(e) => self.show_flash(format!("{e:#}"), cx),
+        }
+        self.refresh_sync_view();
+        cx.notify();
+    }
+
+    pub fn revert_folder(&mut self, folder: &str, cx: &mut Context<Self>) {
+        let r = self.sync.st.as_ref().map(|s| s.revert(folder));
+        match r {
+            Some(Ok(())) => self.show_flash("your changes are undone: the shared files come back", cx),
+            Some(Err(e)) => self.show_flash(format!("{e:#}"), cx),
+            None => {}
+        }
+        self.refresh_sync_view();
+    }
+
+    pub fn set_member_write(&mut self, folder: &str, uri: &str, write: bool, cx: &mut Context<Self>) {
+        let (acc, me) = (self.model.account.clone(), self.model.me.clone());
+        if let Err(e) = self.sync.set_write(&acc, &me, folder, uri, write) {
+            self.show_flash(format!("{e:#}"), cx);
+        }
+        self.refresh_sync_view();
+        cx.notify();
+    }
+
+    pub fn set_folder_device(&mut self, folder: &str, device_st: &str, on: bool, cx: &mut Context<Self>) {
+        let acc = self.model.account.clone();
+        if let Err(e) = self.sync.set_device_on(&acc, folder, device_st, on) {
+            self.show_flash(format!("{e:#}"), cx);
+        }
+        self.refresh_sync_view();
         cx.notify();
     }
 
@@ -1830,6 +2128,7 @@ impl Joma {
             (_, Mode::Search) => ("search", "Filter conversations"),
             (_, Mode::LinkDevice) => ("link", "The jami-auth:// code the new device shows, then Enter"),
             (_, Mode::DeviceName) => ("device-name", "A name for this device, then Enter"),
+            (_, Mode::ShareWith) => ("share-with", "A contact or a conversation, then Enter"),
             (_, Mode::RemoveAccount) => ("remove-account", "Type delete, then Enter"),
             _ => ("idle", ""),
         };
@@ -1900,7 +2199,11 @@ impl Joma {
         if self.sync.st.is_some() && self.sync.last_hello.is_none_or(|t| t.elapsed() > crate::sync::HELLO_EVERY) {
             self.sync_hello(false);
         }
-        if self.sync.st.is_some() && self.tab == Tab::Devices && self.sync_view_at.is_none_or(|t| t.elapsed() > Duration::from_secs(3)) {
+        if self.tab == Tab::Files && self.files.read_at.is_none_or(|t| t.elapsed() > Duration::from_secs(2)) {
+            self.files_read();
+            cx.notify();
+        }
+        if self.sync.st.is_some() && matches!(self.tab, Tab::Devices | Tab::Files) && self.sync_view_at.is_none_or(|t| t.elapsed() > Duration::from_secs(3)) {
             self.sync_view_at = Some(Instant::now());
             self.refresh_sync_view();
         }
@@ -4467,6 +4770,13 @@ impl Joma {
 
     pub fn set_tab(&mut self, tab: Tab, window: &mut Window, cx: &mut Context<Self>) {
         self.tab = tab;
+        if tab == Tab::Files {
+            self.files.open = false;
+            if self.sync.st.is_some() {
+                self.refresh_sync_view();
+            }
+            self.files_read();
+        }
         if self.mode == Mode::Removed {
             self.set_mode(Mode::Chat, window, cx);
         }
@@ -4481,7 +4791,7 @@ impl Joma {
     /// A row dropped on another: see [`joma_quick::drop_on`].
     pub fn drop_row(&mut self, dragged: &Dragged, target: &str, cx: &mut Context<Self>) {
         match dragged.tab {
-            Tab::Calls | Tab::Devices | Tab::Accounts | Tab::Agents => {}
+            Tab::Calls | Tab::Devices | Tab::Accounts | Tab::Agents | Tab::Files => {}
             Tab::Chats => {
                 let was = self.quick.favorites.contains(&dragged.id);
                 joma_quick::drop_on(&mut self.quick.favorites, None, &dragged.id, target);
@@ -4942,6 +5252,21 @@ impl Joma {
                 None => self.show_flash(format!("a username has {USERNAME_RULE}"), cx),
             },
             Mode::LinkDevice => self.link_device(&text, window, cx),
+            Mode::ShareWith => {
+                let Some(folder) = self.files.share_for.clone() else { return self.set_mode(Mode::Chat, window, cx) };
+                if text.is_empty() {
+                    return;
+                }
+                match self.share_with(&folder, &text) {
+                    Ok(t) => {
+                        self.files.share_for = None;
+                        self.show_flash(t, cx);
+                        self.set_mode(Mode::Chat, window, cx);
+                        self.refresh_sync_view();
+                    }
+                    Err(e) => self.show_flash(e, cx),
+                }
+            }
             Mode::DeviceName => {
                 if text.is_empty() {
                     return;
@@ -5428,6 +5753,12 @@ impl Joma {
                     .collect::<Vec<_>>()
                     .join("\n");
                 Reply::Text { text }
+            }
+            Request::Files { what, arg, path, json } => {
+                if self.gate != Gate::Ready {
+                    return Reply::Error { message: "Joma is not on an account now".into() };
+                }
+                self.files_request(&what, arg.as_deref().unwrap_or(""), path.as_deref(), json, cx)
             }
             Request::Contact { what, arg } => {
                 if self.gate != Gate::Ready {

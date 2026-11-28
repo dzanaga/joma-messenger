@@ -108,13 +108,36 @@ normal. `joma connections [<to>] [--json]` prints the same for every connection,
 conversation's members.
 
 ## Folder sync
-Devices tab → **synced folders**: turn sync on, add a folder, and it is kept the same on
-all your devices that run Joma with sync on (Joma runs its own Syncthing, reached
-through Jami: no server, no account). Folders from your other devices appear in
-`~/joma-sync/`. Each device shows whether it is syncing and the path to it; a relayed
-path is yellow (slow for large files). `joma sync on|off`, `joma sync add <path>
-[label]`, `joma sync remove <folder>`, `joma sync status [--json]`. Needs `syncthing`
-installed.
+The **files** view (the folder icon in the rail, Ctrl+7) holds every synced folder. Turn
+sync on there, **add folder**, and it is kept the same on all your devices that run Joma
+with sync on (Joma runs its own Syncthing, reached through Jami: no server, no account).
+Folders from your other devices appear in `~/joma-sync/`. Devices keeps one line and a
+link here. Needs `syncthing` installed.
+- **With people.** **share…** on one of your folders offers it to a contact or to a
+  conversation's members. They see the offer in the conversation and in files (join /
+  not now); joined, it syncs into `~/joma-sync/<name>`. The owner writes, members read;
+  the owner (or an admin) switches a member to **writes**. A member who only reads keeps
+  what they change or delete on their side (the file stays in the folder for the
+  others); **undo my changes** brings the shared files back.
+- **A conversation's files.** With sync on, a file you send in a conversation is also
+  copied into the conversation's folder, `~/joma-sync/conversations/<conversation>/<you>/`,
+  sorted into `images`, `gifs`, `audio` (voice messages in `audio/messages`), `video`
+  (`video/messages`) and `documents`. Each member's files are their own folder: they
+  write it, the others read it. The first file offers the folder to the members; once
+  you join one member's files (or share your own), the others' join by themselves.
+- **The folder view** shows the members (who reads, who writes), each device that syncs
+  it with the path to it (relayed in yellow: slow for large files), your devices with a
+  switch each, and the files: a folder opens, a click selects, a double click opens
+  (pictures in Joma's viewer), **show in folder**, **copy path**, **open in file
+  manager**; dropping files copies them in. Old versions of changed and deleted files
+  stay 30 days in the folder's `.stversions`. **Received** lists `~/Downloads/joma`.
+- Commands: `joma sync on|off|status [--json]`, `joma sync add <path> [label]`, `joma
+  sync remove <folder>`, `joma sync share <folder|path> <contact|conversation>`, `joma sync
+  offers`, `joma sync join <folder> [path]`, `joma sync decline|leave <folder>`, `joma
+  sync write <folder> <contact> on|off`, `joma sync device <folder> <device> on|off`,
+  `joma files [--json]`, `joma files ls <folder> [path] [--json]`, `joma files show
+  <folder>`, `joma files open <file>`. Contacts: `joma add <id>`, `joma requests`, `joma
+  accept|decline <name|id>`.
 
 ## Backups
 `joma backup` encrypts the open account (or `joma backup <name>…`, `--all`) with one
@@ -379,6 +402,10 @@ notifications); calls, voice messages and files not yet tried. Design:
 `docs/design/07-android.md`.
 
 ## Log
+- 0.5.3.dev4 (2026-11-28): folders shared with contacts and conversations (offers, join,
+  readers and writers, a conversation's files sorted into sub-folders); the files view
+  (Ctrl+7); `joma files`, `joma sync share|offers|join|write|device|leave`, `joma add|
+  requests|accept`.
 - 0.5.3.dev3 (2026-11-28): sign in with Joma's GitHub App when there is no gh (a code
   to type on GitHub); back up now from Accounts; optional automatic daily backups with
   the password in the system keyring; `joma github signin`, `joma backup auto`.

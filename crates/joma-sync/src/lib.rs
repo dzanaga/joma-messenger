@@ -72,6 +72,8 @@ pub struct FolderStatus {
     pub error: String,
     /// Syncthing's folder type (`receiveonly`: we only read it).
     pub kind: String,
+    /// A folder we only read: files changed or deleted here (kept on our side).
+    pub local_changed: u64,
 }
 
 /// One of the other devices Syncthing knows, and whether it is connected now.
@@ -329,6 +331,12 @@ impl Api {
         self.set_folder_as(&f.id, &f.label, Path::new(&f.path), &devices, &f.kind)
     }
 
+    /// A folder we only read: undo our local changes (the shared files come back).
+    pub fn revert(&self, id: &str) -> Result<()> {
+        self.request("POST", &format!("/rest/db/revert?folder={id}"), None)?;
+        Ok(())
+    }
+
     pub fn remove_folder(&self, id: &str) -> Result<()> {
         self.request("DELETE", &format!("/rest/config/folders/{id}"), None)?;
         Ok(())
@@ -362,6 +370,7 @@ impl Api {
                 need_bytes: n("needBytes"),
                 error: s["error"].as_str().unwrap_or_default().into(),
                 kind: f.kind,
+                local_changed: n("receiveOnlyChangedFiles") + n("receiveOnlyChangedDeletes") + n("receiveOnlyChangedDirectories"),
                 id: f.id,
                 label: f.label,
                 path: f.path,

@@ -41,6 +41,26 @@ impl Joma {
     }
 
     /// Folder sync with our other devices (D-23): folders, devices, the path to each.
+    /// Devices keeps one line about sync; the folders live in the files view.
+    pub(super) fn sync_summary(&self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
+        let text = match (&self.sync.st, &self.sync_view) {
+            (None, _) if self.sync.starting => "sync is starting…".to_owned(),
+            (None, _) => "folder sync is off".to_owned(),
+            (Some(_), Some(r)) => format!("{} synced {}", r.folders.len(), if r.folders.len() == 1 { "folder" } else { "folders" }),
+            (Some(_), None) => "sync is on".to_owned(),
+        };
+        div()
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .px(px(10.))
+            .pt(px(10.))
+            .child(div().flex_1().text_size(px(t.size - 2.)).text_color(t.muted).child(text))
+            .child(button("devices-files", G_FOLDER, "files", t, false).on_click(cx.listener(|this, _, window, cx| this.set_tab(Tab::Files, window, cx))))
+            .when(self.sync.st.is_some(), |d| d.child(button("sync-off", G_TIMES, "turn off", t, false).on_click(cx.listener(|this, _, _, cx| this.sync_switch(false, cx)))))
+    }
+
+    #[allow(dead_code)]
     pub(super) fn sync_group(&self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
         let small = |s: String, c| div().text_size(px(t.size - 2.)).text_color(c).child(s);
         let head = div().px(px(10.)).pt(px(10.)).pb(px(2.)).text_size(px(t.size - 2.5)).text_color(t.muted).child("SYNCED FOLDERS");

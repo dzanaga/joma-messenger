@@ -87,6 +87,11 @@ const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); -
                                  offer a folder to a contact or a conversation's members
                                  (they read it; the owner writes)
        joma sync offers [--json] folders offered to you
+       joma files [--json]       synced folders: yours, shared, conversations', offered
+       joma files ls <folder> [path] [--json]
+                                 a folder's files (folder: its name, id or conversation)
+       joma files show <folder>  show a folder in Joma's files view
+       joma files open <file>    open a file with the system's app
        joma sync join <folder> [path] | decline <folder> | leave <folder>
        joma sync write <folder> <contact> on|off
                                  let a member add and change files, or not
@@ -243,6 +248,25 @@ fn cli(args: &[String]) -> Option<i32> {
         }
         Some("devices") if args.len() == 3 && args[1] == "keep" => Request::Devices { what: "keep".into(), arg: Some(args[2].clone()), json: false },
         Some("account") if args.len() == 2 => Request::UseAccount { to: args[1].clone() },
+        Some("files") => {
+            let json = args.iter().any(|a| a == "--json");
+            let rest: Vec<String> = args[1..].iter().filter(|a| *a != "--json").cloned().collect();
+            match rest.first().map(String::as_str) {
+                None => Request::Files { what: "list".into(), arg: None, path: None, json },
+                Some("ls") if rest.len() >= 2 => Request::Files { what: "ls".into(), arg: Some(rest[1].clone()), path: rest.get(2).cloned(), json },
+                Some("show") if rest.len() == 2 => Request::Files { what: "show".into(), arg: Some(rest[1].clone()), path: None, json },
+                Some("open") if rest.len() == 2 => Request::Files {
+                    what: "open".into(),
+                    arg: Some(std::fs::canonicalize(&rest[1]).map_or_else(|_| rest[1].clone(), |c| c.to_string_lossy().into_owned())),
+                    path: None,
+                    json,
+                },
+                _ => {
+                    eprintln!("joma files [--json] | ls <folder> [path] [--json] | show <folder> | open <file>");
+                    return Some(2);
+                }
+            }
+        }
         Some("add") if args.len() == 2 => Request::Contact { what: "add".into(), arg: Some(args[1].clone()) },
         Some("requests") if args.len() == 1 => Request::Contact { what: "requests".into(), arg: None },
         Some(w @ ("accept" | "decline")) if args.len() == 2 => Request::Contact { what: w.into(), arg: Some(args[1].clone()) },
@@ -434,6 +458,7 @@ fn main() {
             KeyBinding::new("ctrl-4", TabDevices, None),
             KeyBinding::new("ctrl-5", TabAccounts, None),
             KeyBinding::new("ctrl-6", TabAgents, None),
+            KeyBinding::new("ctrl-7", TabFiles, None),
             KeyBinding::new("ctrl-enter", AcceptRequest, None),
             KeyBinding::new("ctrl-backspace", DeclineRequest, None),
             KeyBinding::new("ctrl-.", ToggleQuick, None),
