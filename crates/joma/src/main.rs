@@ -98,8 +98,10 @@ const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); -
                                  this device's role: transcribes for itself, for all your
                                  devices, or not; send transcripts with your voice messages
        joma sync join <folder> [path] | decline <folder> | leave <folder>
-       joma sync write <folder> <contact> on|off
-                                 let a member add and change files, or not
+       joma sync write <folder> <contact|all> on|off
+                                 let a member (or every member) add and change files
+       joma sync admin <folder> <contact> on|off
+                                 the owner names admins, who choose who writes
        joma sync device <folder> <device> on|off
                                  a folder on or off for one of your devices
        joma backup [ACCT…|--all] [--file PATH]
@@ -215,7 +217,7 @@ fn cli(args: &[String]) -> Option<i32> {
                 json: false,
             },
             (Some(w @ ("decline" | "leave")), 3) => Request::Sync { what: w.into(), arg: Some(args[2].clone()), label: None, json: false },
-            (Some(w @ ("write" | "device")), 5) => Request::Sync { what: w.into(), arg: Some(args[2].clone()), label: Some(format!("{} {}", args[3], args[4])), json: false },
+            (Some(w @ ("write" | "admin" | "device")), 5) => Request::Sync { what: w.into(), arg: Some(args[2].clone()), label: Some(format!("{} {}", args[3], args[4])), json: false },
             _ => {
                 eprintln!("{USAGE}");
                 return Some(2);

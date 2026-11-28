@@ -362,12 +362,24 @@ impl Joma {
         let admin = s.is_admin(&me);
         let owner = if s.owner == me { "you".to_owned() } else { self.model.name_of(&s.owner) };
         g = g.child(line(owner, "owner · writes".into(), t.muted));
+        if admin && s.members.len() > 1 {
+            let all = s.members.iter().all(|m| m.write);
+            let f = s.id.clone();
+            g = g.child(
+                line("everybody".into(), String::new(), t.muted)
+                    .child(button("member-w-all", if all { G_PENCIL } else { G_EYE }, if all { "everybody writes" } else { "set everybody to write" }, t, all).on_click(cx.listener(move |this, _, _, cx| this.set_member_write(&f, "all", !all, cx)))),
+            );
+        }
         for m in &s.members {
             let name = if m.uri == me { "you".to_owned() } else { self.model.name_of(&m.uri) };
             let mut row = line(name, String::new(), t.muted);
             if admin && m.uri != me {
                 let (f, u, w) = (s.id.clone(), m.uri.clone(), !m.write);
                 row = row.child(button(SharedString::from(format!("member-w-{}", m.uri)), if m.write { G_PENCIL } else { G_EYE }, if m.write { "writes" } else { "reads" }, t, m.write).on_click(cx.listener(move |this, _, _, cx| this.set_member_write(&f, &u, w, cx))));
+                if s.owner == me {
+                    let (f, u, a) = (s.id.clone(), m.uri.clone(), !m.admin);
+                    row = row.child(button(SharedString::from(format!("member-a-{}", m.uri)), G_USERS, if m.admin { "admin" } else { "member" }, t, m.admin).on_click(cx.listener(move |this, _, _, cx| this.set_member_admin(&f, &u, a, cx))));
+                }
             } else {
                 row = row.child(small(t, if m.write { "writes" } else { "reads" }, t.muted));
             }

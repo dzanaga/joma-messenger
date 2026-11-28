@@ -1419,6 +1419,15 @@ impl Joma {
         cx.notify();
     }
 
+    pub fn set_member_admin(&mut self, folder: &str, uri: &str, admin: bool, cx: &mut Context<Self>) {
+        let (acc, me) = (self.model.account.clone(), self.model.me.clone());
+        if let Err(e) = self.sync.set_admin(&acc, &me, folder, uri, admin) {
+            self.show_flash(format!("{e:#}"), cx);
+        }
+        self.refresh_sync_view();
+        cx.notify();
+    }
+
     pub fn set_folder_device(&mut self, folder: &str, device_st: &str, on: bool, cx: &mut Context<Self>) {
         let acc = self.model.account.clone();
         if let Err(e) = self.sync.set_device_on(&acc, folder, device_st, on) {
@@ -6322,14 +6331,25 @@ impl Joma {
                     Err(e) => Reply::Error { message: format!("{e:#}") },
                 }
             }
-            // joma sync write <folder> <contact> on|off
-            "write" => {
-                let (Some(folder), Some(rest)) = (arg, label) else { return Reply::Error { message: "joma sync write <folder> <contact> on|off".into() } };
+            // joma sync write|admin <folder> <contact|all> on|off
+            w @ ("write" | "admin") => {
+                let (Some(folder), Some(rest)) = (arg, label) else { return Reply::Error { message: format!("joma sync {w} <folder> <contact|all> on|off") } };
                 let (who, on) = rest.rsplit_once(' ').map(|(w, o)| (w.to_owned(), o == "on")).unwrap_or((rest.clone(), true));
-                let Some(uri) = self.model.contact_named(&who).or_else(|| (who.len() == 40).then(|| who.clone())) else { return Reply::Error { message: format!("no contact {who}") } };
+                let folder = self.files_key(&folder).and_then(|k| if let FilesKey::Folder(f) = k { Some(f) } else { None }).unwrap_or(folder);
+                let uri = if who == "all" && w == "write" {
+                    "all".to_owned()
+                } else {
+                    match self.model.contact_named(&who).or_else(|| (who.len() == 40).then(|| who.clone())) {
+                        Some(u) => u,
+                        None => return Reply::Error { message: format!("no contact {who}") },
+                    }
+                };
                 let me = self.model.me.clone();
-                match self.sync.set_write(&acc, &me, &folder, &uri, on) {
-                    Ok(()) => Reply::Text { text: format!("{} {} write in it", self.model.name_of(&uri), if on { "may" } else { "may not" }) },
+                let r = if w == "write" { self.sync.set_write(&acc, &me, &folder, &uri, on) } else { self.sync.set_admin(&acc, &me, &folder, &uri, on) };
+                let who = if uri == "all" { "every member".to_owned() } else { self.model.name_of(&uri) };
+                match r {
+                    Ok(()) if w == "write" => Reply::Text { text: format!("{who} {} write in it", if on { "may" } else { "may not" }) },
+                    Ok(()) => Reply::Text { text: format!("{who} {} an admin of it", if on { "is" } else { "is no longer" }) },
                     Err(e) => Reply::Error { message: format!("{e:#}") },
                 }
             }

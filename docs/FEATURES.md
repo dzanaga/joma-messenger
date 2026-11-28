@@ -121,7 +121,8 @@ link here. Needs `syncthing` installed.
 - **With people.** **share…** on one of your folders offers it to a contact or to a
   conversation's members. They see the offer in the conversation and in files (join /
   not now); joined, it syncs into `~/joma-sync/<name>`. The owner writes, members read;
-  the owner (or an admin) switches a member to **writes**. A member who only reads keeps
+  the owner (or an admin) switches a member to **writes**, or **everybody** at once; the
+  owner names **admins** (group chats that become working groups). A member who only reads keeps
   what they change or delete on their side (the file stays in the folder for the
   others); **undo my changes** brings the shared files back.
 - **A conversation's files.** With sync on, a file you send in a conversation is also
@@ -143,7 +144,7 @@ link here. Needs `syncthing` installed.
 - Commands: `joma sync on|off|status [--json]`, `joma sync add <path> [label]`, `joma
   sync remove <folder>`, `joma sync share <folder|path> <contact|conversation>`, `joma sync
   offers`, `joma sync join <folder> [path]`, `joma sync decline|leave <folder>`, `joma
-  sync write <folder> <contact> on|off`, `joma sync device <folder> <device> on|off`,
+  sync write <folder> <contact|all> on|off`, `joma sync admin <folder> <contact> on|off`, `joma sync device <folder> <device> on|off`,
   `joma files [--json]`, `joma files ls <folder> [path] [--json]`, `joma files show
   <folder>`, `joma files open <file>`. Contacts: `joma add <id>`, `joma requests`, `joma
   accept|decline <name|id>`.
@@ -434,7 +435,8 @@ notifications); calls, voice messages and files not yet tried. Design:
 
 ## Log
 - 0.5.3.dev8 (2026-11-28): files view: conflicts (keep this / keep the other), delete to
-  the trash.
+  the trash; folder admins and "everybody writes" (`joma sync admin`, `joma sync write
+  <folder> all on`).
 - 0.5.3.dev7 (2026-11-28): the compact panel takes the phone's layout: the tabs along the
   bottom, hidden inside a conversation (not seen on screen yet: the host's screen was off).
 - 0.5.3.dev6 (2026-11-28): the desktop tells your devices its Omarchy theme (joma for

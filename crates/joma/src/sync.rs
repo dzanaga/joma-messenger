@@ -285,14 +285,30 @@ impl Sync {
         }
     }
 
-    /// An owner or admin lets a member write, or not.
+    /// An owner or admin lets a member write, or not (`uri` "all": every member).
     pub fn set_write(&mut self, account: &str, me: &str, folder: &str, uri: &str, write: bool) -> Result<()> {
+        self.set_member(account, me, folder, uri, |m| m.write = write, false)
+    }
+
+    /// The owner makes a member an admin (who may change who writes), or not.
+    pub fn set_admin(&mut self, account: &str, me: &str, folder: &str, uri: &str, admin: bool) -> Result<()> {
+        self.set_member(account, me, folder, uri, |m| m.admin = admin, true)
+    }
+
+    fn set_member(&mut self, account: &str, me: &str, folder: &str, uri: &str, change: impl Fn(&mut crate::shares::Member), owner_only: bool) -> Result<()> {
         let s = self.store.shares.get_mut(folder).ok_or_else(|| anyhow::anyhow!("no shared folder {folder}"))?;
+        if owner_only && s.owner != me {
+            anyhow::bail!("only the folder's owner chooses its admins");
+        }
         if !s.is_admin(me) {
             anyhow::bail!("only the folder's owner or an admin changes who writes");
         }
-        let m = s.members.iter_mut().find(|m| m.uri == uri).ok_or_else(|| anyhow::anyhow!("not a member of {}", s.label))?;
-        m.write = write;
+        if uri == "all" {
+            s.members.iter_mut().for_each(&change);
+        } else {
+            let m = s.members.iter_mut().find(|m| m.uri == uri).ok_or_else(|| anyhow::anyhow!("not a member of {}", s.label))?;
+            change(m);
+        }
         let (w, others): (crate::shares::Wire, Vec<String>) = (crate::shares::Wire::Members { folder: folder.into(), members: s.members.clone() }, s.others(me).map(str::to_owned).collect());
         self.store.save(account);
         for u in others {
