@@ -139,7 +139,11 @@ fn unescape(s: &str) -> String {
 
 /// The folders in an account's Syncthing config (read from its file: Syncthing need not run).
 pub fn saved_folders(account: &str) -> Vec<SavedFolder> {
-    let Ok(xml) = std::fs::read_to_string(home(account).join("config.xml")) else { return Vec::new() };
+    std::fs::read_to_string(home(account).join("config.xml")).map(|x| parse_folders(&x)).unwrap_or_default()
+}
+
+/// The `<folder …>` tags of Syncthing's config.
+pub fn parse_folders(xml: &str) -> Vec<SavedFolder> {
     let attr = |tag: &str, name: &str| -> String {
         let key = format!(" {name}=\"");
         tag.find(&key).and_then(|i| tag[i + key.len()..].split('"').next()).map(unescape).unwrap_or_default()
@@ -151,6 +155,14 @@ pub fn saved_folders(account: &str) -> Vec<SavedFolder> {
         })
         .filter(|f| !f.id.is_empty() && !f.path.is_empty())
         .collect()
+}
+
+/// A path under the old machine's home, under the new one's (others stay).
+pub fn move_home(path: &str, old: &str, new: &str) -> String {
+    match path.strip_prefix(old).filter(|r| !old.is_empty() && old != new && (r.is_empty() || r.starts_with('/'))) {
+        Some(rest) => format!("{new}{rest}"),
+        None => path.to_owned(),
+    }
 }
 
 /// This account's sync state for the backup, or None when there is nothing to keep.
@@ -309,12 +321,7 @@ impl Sync {
         let st = self.st.as_ref().ok_or_else(|| anyhow::anyhow!("sync is not running"))?;
         let own = self.own();
         let here = std::env::var("HOME").unwrap_or_default();
-        let moved = |p: &str| -> String {
-            match p.strip_prefix(saved.home.as_str()).filter(|r| !saved.home.is_empty() && here != saved.home && (r.is_empty() || r.starts_with('/'))) {
-                Some(rest) => format!("{here}{rest}"),
-                None => p.to_owned(),
-            }
-        };
+        let moved = |p: &str| move_home(p, &saved.home, &here);
         let mut n = 0;
         for f in &saved.folders {
             let moved_path = moved(&f.path);
@@ -812,6 +819,20 @@ mod tests {
         assert_eq!(Hello::decode(r#"{"v":2,"dev":"d","st":"x","service":"s"}"#), None);
         assert_eq!(Hello::decode(r#"{"v":1,"dev":"d","st":"","service":"s"}"#), None);
         assert_eq!(Hello::decode("nope"), None);
+    }
+
+    #[test]
+    fn saved_state() {
+        let xml = r#"<configuration><folder id="joma-trip-1" label="Trip &amp; more" path="/home/a/joma-sync/Trip" type="receiveonly" rescanIntervalS="3600"><device id="X"></device></folder>
+<folder id="jc-c-o" label="Marta&#39;s files" path="/data/x" type="sendreceive"></folder><device id="X" name="y"></device></configuration>"#;
+        let f = parse_folders(xml);
+        assert_eq!(f.len(), 2);
+        assert_eq!(f[0], SavedFolder { id: "joma-trip-1".into(), label: "Trip & more".into(), path: "/home/a/joma-sync/Trip".into(), kind: "receiveonly".into() });
+        assert_eq!(f[1].label, "Marta's files");
+        assert_eq!(move_home("/home/a/joma-sync/Trip", "/home/a", "/home/b"), "/home/b/joma-sync/Trip");
+        assert_eq!(move_home("/home/ab/x", "/home/a", "/home/b"), "/home/ab/x");
+        assert_eq!(move_home("/data/x", "/home/a", "/home/b"), "/data/x");
+        assert_eq!(move_home("/home/a/x", "/home/a", "/home/a"), "/home/a/x");
     }
 
     #[test]
