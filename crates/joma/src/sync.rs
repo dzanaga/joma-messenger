@@ -21,6 +21,8 @@ use serde::{Deserialize, Serialize};
 
 pub const MIME: &str = "application/x-joma-sync+json";
 pub const SERVICE: &str = "joma-sync";
+/// The same Syncthing port, exposed to the members of our shared folders.
+pub const PEER_SERVICE: &str = "joma-sync-peers";
 
 /// What a device says about its Syncthing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,6 +48,9 @@ impl Hello {
     }
 
     pub fn decode(text: &str) -> Option<Hello> {
+        if text.contains("\"kind\"") {
+            return None;
+        }
         serde_json::from_str(text).ok().filter(|h: &Hello| h.v == 1 && !h.st.is_empty())
     }
 }
@@ -53,6 +58,8 @@ impl Hello {
 /// One of our other devices as sync knows it.
 #[derive(Debug, Clone, Default)]
 pub struct Peer {
+    /// A contact's device: its account (empty for our own devices).
+    pub uri: String,
     pub st: String,
     pub name: String,
     pub service: String,
@@ -119,6 +126,13 @@ pub struct Sync {
     pub error: Option<String>,
     /// When we last told our devices.
     pub last_hello: Option<std::time::Instant>,
+    /// Folders shared with contacts and conversations, and offers.
+    pub store: crate::shares::Store,
+    /// Our service for contacts, and whom it lets in.
+    pub peer_service: Option<String>,
+    peer_allowed: Vec<String>,
+    /// Contacts' devices that hold a folder we share, by Jami device id.
+    pub remotes: HashMap<String, Peer>,
 }
 
 /// Devices that were offline hear from us again this often.
@@ -151,7 +165,254 @@ impl Sync {
             Err(e) => self.error = Some(format!("cannot expose Syncthing to your devices: {e:#}")),
         }
         self.st = Some(st);
+        self.store = crate::shares::Store::load(account);
+        self.expose_peers(account, me);
         self.hello(account, me, device, name, false);
+        self.announce(account, me, device, name);
+    }
+
+    /// Expose Syncthing to the members of our shares (again, when they change).
+    pub fn expose_peers(&mut self, account: &str, me: &str) {
+        let Some(st) = &self.st else { return };
+        let allowed = self.store.allowed(me);
+        if allowed == self.peer_allowed && (self.peer_service.is_some() || allowed.is_empty()) {
+            return;
+        }
+        for s in joma_jami::exposed_services(account).unwrap_or_default() {
+            if s.get("name").map(String::as_str) == Some(PEER_SERVICE) {
+                if let Some(id) = s.get("id") {
+                    let _ = joma_jami::remove_service(account, id);
+                }
+            }
+        }
+        self.peer_service = None;
+        self.peer_allowed = allowed.clone();
+        if allowed.is_empty() {
+            return;
+        }
+        let list: Vec<&str> = allowed.iter().map(String::as_str).collect();
+        match joma_jami::expose_service(account, PEER_SERVICE, st.listen_port, &list) {
+            Ok(id) => self.peer_service = Some(id),
+            Err(e) => self.error = Some(format!("cannot expose Syncthing to your contacts: {e:#}")),
+        }
+    }
+
+    fn send(account: &str, to: &str, w: &crate::shares::Wire) {
+        let mut p = joma_jami::Details::new();
+        p.insert(MIME.into(), w.encode());
+        if let Err(e) = joma_jami::send_account_message(account, to, &p, false) {
+            tracing::warn!(error = %e, "could not send a sync message");
+        }
+    }
+
+    fn join_wire(&self, folder: &str, device: &str, name: &str, reply: bool) -> Option<crate::shares::Wire> {
+        let (st, service) = (self.st.as_ref()?, self.peer_service.as_ref()?);
+        Some(crate::shares::Wire::Join(crate::shares::Join { folder: folder.into(), dev: device.into(), st: st.id.clone(), service: service.clone(), name: name.into(), reply }))
+    }
+
+    /// Tell the other members of every folder we hold where our Syncthing is (at start).
+    pub fn announce(&self, account: &str, me: &str, device: &str, name: &str) {
+        for s in self.store.shares.values() {
+            if let Some(w) = self.join_wire(&s.id, device, name, false) {
+                for u in s.others(me) {
+                    Self::send(account, u, &w);
+                }
+            }
+        }
+    }
+
+    /// Our own devices' Syncthing ids.
+    fn own(&self) -> Vec<String> {
+        self.peers.values().map(|p| p.st.clone()).collect()
+    }
+
+    /// Share a folder with contacts (`conv`: a conversation's files): it becomes ours, the
+    /// members get an offer.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_share(&mut self, account: &str, me: &str, my_name: &str, id: Option<String>, label: &str, path: &Path, conv: Option<String>, members: Vec<crate::shares::Member>) -> Result<crate::shares::Share> {
+        let st = self.st.as_ref().ok_or_else(|| anyhow::anyhow!("sync is off (joma sync on)"))?;
+        let id = id.unwrap_or_else(|| joma_sync::folder_id(label));
+        st.set_folder_as(&id, label, path, &self.own(), "sendreceive")?;
+        let share = crate::shares::Share { id: id.clone(), label: label.into(), path: path.to_string_lossy().into_owned(), conv, owner: me.into(), owner_name: my_name.into(), members, off: Vec::new() };
+        self.store.shares.insert(id, share.clone());
+        self.store.save(account);
+        self.expose_peers(account, me);
+        let offer = crate::shares::Wire::Offer(crate::shares::Offer::of(&share));
+        for u in share.others(me) {
+            Self::send(account, u, &offer);
+        }
+        Ok(share)
+    }
+
+    /// Accept an offer: the folder goes to `path` (default `~/joma-sync/<label>`, or the
+    /// conversation's place).
+    pub fn join(&mut self, account: &str, me: &str, device: &str, name: &str, folder: &str, path: Option<PathBuf>, conv_title: &str) -> Result<crate::shares::Share> {
+        let st = self.st.as_ref().ok_or_else(|| anyhow::anyhow!("sync is off (joma sync on)"))?;
+        let o = self.store.offers.get(folder).cloned().ok_or_else(|| anyhow::anyhow!("no offer for {folder}"))?;
+        let path = path.unwrap_or_else(|| match &o.conv {
+            Some(_) => crate::shares::conv_dir(conv_title, if o.owner_name.is_empty() { &o.owner[..8] } else { &o.owner_name }),
+            None => default_dir().join(crate::shares::segment(&o.label)),
+        });
+        let share = crate::shares::Share { id: o.folder.clone(), label: o.label.clone(), path: path.to_string_lossy().into_owned(), conv: o.conv.clone(), owner: o.owner.clone(), owner_name: o.owner_name.clone(), members: o.members.clone(), off: Vec::new() };
+        st.set_folder_as(&share.id, &share.label, &path, &self.own(), share.kind_for(me))?;
+        self.store.offers.remove(folder);
+        if let Some(c) = &share.conv {
+            self.store.convs.insert(c.clone());
+            self.store.declined.remove(c);
+        }
+        self.store.shares.insert(share.id.clone(), share.clone());
+        self.store.save(account);
+        self.expose_peers(account, me);
+        if let Some(w) = self.join_wire(&share.id, device, name, false) {
+            for u in share.others(me) {
+                Self::send(account, u, &w);
+            }
+        }
+        Ok(share)
+    }
+
+    pub fn decline(&mut self, account: &str, folder: &str) {
+        if let Some(o) = self.store.offers.remove(folder) {
+            if let Some(c) = o.conv {
+                // "not now" for one folder of a conversation is not now for all of them.
+                let rest: Vec<String> = self.store.offers.values().filter(|x| x.conv.as_ref() == Some(&c)).map(|x| x.folder.clone()).collect();
+                for f in rest {
+                    self.store.offers.remove(&f);
+                }
+                self.store.declined.insert(c);
+            }
+            self.store.save(account);
+        }
+    }
+
+    /// An owner or admin lets a member write, or not.
+    pub fn set_write(&mut self, account: &str, me: &str, folder: &str, uri: &str, write: bool) -> Result<()> {
+        let s = self.store.shares.get_mut(folder).ok_or_else(|| anyhow::anyhow!("no shared folder {folder}"))?;
+        if !s.is_admin(me) {
+            anyhow::bail!("only the folder's owner or an admin changes who writes");
+        }
+        let m = s.members.iter_mut().find(|m| m.uri == uri).ok_or_else(|| anyhow::anyhow!("not a member of {}", s.label))?;
+        m.write = write;
+        let (w, others): (crate::shares::Wire, Vec<String>) = (crate::shares::Wire::Members { folder: folder.into(), members: s.members.clone() }, s.others(me).map(str::to_owned).collect());
+        self.store.save(account);
+        for u in others {
+            Self::send(account, &u, &w);
+        }
+        Ok(())
+    }
+
+    /// A folder on (or off) for one of our own devices.
+    pub fn set_device_on(&mut self, account: &str, folder: &str, device_st: &str, on: bool) -> Result<()> {
+        let st = self.st.as_ref().ok_or_else(|| anyhow::anyhow!("sync is off"))?;
+        st.share_with(folder, device_st, on)?;
+        if let Some(s) = self.store.shares.get_mut(folder) {
+            s.off.retain(|d| d != device_st);
+            if !on {
+                s.off.push(device_st.into());
+            }
+            self.store.save(account);
+        }
+        Ok(())
+    }
+
+    /// Leave a shared folder (the files stay).
+    pub fn leave(&mut self, account: &str, me: &str, folder: &str) -> Result<()> {
+        let st = self.st.as_ref().ok_or_else(|| anyhow::anyhow!("sync is off"))?;
+        st.remove_folder(folder)?;
+        if let Some(s) = self.store.shares.remove(folder) {
+            for u in s.others(me) {
+                Self::send(account, u, &crate::shares::Wire::Leave { folder: folder.into() });
+            }
+            self.store.save(account);
+            self.expose_peers(account, me);
+        }
+        Ok(())
+    }
+
+    /// A message about shared folders from a contact (or our own account). Returns what
+    /// to tell the user, if anything.
+    pub fn heard_wire(&mut self, account: &str, me: &str, device: &str, name: &str, from: &str, w: crate::shares::Wire) -> Heard {
+        use crate::shares::Wire;
+        match w {
+            Wire::Offer(o) if from != me => {
+                let (folder, label) = (o.folder.clone(), o.label.clone());
+                let auto = self.store.offered(from, o, crate::github::now());
+                self.store.save(account);
+                if auto {
+                    Heard::AutoJoin(folder)
+                } else if self.store.offers.contains_key(&folder) {
+                    Heard::Offer(label)
+                } else {
+                    Heard::Nothing
+                }
+            }
+            Wire::Join(j) if from != me => {
+                let Some(s) = self.store.shares.get(&j.folder) else { return Heard::Nothing };
+                if !s.has(from) {
+                    return Heard::Nothing;
+                }
+                let Some(st) = &self.st else { return Heard::Nothing };
+                let known = self.remotes.get(&j.dev).cloned();
+                let addrs: Vec<String> = known.as_ref().and_then(|p| p.port).map(addr).into_iter().collect();
+                if let Err(e) = st.set_peer_device(&j.st, &j.name, &addrs).and_then(|_| st.share_with(&j.folder, &j.st, true)) {
+                    self.error = Some(format!("{e:#}"));
+                }
+                let mut peer = known.unwrap_or_default();
+                if peer.tunnel.is_none() || peer.service != j.service || peer.st != j.st {
+                    if let Some(t) = peer.tunnel.take() {
+                        let _ = joma_jami::close_tunnel(account, &t);
+                    }
+                    match joma_jami::open_tunnel(account, from, &j.dev, &j.service, PEER_SERVICE) {
+                        Ok(t) => peer.tunnel = Some(t),
+                        Err(e) => self.error = Some(format!("cannot reach {}: {e:#}", if j.name.is_empty() { &j.dev } else { &j.name })),
+                    }
+                }
+                peer.uri = from.into();
+                peer.st = j.st.clone();
+                peer.name = j.name.clone();
+                peer.service = j.service.clone();
+                self.remotes.insert(j.dev.clone(), peer);
+                if !j.reply {
+                    if let Some(w) = self.join_wire(&j.folder, device, name, true) {
+                        Self::send(account, from, &w);
+                    }
+                }
+                Heard::Nothing
+            }
+            Wire::Members { folder, members } => {
+                let Some(s) = self.store.shares.get_mut(&folder) else { return Heard::Nothing };
+                if !s.is_admin(from) {
+                    return Heard::Nothing;
+                }
+                s.members = members;
+                let s = s.clone();
+                if let Some(st) = &self.st {
+                    let devices: Vec<String> = st.folders().ok().and_then(|f| f.into_iter().find(|f| f.id == folder)).map(|f| f.devices).unwrap_or_default();
+                    if let Err(e) = st.set_folder_as(&s.id, &s.label, Path::new(&s.path), &devices, s.kind_for(me)) {
+                        self.error = Some(format!("{e:#}"));
+                    }
+                }
+                self.store.save(account);
+                self.expose_peers(account, me);
+                Heard::Changed(format!("{}: you can {} now", s.label, if s.can_write(me) { "add and change files" } else { "only read the files" }))
+            }
+            Wire::Leave { folder } => {
+                let gone: Vec<String> = self.remotes.values().filter(|p| p.uri == from).map(|p| p.st.clone()).collect();
+                if let Some(st) = &self.st {
+                    for d in gone {
+                        let _ = st.share_with(&folder, &d, false);
+                    }
+                }
+                if let Some(s) = self.store.shares.get_mut(&folder) {
+                    if s.owner == me {
+                        s.members.retain(|m| m.uri != from);
+                        self.store.save(account);
+                    }
+                }
+                Heard::Nothing
+            }
+            _ => Heard::Nothing,
+        }
     }
 
     /// Tell our other devices where our Syncthing is.
@@ -175,7 +436,8 @@ impl Sync {
         if let Err(e) = st.set_device(&hello.st, &hello.name, &known.as_ref().and_then(|p| p.port).map(addr).into_iter().collect::<Vec<_>>()) {
             self.error = Some(format!("{e:#}"));
         }
-        if let Err(e) = st.share_all_with(&hello.st) {
+        let off: Vec<String> = self.store.shares.values().filter(|s| s.off.contains(&hello.st)).map(|s| s.id.clone()).collect();
+        if let Err(e) = st.share_all_but(&hello.st, &off) {
             self.error = Some(format!("{e:#}"));
         }
         let mut peer = known.unwrap_or_default();
@@ -197,6 +459,15 @@ impl Sync {
 
     /// A tunnel opened: is it one of ours? Then give Syncthing its port.
     pub fn tunnel_opened(&mut self, tunnel: &str, port: u16) -> bool {
+        if let Some(peer) = self.remotes.values_mut().find(|p| p.tunnel.as_deref() == Some(tunnel)) {
+            peer.port = Some(port);
+            if let Some(st) = &self.st {
+                if let Err(e) = st.set_peer_device(&peer.st, &peer.name, &[addr(port)]) {
+                    self.error = Some(format!("{e:#}"));
+                }
+            }
+            return true;
+        }
         let Some(peer) = self.peers.values_mut().find(|p| p.tunnel.as_deref() == Some(tunnel)) else { return false };
         peer.port = Some(port);
         if let Some(st) = &self.st {
@@ -209,7 +480,7 @@ impl Sync {
 
     /// A tunnel closed: ours? Then it is reopened at the next Hello.
     pub fn tunnel_closed(&mut self, tunnel: &str) -> bool {
-        let Some(peer) = self.peers.values_mut().find(|p| p.tunnel.as_deref() == Some(tunnel)) else { return false };
+        let Some(peer) = self.peers.values_mut().chain(self.remotes.values_mut()).find(|p| p.tunnel.as_deref() == Some(tunnel)) else { return false };
         peer.tunnel = None;
         peer.port = None;
         true
@@ -241,15 +512,20 @@ impl Sync {
 
     /// Stop Syncthing and withdraw the service.
     pub fn stop(&mut self, account: &str) {
-        for p in self.peers.values_mut() {
+        for p in self.peers.values_mut().chain(self.remotes.values_mut()) {
             if let Some(t) = p.tunnel.take() {
                 let _ = joma_jami::close_tunnel(account, &t);
             }
         }
         self.peers.clear();
+        self.remotes.clear();
         if let Some(id) = self.service.take() {
             let _ = joma_jami::remove_service(account, &id);
         }
+        if let Some(id) = self.peer_service.take() {
+            let _ = joma_jami::remove_service(account, &id);
+        }
+        self.peer_allowed.clear();
         if let Some(mut st) = self.st.take() {
             st.stop();
         }
@@ -258,7 +534,7 @@ impl Sync {
 
     /// What a report needs, to build it off the UI thread.
     pub fn snapshot(&self) -> Snapshot {
-        Snapshot { api: self.st.as_ref().map(|s| s.api.clone()), peers: self.peers.clone(), error: self.error.clone(), starting: self.starting }
+        Snapshot { api: self.st.as_ref().map(|s| s.api.clone()), peers: self.peers.clone(), remotes: self.remotes.clone(), store: self.store.clone(), error: self.error.clone(), starting: self.starting }
     }
 }
 
@@ -266,6 +542,8 @@ impl Sync {
 pub struct Snapshot {
     api: Option<joma_sync::Api>,
     peers: HashMap<String, Peer>,
+    remotes: HashMap<String, Peer>,
+    store: crate::shares::Store,
     error: Option<String>,
     starting: bool,
 }
@@ -293,10 +571,12 @@ impl Snapshot {
         let mut devices: Vec<DeviceLine> = self
             .peers
             .iter()
+            .chain(self.remotes.iter())
             .map(|(dev, p)| {
                 let s = status.get(&p.st);
                 let path = path_of(dev);
                 DeviceLine {
+                    uri: p.uri.clone(),
                     device: dev.clone(),
                     name: p.name.clone(),
                     syncthing: p.st.clone(),
@@ -309,8 +589,15 @@ impl Snapshot {
                 }
             })
             .collect();
-        devices.sort_by(|a, b| a.name.cmp(&b.name));
+        devices.sort_by(|a, b| (!a.uri.is_empty(), &a.name).cmp(&(!b.uri.is_empty(), &b.name)));
         r.devices = devices;
+        let kinds: HashMap<String, String> = st.folders().unwrap_or_default().into_iter().map(|f| (f.id, f.kind)).collect();
+        for f in &mut r.folders {
+            f.kind = kinds.get(&f.id).cloned().unwrap_or_default();
+        }
+        r.shares = self.store.shares.values().cloned().collect();
+        // An offer for a folder that reached us from another of our devices is taken.
+        r.offers = self.store.offers.values().filter(|o| !r.folders.iter().any(|f| f.id == o.folder)).cloned().collect();
         r
     }
 }
@@ -321,6 +608,9 @@ fn addr(port: u16) -> String {
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct DeviceLine {
+    /// A contact's device: the contact's account (empty: one of ours).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub uri: String,
     pub device: String,
     pub name: String,
     pub syncthing: String,
@@ -343,6 +633,21 @@ pub struct Report {
     pub id: String,
     pub folders: Vec<joma_sync::FolderStatus>,
     pub devices: Vec<DeviceLine>,
+    /// Folders shared with contacts and conversations.
+    pub shares: Vec<crate::shares::Share>,
+    /// Offers waiting for an answer.
+    pub offers: Vec<crate::shares::Offer>,
+}
+
+/// What a message about shared folders means for the user.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Heard {
+    Nothing,
+    /// A new offer, waiting in the conversation and the files view.
+    Offer(String),
+    /// A conversation whose files we joined offered another member's folder.
+    AutoJoin(String),
+    Changed(String),
 }
 
 pub fn size(b: u64) -> String {

@@ -24,6 +24,7 @@ mod player;
 mod presence;
 mod seen;
 mod setup;
+mod shares;
 mod signin;
 mod stage;
 mod sync;
@@ -65,6 +66,10 @@ const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); -
        joma devices keep <dev>   keep a new device (one restored from the backup or
                                  linked elsewhere)
        joma account <name>       open another account (a name, username or ID)
+       joma add <id>             send a contact request to a Jami ID
+       joma requests             contact requests waiting
+       joma accept|decline <name|id>
+                                 answer a contact request
        joma block <to>         block a contact: no messages, calls or requests from them
        joma unblock <to>         unblock a contact
        joma draw laser|pen|off|clear|shot
@@ -78,6 +83,15 @@ const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); -
        joma sync add <path> [label]
                                  share a folder with all your devices
        joma sync remove <folder> stop syncing a folder (its files stay)
+       joma sync share <folder|path> <contact|conversation>
+                                 offer a folder to a contact or a conversation's members
+                                 (they read it; the owner writes)
+       joma sync offers [--json] folders offered to you
+       joma sync join <folder> [path] | decline <folder> | leave <folder>
+       joma sync write <folder> <contact> on|off
+                                 let a member add and change files, or not
+       joma sync device <folder> <device> on|off
+                                 a folder on or off for one of your devices
        joma backup [ACCT…|--all] [--file PATH]
                                  back up accounts, encrypted with a password Joma asks
                                  for in its window, to github.com/<you>/joma-backup
@@ -177,6 +191,21 @@ fn cli(args: &[String]) -> Option<i32> {
                 json: false,
             },
             (Some("remove"), 3) => Request::Sync { what: "remove".into(), arg: Some(args[2].clone()), label: None, json: false },
+            (Some("share"), 4) => Request::Sync {
+                what: "share".into(),
+                arg: Some(std::fs::canonicalize(&args[2]).map_or_else(|_| args[2].clone(), |c| c.to_string_lossy().into_owned())),
+                label: Some(args[3].clone()),
+                json: false,
+            },
+            (Some("offers"), _) => Request::Sync { what: "offers".into(), arg: None, label: None, json: args.iter().any(|a| a == "--json") },
+            (Some("join"), 3 | 4) => Request::Sync {
+                what: "join".into(),
+                arg: Some(args[2].clone()),
+                label: args.get(3).map(|p| std::path::absolute(p).map_or_else(|_| p.clone(), |c| c.to_string_lossy().into_owned())),
+                json: false,
+            },
+            (Some(w @ ("decline" | "leave")), 3) => Request::Sync { what: w.into(), arg: Some(args[2].clone()), label: None, json: false },
+            (Some(w @ ("write" | "device")), 5) => Request::Sync { what: w.into(), arg: Some(args[2].clone()), label: Some(format!("{} {}", args[3], args[4])), json: false },
             _ => {
                 eprintln!("{USAGE}");
                 return Some(2);
@@ -214,6 +243,9 @@ fn cli(args: &[String]) -> Option<i32> {
         }
         Some("devices") if args.len() == 3 && args[1] == "keep" => Request::Devices { what: "keep".into(), arg: Some(args[2].clone()), json: false },
         Some("account") if args.len() == 2 => Request::UseAccount { to: args[1].clone() },
+        Some("add") if args.len() == 2 => Request::Contact { what: "add".into(), arg: Some(args[1].clone()) },
+        Some("requests") if args.len() == 1 => Request::Contact { what: "requests".into(), arg: None },
+        Some(w @ ("accept" | "decline")) if args.len() == 2 => Request::Contact { what: w.into(), arg: Some(args[1].clone()) },
         Some("link-device") if args.len() == 2 => Request::LinkDevice { token: args[1].clone() },
         Some(b @ ("block" | "unblock")) if args.len() == 2 => Request::Block { to: args[1].clone(), block: b == "block" },
         Some("send") if args.len() >= 3 => Request::Send { to: args[1].clone(), text: args[2..].join(" ") },

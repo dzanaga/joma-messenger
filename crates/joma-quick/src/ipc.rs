@@ -124,6 +124,13 @@ pub enum Request {
         #[serde(default)]
         json: bool,
     },
+    /// Contacts: `add` a Jami ID (sends a request), `requests` waiting, `accept` or
+    /// `decline` one (`arg`: a name or the conversation id).
+    Contact {
+        what: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        arg: Option<String>,
+    },
     /// Quit Joma (closing its window only hides it).
     Quit,
 }

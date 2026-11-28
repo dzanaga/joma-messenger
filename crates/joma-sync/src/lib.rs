@@ -49,6 +49,9 @@ pub struct Folder {
     pub id: String,
     pub label: String,
     pub path: String,
+    /// `sendreceive`, `receiveonly`, …
+    #[serde(default)]
+    pub kind: String,
     /// The device IDs it is shared with (ours included).
     pub devices: Vec<String>,
 }
@@ -67,6 +70,8 @@ pub struct FolderStatus {
     pub need_files: u64,
     pub need_bytes: u64,
     pub error: String,
+    /// Syncthing's folder type (`receiveonly`: we only read it).
+    pub kind: String,
 }
 
 /// One of the other devices Syncthing knows, and whether it is connected now.
@@ -239,9 +244,19 @@ impl Api {
     /// Add (or update) another device, reached at `address` (`tcp://127.0.0.1:<port>`,
     /// the local end of a Jami tunnel). Folders it shares are accepted by themselves.
     pub fn set_device(&self, id: &str, name: &str, addresses: &[String]) -> Result<()> {
+        self.set_device_with(id, name, addresses, true)
+    }
+
+    /// A contact's device: its folders are not accepted by themselves (Joma joins the
+    /// ones you accept).
+    pub fn set_peer_device(&self, id: &str, name: &str, addresses: &[String]) -> Result<()> {
+        self.set_device_with(id, name, addresses, false)
+    }
+
+    fn set_device_with(&self, id: &str, name: &str, addresses: &[String], auto: bool) -> Result<()> {
         self.put(
             &format!("/rest/config/devices/{id}"),
-            &json!({ "deviceID": id, "name": name, "addresses": addresses, "autoAcceptFolders": true, "introducer": false }),
+            &json!({ "deviceID": id, "name": name, "addresses": addresses, "autoAcceptFolders": auto, "introducer": false }),
         )?;
         Ok(())
     }
@@ -265,26 +280,53 @@ impl Api {
 
     /// Share a folder (created if new) with `devices` besides us.
     pub fn set_folder(&self, id: &str, label: &str, path: &Path, devices: &[String]) -> Result<()> {
+        let kind = self.folders()?.into_iter().find(|f| f.id == id).map(|f| f.kind).unwrap_or_else(|| "sendreceive".into());
+        self.set_folder_as(id, label, path, devices, &kind)
+    }
+
+    /// The same with Syncthing's folder type: `sendreceive`, or `receiveonly` for a folder
+    /// we may only read (what we change stays here). Old versions of changed and deleted
+    /// files are kept 30 days in the folder's `.stversions`.
+    pub fn set_folder_as(&self, id: &str, label: &str, path: &Path, devices: &[String], kind: &str) -> Result<()> {
         std::fs::create_dir_all(path)?;
         let mut all: Vec<Value> = vec![json!({ "deviceID": self.id })];
         all.extend(devices.iter().filter(|d| **d != self.id).map(|d| json!({ "deviceID": d })));
         self.put(
             &format!("/rest/config/folders/{id}"),
-            &json!({ "id": id, "label": label, "path": path.to_string_lossy(), "type": "sendreceive", "devices": all, "fsWatcherEnabled": true }),
+            &json!({
+                "id": id, "label": label, "path": path.to_string_lossy(), "type": kind, "devices": all, "fsWatcherEnabled": true,
+                "versioning": { "type": "staggered", "params": { "maxAge": "2592000", "cleanInterval": "3600" } }
+            }),
         )?;
         Ok(())
     }
 
     /// Share every folder with one more device (your devices share everything).
     pub fn share_all_with(&self, device: &str) -> Result<()> {
+        self.share_all_but(device, &[])
+    }
+
+    /// Every folder but `except` (switched off for that device).
+    pub fn share_all_but(&self, device: &str, except: &[String]) -> Result<()> {
         for f in self.folders()? {
-            if !f.devices.iter().any(|d| d == device) {
+            if !except.contains(&f.id) && !f.devices.iter().any(|d| d == device) {
                 let mut devices = f.devices.clone();
                 devices.push(device.to_owned());
                 self.set_folder(&f.id, &f.label, Path::new(&f.path), &devices)?;
             }
         }
         Ok(())
+    }
+
+    /// Add one device to a folder, or take it off.
+    pub fn share_with(&self, folder: &str, device: &str, on: bool) -> Result<()> {
+        let Some(f) = self.folders()?.into_iter().find(|f| f.id == folder) else { return Ok(()) };
+        let has = f.devices.iter().any(|d| d == device);
+        if has == on {
+            return Ok(());
+        }
+        let devices: Vec<String> = if on { f.devices.iter().cloned().chain([device.to_owned()]).collect() } else { f.devices.iter().filter(|d| *d != device).cloned().collect() };
+        self.set_folder_as(&f.id, &f.label, Path::new(&f.path), &devices, &f.kind)
     }
 
     pub fn remove_folder(&self, id: &str) -> Result<()> {
@@ -301,6 +343,7 @@ impl Api {
                 id: f["id"].as_str().unwrap_or_default().into(),
                 label: f["label"].as_str().unwrap_or_default().into(),
                 path: f["path"].as_str().unwrap_or_default().into(),
+                kind: f["type"].as_str().unwrap_or("sendreceive").into(),
                 devices: f["devices"].as_array().into_iter().flatten().filter_map(|d| d["deviceID"].as_str().map(str::to_owned)).collect(),
             })
             .collect())
@@ -318,6 +361,7 @@ impl Api {
                 need_files: n("needFiles"),
                 need_bytes: n("needBytes"),
                 error: s["error"].as_str().unwrap_or_default().into(),
+                kind: f.kind,
                 id: f.id,
                 label: f.label,
                 path: f.path,

@@ -958,6 +958,7 @@ impl Joma {
         self.adding_account = None;
         self.new_devices.clear();
         self.gh = crate::github::Store::load(&account);
+        self.sync.store = crate::shares::Store::load(&account);
         self.gh_found = None;
         if self.restoring.as_ref().is_some_and(|r| r.working) {
             self.restoring = None;
@@ -1023,6 +1024,107 @@ impl Joma {
             let r = crate::sync::start_syncthing(&acc);
             let _ = tx.unbounded_send(AppMsg::SyncStarted(acc, r));
         });
+    }
+
+    /// A message about folders shared with contacts.
+    fn sync_wire(&mut self, from: String, w: crate::shares::Wire, cx: &mut Context<Self>) {
+        let name = self.model.devices.get(&self.model.device).cloned().unwrap_or_default();
+        let (acc, me, dev) = (self.model.account.clone(), self.model.me.clone(), self.model.device.clone());
+        match self.sync.heard_wire(&acc, &me, &dev, &name, &from, w) {
+            crate::sync::Heard::Nothing => {}
+            crate::sync::Heard::Offer(label) => {
+                let who = self.model.name_of(&from);
+                self.show_flash(format!("{who} shares a folder: {label} (files, or the conversation)"), cx);
+                notify_desktop(&format!("{who} shares a folder"), &format!("{label}: join it in Joma"));
+            }
+            crate::sync::Heard::AutoJoin(folder) => {
+                if let Err(e) = self.join_share(&folder, None) {
+                    self.show_flash(format!("could not join the conversation's new folder: {e}"), cx);
+                }
+            }
+            crate::sync::Heard::Changed(text) => self.show_flash(text, cx),
+        }
+        cx.notify();
+    }
+
+    /// The title of a conversation (for its files folder).
+    fn conv_title(&self, conv: &str) -> String {
+        self.model.conversations.get(conv).map(|c| c.title.clone()).unwrap_or_else(|| conv[..conv.len().min(8)].to_owned())
+    }
+
+    /// Join an offered folder (`path`: where; default under `~/joma-sync/`).
+    pub fn join_share(&mut self, folder: &str, path: Option<std::path::PathBuf>) -> Result<crate::shares::Share, String> {
+        let name = self.model.devices.get(&self.model.device).cloned().unwrap_or_default();
+        let (acc, me, dev) = (self.model.account.clone(), self.model.me.clone(), self.model.device.clone());
+        let conv = self.sync.store.offers.get(folder).and_then(|o| o.conv.clone());
+        let title = conv.as_deref().map(|c| self.conv_title(c)).unwrap_or_default();
+        let s = self.sync.join(&acc, &me, &dev, &name, folder, path, &title).map_err(|e| format!("{e:#}"))?;
+        // A conversation's other folders already offered join with it.
+        if let Some(c) = &conv {
+            let more: Vec<String> = self.sync.store.offers.values().filter(|o| o.conv.as_ref() == Some(c)).map(|o| o.folder.clone()).collect();
+            for f in more {
+                let _ = self.sync.join(&acc, &me, &dev, &name, &f, None, &title);
+            }
+        }
+        Ok(s)
+    }
+
+    pub fn join_share_ui(&mut self, folder: &str, cx: &mut Context<Self>) {
+        match self.join_share(folder, None) {
+            Ok(s) => self.show_flash(format!("{} joins your synced folders: {}", s.label, s.path), cx),
+            Err(e) => self.show_flash(format!("not joined: {e}"), cx),
+        }
+        self.refresh_sync_view();
+        cx.notify();
+    }
+
+    pub fn decline_share(&mut self, folder: &str, cx: &mut Context<Self>) {
+        let acc = self.model.account.clone();
+        self.sync.decline(&acc, folder);
+        cx.notify();
+    }
+
+    /// A file sent in a conversation also goes into the conversation's shared folder
+    /// (ours, in the sub-folder for its kind), when sync is on. The first one makes the
+    /// folder and offers it to the members.
+    fn share_conv_file(&mut self, conv: &str, file: &std::path::Path, message: bool) -> Result<Option<std::path::PathBuf>, String> {
+        if self.sync.st.is_none() {
+            return Ok(None);
+        }
+        let Some(c) = self.model.conversations.get(conv) else { return Ok(None) };
+        if c.request || c.peers.is_empty() {
+            return Ok(None);
+        }
+        let me = self.model.me.clone();
+        let my_name = if self.model.my_name.is_empty() { self.model.username.clone() } else { self.model.my_name.clone() };
+        let share = match self.sync.store.mine_in(conv, &me).cloned() {
+            Some(s) => s,
+            None => {
+                let title = c.title.clone();
+                let members: Vec<crate::shares::Member> = c.peers.iter().filter(|p| **p != me).map(|p| crate::shares::Member { uri: p.clone(), name: self.model.name_of(p), ..Default::default() }).collect();
+                let path = crate::shares::conv_dir(&title, if my_name.is_empty() { "me" } else { &my_name });
+                for cat in crate::shares::CATEGORIES {
+                    std::fs::create_dir_all(path.join(cat)).map_err(|e| format!("{}: {e}", path.display()))?;
+                }
+                let acc = self.model.account.clone();
+                let id = crate::shares::conv_folder_id(conv, &me);
+                // Sharing our files in a conversation takes the others' files too.
+                self.sync.store.convs.insert(conv.to_owned());
+                self.sync
+                    .create_share(&acc, &me, &my_name, Some(id), &format!("{}'s files", if my_name.is_empty() { "me" } else { &my_name }), &path, Some(conv.to_owned()), members)
+                    .map_err(|e| format!("{e:#}"))?
+            }
+        };
+        // Already in the folder (sent from the files view): nothing to copy.
+        if file.starts_with(&share.path) {
+            return Ok(Some(file.to_path_buf()));
+        }
+        let dir = std::path::Path::new(&share.path).join(crate::shares::category(file, message));
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into());
+        let to = crate::shares::free_name(&dir, &name);
+        std::fs::copy(file, &to).map_err(|e| format!("{}: {e}", to.display()))?;
+        Ok(Some(to))
     }
 
     fn sync_hello(&mut self, reply: bool) {
@@ -2097,7 +2199,7 @@ impl Joma {
             }
             AppMsg::Recorded { conv, path, send } => {
                 if send {
-                    if let Reply::Error { message } = self.send_file(&conv, &path) {
+                    if let Reply::Error { message } = self.send_file_as(&conv, &path, true) {
                         self.show_flash(format!("not sent: {message}"), cx);
                     }
                     self.pinned_bottom = true;
@@ -2262,6 +2364,10 @@ impl Joma {
                 return;
             }
             Event::AccountMessage { account, from, payloads } if *account == acc && payloads.contains_key(crate::sync::MIME) => {
+                if let Some(w) = payloads.get(crate::sync::MIME).and_then(|p| crate::shares::Wire::decode(p)) {
+                    self.sync_wire(bare_uri(from).to_owned(), w, cx);
+                    return;
+                }
                 if let Some(h) = payloads.get(crate::sync::MIME).and_then(|p| crate::sync::Hello::decode(p)) {
                     // Only our own devices take part.
                     if bare_uri(from) == self.model.me && h.dev != self.model.device {
@@ -5323,6 +5429,35 @@ impl Joma {
                     .join("\n");
                 Reply::Text { text }
             }
+            Request::Contact { what, arg } => {
+                if self.gate != Gate::Ready {
+                    return Reply::Error { message: "Joma is not on an account now".into() };
+                }
+                let acc = self.model.account.clone();
+                let arg = arg.unwrap_or_default();
+                let requests: Vec<(String, String)> = self.model.conversations.values().filter(|c| c.request).map(|c| (c.id.clone(), c.title.clone())).collect();
+                match what.as_str() {
+                    "add" => {
+                        let uri = arg.trim().to_lowercase();
+                        if uri.len() != 40 || !uri.chars().all(|c| c.is_ascii_hexdigit()) {
+                            return Reply::Error { message: "joma add <40-digit Jami ID>".into() };
+                        }
+                        match joma_jami::add_contact(&acc, &uri) {
+                            Ok(()) => Reply::Text { text: "request sent; the conversation starts when they accept".into() },
+                            Err(e) => Reply::Error { message: e.to_string() },
+                        }
+                    }
+                    "requests" => Reply::Text { text: if requests.is_empty() { "no requests".into() } else { requests.iter().map(|(id, t)| format!("{t}  {id}")).collect::<Vec<_>>().join("\n") } },
+                    _ => {
+                        let low = arg.to_lowercase();
+                        let Some((id, _)) = requests.iter().find(|(id, t)| *id == arg || t.to_lowercase() == low || (low.len() >= 6 && t.to_lowercase().contains(&low))).cloned() else {
+                            return Reply::Error { message: "no such request (joma requests)".into() };
+                        };
+                        self.accept_request(id, what == "accept", cx);
+                        Reply::Done
+                    }
+                }
+            }
             Request::Devices { what, arg, json } => {
                 if self.gate != Gate::Ready {
                     return Reply::Error { message: "Joma is not on an account now".into() };
@@ -5419,6 +5554,56 @@ impl Joma {
         }
     }
 
+    /// Share a synced folder (its id, label or path; a path becomes a new folder) with a
+    /// contact or the members of a conversation.
+    pub fn share_with(&mut self, what: &str, with: &str) -> Result<String, String> {
+        if self.sync.st.is_none() {
+            return Err("sync is off (joma sync on)".into());
+        }
+        let me = self.model.me.clone();
+        let members: Vec<String> = if let Some(uri) = self.model.contact_named(with) {
+            vec![uri]
+        } else if let Some(c) = self.model.conversations.values().find(|c| c.id == with || c.title.eq_ignore_ascii_case(with)) {
+            c.peers.iter().filter(|p| **p != me).cloned().collect()
+        } else {
+            return Err(format!("no contact or conversation {with}"));
+        };
+        let folders = self.sync.st.as_ref().and_then(|s| s.folders().ok()).unwrap_or_default();
+        let found = folders.iter().find(|f| f.id == what || f.label == what || std::path::Path::new(&f.path) == std::path::Path::new(what)).cloned();
+        let acc = self.model.account.clone();
+        let my_name = self.model.my_name.clone();
+        // A folder we share already: more members, a new offer.
+        if let Some(s) = found.as_ref().and_then(|f| self.sync.store.shares.get(&f.id)).cloned() {
+            if s.owner != me {
+                return Err(format!("{} is {}'s: only the owner shares it further", s.label, self.model.name_of(&s.owner)));
+            }
+            let mut s2 = s.clone();
+            for u in &members {
+                if !s2.has(u) {
+                    s2.members.push(crate::shares::Member { uri: u.clone(), name: self.model.name_of(u), ..Default::default() });
+                }
+            }
+            self.sync.store.shares.remove(&s.id);
+            let path = std::path::PathBuf::from(&s2.path);
+            let s3 = self.sync.create_share(&acc, &me, &my_name, Some(s2.id.clone()), &s2.label, &path, s2.conv.clone(), s2.members.clone()).map_err(|e| format!("{e:#}"))?;
+            return Ok(format!("{} offered to {}", s3.label, members.iter().map(|u| self.model.name_of(u)).collect::<Vec<_>>().join(", ")));
+        }
+        let (id, label, path) = match found {
+            Some(f) => (Some(f.id), f.label, std::path::PathBuf::from(f.path)),
+            None => {
+                let p = std::path::PathBuf::from(what);
+                if !p.is_dir() {
+                    return Err(format!("{what} is neither a synced folder nor a folder"));
+                }
+                let label = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "folder".into());
+                (None, label, p)
+            }
+        };
+        let list: Vec<crate::shares::Member> = members.iter().map(|u| crate::shares::Member { uri: u.clone(), name: self.model.name_of(u), ..Default::default() }).collect();
+        let s = self.sync.create_share(&acc, &me, &my_name, id, &label, &path, None, list).map_err(|e| format!("{e:#}"))?;
+        Ok(format!("{} offered to {} (they read; joma sync write gives writing)", s.label, members.iter().map(|u| self.model.name_of(u)).collect::<Vec<_>>().join(", ")))
+    }
+
     fn sync_request(&mut self, what: &str, arg: Option<String>, label: Option<String>, json: bool) -> Reply {
         if self.gate != Gate::Ready {
             return Reply::Error { message: "Joma is not connected to Jami yet".into() };
@@ -5462,6 +5647,63 @@ impl Joma {
                 Ok(()) => Reply::Done,
                 Err(e) => Reply::Error { message: format!("{e:#}") },
             },
+            // joma sync share <folder|path> <contact|conversation>
+            "share" => {
+                let (Some(what), Some(with)) = (arg, label) else { return Reply::Error { message: "joma sync share <folder> <contact|conversation>".into() } };
+                match self.share_with(&what, &with) {
+                    Ok(t) => Reply::Text { text: t },
+                    Err(e) => Reply::Error { message: e },
+                }
+            }
+            "offers" => {
+                let offers: Vec<&crate::shares::Offer> = self.sync.store.offers.values().collect();
+                if json {
+                    return Reply::Text { text: serde_json::to_string(&offers).unwrap_or_default() };
+                }
+                if offers.is_empty() {
+                    return Reply::Text { text: "no folders offered".into() };
+                }
+                Reply::Text { text: offers.iter().map(|o| format!("{}  {}  from {}{}", o.folder, o.label, self.model.name_of(&o.owner), if o.conv.is_some() { "  (conversation)" } else { "" })).collect::<Vec<_>>().join("\n") }
+            }
+            "join" => match self.join_share(arg.as_deref().unwrap_or(""), label.map(std::path::PathBuf::from)) {
+                Ok(s) => Reply::Text { text: format!("{} → {}", s.label, s.path) },
+                Err(e) => Reply::Error { message: e },
+            },
+            "decline" => {
+                if !self.sync.store.offers.contains_key(arg.as_deref().unwrap_or("")) {
+                    return Reply::Error { message: "no such offer (joma sync offers)".into() };
+                }
+                self.sync.decline(&acc, arg.as_deref().unwrap_or(""));
+                Reply::Done
+            }
+            "leave" => {
+                let me = self.model.me.clone();
+                match self.sync.leave(&acc, &me, arg.as_deref().unwrap_or("")) {
+                    Ok(()) => Reply::Text { text: "left; the files stay where they are".into() },
+                    Err(e) => Reply::Error { message: format!("{e:#}") },
+                }
+            }
+            // joma sync write <folder> <contact> on|off
+            "write" => {
+                let (Some(folder), Some(rest)) = (arg, label) else { return Reply::Error { message: "joma sync write <folder> <contact> on|off".into() } };
+                let (who, on) = rest.rsplit_once(' ').map(|(w, o)| (w.to_owned(), o == "on")).unwrap_or((rest.clone(), true));
+                let Some(uri) = self.model.contact_named(&who).or_else(|| (who.len() == 40).then(|| who.clone())) else { return Reply::Error { message: format!("no contact {who}") } };
+                let me = self.model.me.clone();
+                match self.sync.set_write(&acc, &me, &folder, &uri, on) {
+                    Ok(()) => Reply::Text { text: format!("{} {} write in it", self.model.name_of(&uri), if on { "may" } else { "may not" }) },
+                    Err(e) => Reply::Error { message: format!("{e:#}") },
+                }
+            }
+            // joma sync device <folder> <device> on|off
+            "device" => {
+                let (Some(folder), Some(rest)) = (arg, label) else { return Reply::Error { message: "joma sync device <folder> <device> on|off".into() } };
+                let (who, on) = rest.rsplit_once(' ').map(|(w, o)| (w.to_owned(), o == "on")).unwrap_or((rest.clone(), true));
+                let Some(st) = self.sync.peers.iter().find(|(d, p)| p.name == who || d.starts_with(&who)).map(|(_, p)| p.st.clone()) else { return Reply::Error { message: format!("no device {who} with sync") } };
+                match self.sync.set_device_on(&acc, &folder, &st, on) {
+                    Ok(()) => Reply::Done,
+                    Err(e) => Reply::Error { message: format!("{e:#}") },
+                }
+            }
             other => Reply::Error { message: format!("unknown sync command {other}") },
         }
     }
@@ -5522,11 +5764,20 @@ impl Joma {
     }
 
     fn send_file(&mut self, conv: &str, path: &str) -> Reply {
+        self.send_file_as(conv, path, false)
+    }
+
+    /// Send a file (`message`: a voice or video message) through Jami, and put it in the
+    /// conversation's shared folder.
+    fn send_file_as(&mut self, conv: &str, path: &str, message: bool) -> Reply {
         let path = std::path::Path::new(path);
         if !path.is_file() {
             return Reply::Error { message: format!("{} is not a file", path.display()) };
         }
         let abs = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        if let Err(e) = self.share_conv_file(conv, &abs, message) {
+            tracing::warn!(error = %e, "the file did not go into the conversation's folder");
+        }
         match joma_jami::send_file(&self.model.account, conv, &abs.to_string_lossy()) {
             Ok(()) => Reply::Done,
             Err(e) => Reply::Error { message: e.to_string() },
