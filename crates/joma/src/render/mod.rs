@@ -380,6 +380,16 @@ impl Render for Joma {
             .text_color(t.text)
             .font_family(t.font.clone())
             .text_size(px(t.size))
+            .on_key_down(cx.listener(|this, e: &gpui::KeyDownEvent, window, cx| {
+                // The files view's own keys, when no field takes them.
+                let m = &e.keystroke.modifiers;
+                if this.tab != Tab::Files || this.mode != Mode::Chat || m.control || m.alt || m.platform || this.input.focus_handle(cx).is_focused(window) {
+                    return;
+                }
+                if this.files_keypress(&e.keystroke.key, cx) {
+                    cx.stop_propagation();
+                }
+            }))
             .on_action(cx.listener(|this, _: &Quit, _, cx| {
                 this.leave();
                 cx.quit()

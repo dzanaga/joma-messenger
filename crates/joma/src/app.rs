@@ -1339,6 +1339,48 @@ impl Joma {
         cx.notify();
     }
 
+    /// j/k (or the arrows, Alt+J/K) in the files view: the next or previous row.
+    pub fn files_step(&mut self, by: i32, cx: &mut Context<Self>) {
+        let n = self.files.entries.len() as i32;
+        if n == 0 {
+            return;
+        }
+        let at = self.files.picked.as_ref().and_then(|p| self.files.entries.iter().position(|e| e.path == *p)).map_or(if by > 0 { -1 } else { n }, |i| i as i32);
+        let next = (at + by).clamp(0, n - 1) as usize;
+        self.files.picked = Some(self.files.entries[next].path.clone());
+        cx.notify();
+    }
+
+    /// The files view's keys (discussion 2026-11-27-files, question 4): j/k and the
+    /// arrows move, Enter opens (a folder: goes in), Space shows a picture in Joma,
+    /// Backspace goes up, Delete moves to the trash (asking first).
+    pub fn files_keypress(&mut self, key: &str, cx: &mut Context<Self>) -> bool {
+        let picked = self.files.picked.clone();
+        match key {
+            "j" | "down" => self.files_step(1, cx),
+            "k" | "up" => self.files_step(-1, cx),
+            "enter" => match picked {
+                Some(p) if p.is_dir() => self.files_enter(&p, cx),
+                Some(p) => self.files_activate(&p, cx),
+                None => return false,
+            },
+            "space" => match picked {
+                Some(p) if crate::render::is_picture(&p) => {
+                    self.viewer = Some(p);
+                    cx.notify();
+                }
+                _ => return false,
+            },
+            "backspace" => self.files_up(cx),
+            "delete" => match picked {
+                Some(p) if p.is_file() => self.files_delete(&p, cx),
+                _ => return false,
+            },
+            _ => return false,
+        }
+        true
+    }
+
     pub fn files_close(&mut self, cx: &mut Context<Self>) {
         self.files.open = false;
         cx.notify();
@@ -4972,6 +5014,9 @@ impl Joma {
     }
 
     pub fn step(&mut self, by: i32, cx: &mut Context<Self>) {
+        if self.tab == Tab::Files {
+            return self.files_step(by, cx);
+        }
         let ids: Vec<String> = self.visible_conversations().iter().map(|c| c.id.clone()).collect();
         if ids.is_empty() {
             return;

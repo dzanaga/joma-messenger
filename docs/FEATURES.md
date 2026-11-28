@@ -135,7 +135,8 @@ link here. Needs `syncthing` installed.
   it with the path to it (relayed in yellow: slow for large files), your devices with a
   switch each, and the files: a folder opens, a click selects, a double click opens
   (pictures in Joma's viewer), **show in folder**, **copy path**, **open in file
-  manager**; dropping files copies them in; the bin on a selected file moves it to the
+  manager**; keys: j/k or the arrows move, Enter opens (a folder: goes in), Space shows a
+  picture, Backspace goes up, Delete deletes (asking first); dropping files copies them in; the bin on a selected file moves it to the
   trash after a second click (it goes from the other devices too, which the second click
   says). When two devices changed a file at once, its row says **conflict** with **keep
   this** and **keep the other** (Syncthing's `.sync-conflict-` copy is folded under it).
@@ -436,6 +437,7 @@ notifications); calls, voice messages and files not yet tried. Design:
   device; your desktop shows it under new devices).
 
 ## Log
+- 0.5.3.dev12 (2026-11-28): keys in the files view (not tried on screen yet).
 - 0.5.3.dev11 (2026-11-28): backups keep the synced folders; after a restore, set them up
   again from files (`joma sync restored`).
 - 0.5.3.dev10 (2026-11-28): whisper.cpp removed: Superwhisper is the only engine.
