@@ -1447,18 +1447,23 @@ impl Joma {
     pub fn files_drop(&mut self, paths: Vec<std::path::PathBuf>, cx: &mut Context<Self>) {
         let Some(root) = self.files_root() else { return };
         let dir = self.files.dir.clone().unwrap_or(root);
-        let mut n = 0;
-        for p in paths.iter().filter(|p| p.is_file()) {
-            let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into());
-            match std::fs::copy(p, crate::shares::free_name(&dir, &name)) {
-                Ok(_) => n += 1,
-                Err(e) => self.show_flash(format!("{name}: {e}"), cx),
+        // Copied off the UI thread (large files take a while); the list shows them as they land.
+        let jobs: Vec<(std::path::PathBuf, std::path::PathBuf)> = paths
+            .iter()
+            .filter(|p| p.is_file())
+            .map(|p| (p.clone(), crate::shares::free_name(&dir, &p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into()))))
+            .collect();
+        let n = jobs.len();
+        std::thread::spawn(move || {
+            for (from, to) in jobs {
+                if let Err(e) = std::fs::copy(&from, &to) {
+                    tracing::warn!(error = %e, to = %to.display(), "could not copy a dropped file");
+                }
             }
-        }
+        });
         if n > 0 {
-            self.show_flash(format!("{n} {} copied into {}", if n == 1 { "file" } else { "files" }, dir.display()), cx);
+            self.show_flash(format!("copying {n} {} into {}", if n == 1 { "file" } else { "files" }, dir.display()), cx);
         }
-        self.files_read();
         cx.notify();
     }
 
