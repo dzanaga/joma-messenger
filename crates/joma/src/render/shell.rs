@@ -6,7 +6,9 @@ impl Joma {
     /// The rail on the left: the six views as icons (their names and keys in tooltips),
     /// then an update, settings, the panel/window switch and our picture (its menu holds
     /// the rest). The accent only for unread messages and an update.
-    pub(super) fn rail(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
+    /// The tab rail: on the left, or (`bottom`, the compact panel) along the bottom like
+    /// the phone's bar (discussion 2026-11-27-one-joma, question 2).
+    pub(super) fn rail(&self, t: &Theme, bottom: bool, cx: &mut Context<Self>) -> AnyElement {
         let unread: u32 = self.listed_unread();
         let live = !self.model.calls.is_empty() || !self.running_shares_empty();
         let item = |n: usize, tab: Tab, g: Icon, title: &'static str, count: Option<String>, dot: bool| {
@@ -56,20 +58,15 @@ impl Joma {
                 .tooltip(tip(t, hint))
                 .child(g)
         };
-        div()
-            .flex()
-            .flex_col()
+        let line = |d: gpui::Div| if bottom { d.flex_row() } else { d.flex_col() };
+        line(div().flex())
             .flex_none()
             .items_center()
             .justify_between()
-            .w(px(48.))
-            .h_full()
-            .py(px(6.))
+            .map(|d| if bottom { d.w_full().h(px(44.)).px(px(6.)) } else { d.w(px(48.)).h_full().py(px(6.)) })
             .bg(t.bar)
             .child(
-                div()
-                    .flex()
-                    .flex_col()
+                line(div().flex())
                     .items_center()
                     .gap(px(2.))
                     .child(item(1, Tab::Chats, G_COMMENT, "chats", (unread > 0).then(|| unread.min(99).to_string()), false))
@@ -81,9 +78,7 @@ impl Joma {
                     .child(item(6, Tab::Agents, G_ROBOT, "agents", None, false)),
             )
             .child(
-                div()
-                    .flex()
-                    .flex_col()
+                line(div().flex())
                     .items_center()
                     .gap(px(2.))
                     .when_some(self.update.clone(), |d, v| {
@@ -112,7 +107,7 @@ impl Joma {
                     .child(
                         div()
                             .id("strip-me")
-                            .mt(px(S1))
+                            .when(!bottom, |d| d.mt(px(S1)))
                             .cursor_pointer()
                             .hover(|d| d.opacity(0.8))
                             .child(avatar(t, self.model.avatars.get(&self.model.me).cloned(), &self.model.me, &self.model.my_name, 26., Some(status)))

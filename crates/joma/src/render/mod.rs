@@ -516,14 +516,17 @@ impl Render for Joma {
             .relative()
             .when(!self.fullscreen && self.gate == Gate::Ready, |d| d.children(self.setup_banner(&t, cx)))
             // The rail, then the view: areas touch, set apart by their fill.
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_h(px(0.))
-                    .when(!self.fullscreen && self.gate == Gate::Ready, |d| d.child(self.rail(&t, cx)))
-                    .child(body),
-            )
+            .map(|d| {
+                let ready = !self.fullscreen && self.gate == Gate::Ready;
+                if self.narrow {
+                    // The compact panel is the phone's layout: the bar at the bottom, hidden
+                    // while a conversation or a folder fills the panel (back returns).
+                    let inside = (self.tab == Tab::Files && self.files.open && self.files.key.is_some()) || (self.tab != Tab::Files && self.narrow_chat && self.selected.is_some());
+                    d.child(div().flex().flex_col().flex_1().min_h(px(0.)).child(div().flex().flex_1().min_h(px(0.)).child(body)).when(ready && !inside, |d| d.child(self.rail(&t, true, cx))))
+                } else {
+                    d.child(div().flex().flex_1().min_h(px(0.)).when(ready, |d| d.child(self.rail(&t, false, cx))).child(body))
+                }
+            })
             .children(self.menu_overlay(&t, cx))
             .children(self.keys_overlay(&t, cx))
             .children(self.viewer_overlay(&t, cx))

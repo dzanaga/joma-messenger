@@ -15,6 +15,11 @@ remove from the list. Attach, emoji, YouTube, voice and video messages are insid
 message field. Notes that used to be in the status line pass at the bottom of the
 window. **F1** (or Ctrl+/) lists every key.
 
+The compact panel (under the bar, or any window narrower than 700 px) is the phone's
+layout: one column, the list, then one conversation (back returns), and the tabs as a
+bar along the bottom, hidden while a conversation or a folder fills the panel. **files**
+(Ctrl+7) sits after devices.
+
 ## Account
 Creating an account asks for your name (what contacts see), then an optional username:
 it is registered on Jami's name server once the account is online, so contacts can find
@@ -424,6 +429,8 @@ notifications); calls, voice messages and files not yet tried. Design:
   device; your desktop shows it under new devices).
 
 ## Log
+- 0.5.3.dev7 (2026-11-28): the compact panel takes the phone's layout: the tabs along the
+  bottom, hidden inside a conversation (not seen on screen yet: the host's screen was off).
 - 0.5.3.dev6 (2026-11-28): the desktop tells your devices its Omarchy theme (joma for
   Android 0.1.0.dev3 follows it); Android 0.1.0.dev3: Omarchy's themes on the phone,
   restore from the GitHub backup.
