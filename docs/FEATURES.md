@@ -134,8 +134,12 @@ link here. Needs `syncthing` installed.
   it with the path to it (relayed in yellow: slow for large files), your devices with a
   switch each, and the files: a folder opens, a click selects, a double click opens
   (pictures in Joma's viewer), **show in folder**, **copy path**, **open in file
-  manager**; dropping files copies them in. Old versions of changed and deleted files
-  stay 30 days in the folder's `.stversions`. **Received** lists `~/Downloads/joma`.
+  manager**; dropping files copies them in; the bin on a selected file moves it to the
+  trash after a second click (it goes from the other devices too, which the second click
+  says). When two devices changed a file at once, its row says **conflict** with **keep
+  this** and **keep the other** (Syncthing's `.sync-conflict-` copy is folded under it).
+  Old versions of changed and deleted files stay 30 days in the folder's `.stversions`.
+  **Received** lists `~/Downloads/joma`.
 - Commands: `joma sync on|off|status [--json]`, `joma sync add <path> [label]`, `joma
   sync remove <folder>`, `joma sync share <folder|path> <contact|conversation>`, `joma sync
   offers`, `joma sync join <folder> [path]`, `joma sync decline|leave <folder>`, `joma
@@ -429,6 +433,8 @@ notifications); calls, voice messages and files not yet tried. Design:
   device; your desktop shows it under new devices).
 
 ## Log
+- 0.5.3.dev8 (2026-11-28): files view: conflicts (keep this / keep the other), delete to
+  the trash.
 - 0.5.3.dev7 (2026-11-28): the compact panel takes the phone's layout: the tabs along the
   bottom, hidden inside a conversation (not seen on screen yet: the host's screen was off).
 - 0.5.3.dev6 (2026-11-28): the desktop tells your devices its Omarchy theme (joma for

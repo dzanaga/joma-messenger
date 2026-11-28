@@ -366,6 +366,16 @@ pub struct FileEntry {
     pub dir: bool,
     pub size: u64,
     pub modified: i64,
+    /// Syncthing's copies of this file from a conflict (two devices changed it at once).
+    pub conflicts: Vec<std::path::PathBuf>,
+}
+
+/// `report.sync-conflict-20261128-031500-ABCDEFG.pdf` → `report.pdf`.
+pub fn conflict_of(name: &str) -> Option<String> {
+    let i = name.find(".sync-conflict-")?;
+    let rest = &name[i + ".sync-conflict-".len()..];
+    let ext = rest.split_once('.').map(|(_, e)| format!(".{e}")).unwrap_or_default();
+    Some(format!("{}{ext}", &name[..i]))
 }
 
 #[derive(Debug, Clone, Default)]
@@ -382,6 +392,16 @@ pub struct FilesView {
     pub share_for: Option<String>,
 }
 
+/// Into the desktop's trash (`gio trash`), so a deletion can be undone.
+pub fn trash(path: &std::path::Path) -> std::io::Result<()> {
+    let out = std::process::Command::new("gio").arg("trash").arg(path).output()?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(String::from_utf8_lossy(&out.stderr).trim().to_owned()))
+    }
+}
+
 /// Folders first, then by name; dot files hidden (Syncthing's own among them).
 pub fn read_dir(dir: &std::path::Path) -> Vec<FileEntry> {
     let mut out: Vec<FileEntry> = std::fs::read_dir(dir)
@@ -392,9 +412,17 @@ pub fn read_dir(dir: &std::path::Path) -> Vec<FileEntry> {
         .filter_map(|e| {
             let m = e.metadata().ok()?;
             let modified = m.modified().ok().and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs() as i64);
-            Some(FileEntry { name: e.file_name().to_string_lossy().into_owned(), path: e.path(), dir: m.is_dir(), size: m.len(), modified })
+            Some(FileEntry { name: e.file_name().to_string_lossy().into_owned(), path: e.path(), dir: m.is_dir(), size: m.len(), modified, conflicts: Vec::new() })
         })
         .collect();
+    // Conflict copies go under the file they belong to.
+    let copies: Vec<(String, std::path::PathBuf)> = out.iter().filter_map(|e| Some((conflict_of(&e.name)?, e.path.clone()))).collect();
+    out.retain(|e| conflict_of(&e.name).is_none() || !copies.iter().any(|(orig, p)| *p == e.path && dir.join(orig).exists()));
+    for (orig, p) in copies {
+        if let Some(e) = out.iter_mut().find(|e| e.name == orig) {
+            e.conflicts.push(p);
+        }
+    }
     out.sort_by(|a, b| (!a.dir, a.name.to_lowercase()).cmp(&(!b.dir, b.name.to_lowercase())));
     out
 }
@@ -1316,6 +1344,37 @@ impl Joma {
         if n > 0 {
             self.show_flash(format!("{n} {} copied into {}", if n == 1 { "file" } else { "files" }, dir.display()), cx);
         }
+        self.files_read();
+        cx.notify();
+    }
+
+    /// A conflict: keep this file (the other copy goes), or the other (it replaces this).
+    pub fn resolve_conflict(&mut self, file: &std::path::Path, copy: &std::path::Path, keep_other: bool, cx: &mut Context<Self>) {
+        let r = if keep_other { std::fs::rename(copy, file) } else { trash(copy) };
+        if let Err(e) = r {
+            self.show_flash(format!("{e}"), cx);
+        }
+        self.files_read();
+        cx.notify();
+    }
+
+    /// Delete a file of the folder shown: into the trash, after a second click (it goes
+    /// from every device that syncs the folder).
+    pub fn files_delete(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let devices = self.sync_view.as_ref().map_or(0, |r| r.devices.len());
+        let ask = if matches!(self.files.key, Some(FilesKey::Received)) {
+            "click again: into the trash".to_owned()
+        } else {
+            format!("click again: into the trash here, and gone from the folder on the {devices} other devices that sync it")
+        };
+        if !self.armed(&format!("del:{}", path.display()), &ask, cx) {
+            return;
+        }
+        match trash(path) {
+            Ok(()) => self.show_flash(format!("{} is in the trash", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()), cx),
+            Err(e) => self.show_flash(format!("{e}"), cx),
+        }
+        self.files.picked = None;
         self.files_read();
         cx.notify();
     }
@@ -6571,4 +6630,30 @@ fn file_stamp() -> String {
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     unsafe { libc::localtime_r(&t, &mut tm) };
     format!("{:04}{:02}{:02}-{:02}{:02}{:02}", 1900 + tm.tm_year, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec)
+}
+
+#[cfg(test)]
+mod files_tests {
+    use super::*;
+
+    #[test]
+    fn conflict_names() {
+        assert_eq!(conflict_of("report.sync-conflict-20261128-031500-ABCDEFG.pdf").as_deref(), Some("report.pdf"));
+        assert_eq!(conflict_of("notes.sync-conflict-20261128-031500-ABCDEFG").as_deref(), Some("notes"));
+        assert_eq!(conflict_of("plain.txt"), None);
+    }
+
+    #[test]
+    fn conflicts_go_under_their_file() {
+        let d = std::env::temp_dir().join(format!("joma-files-{}", std::process::id()));
+        std::fs::create_dir_all(d.join("sub")).unwrap();
+        std::fs::write(d.join("a.txt"), "1").unwrap();
+        std::fs::write(d.join("a.sync-conflict-20261128-031500-ABCDEFG.txt"), "2").unwrap();
+        std::fs::write(d.join(".hidden"), "x").unwrap();
+        let list = read_dir(&d);
+        let names: Vec<&str> = list.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["sub", "a.txt"]);
+        assert_eq!(list[1].conflicts.len(), 1);
+        let _ = std::fs::remove_dir_all(&d);
+    }
 }

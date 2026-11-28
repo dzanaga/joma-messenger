@@ -278,17 +278,42 @@ impl Joma {
                     cx.notify();
                 }
             }));
+        let mut col = None;
+        if !e.conflicts.is_empty() {
+            let mut warn = div().flex().flex_col().gap(px(2.)).px(px(S3 + 30.)).pb(px(4.));
+            for (i, copy) in e.conflicts.iter().enumerate() {
+                let (f1, c1, f2, c2) = (e.path.clone(), copy.clone(), e.path.clone(), copy.clone());
+                let from = copy.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                warn = warn.child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap(px(6.))
+                        .child(small(t, format!("conflict: another device changed it too ({from})"), t.yellow))
+                        .child(button(SharedString::from(format!("cf-this-{}-{i}", e.path.display())), G_CHECK, "keep this", t, false).on_click(cx.listener(move |this, _, _, cx| this.resolve_conflict(&f1, &c1, false, cx))))
+                        .child(button(SharedString::from(format!("cf-other-{}-{i}", e.path.display())), G_EXCHANGE, "keep the other", t, false).on_click(cx.listener(move |this, _, _, cx| this.resolve_conflict(&f2, &c2, true, cx)))),
+                );
+            }
+            col = Some(warn);
+        }
         if on && !dir {
             let (a, b, c) = (e.path.clone(), e.path.clone(), e.path.clone());
+            let d = e.path.clone();
+            let armed = self.is_armed(&format!("del:{}", e.path.display()));
             row = row
                 .child(button("file-open", G_EXPAND, "open", t, false).on_click(cx.listener(move |this, _, _, cx| this.files_activate(&a, cx))))
                 .child(button("file-show", G_FOLDER, "show in folder", t, false).on_click(cx.listener(move |this, _, _, cx| this.open_outside_checked(b.parent().unwrap_or(&b), cx))))
                 .child(button("file-copy", G_COPY, "copy path", t, false).on_click(cx.listener(move |this, _, _, cx| {
                     cx.write_to_clipboard(gpui::ClipboardItem::new_string(c.display().to_string()));
                     this.show_flash("path copied", cx);
-                })));
+                })))
+                .child(button("file-del", G_TRASH, if armed { "delete?" } else { "" }, t, armed).text_color(if armed { t.red } else { t.muted }).on_click(cx.listener(move |this, _, _, cx| this.files_delete(&d, cx))));
         }
-        row.into_any_element()
+        match col {
+            Some(w) => div().flex().flex_col().child(row).child(w).into_any_element(),
+            None => row.into_any_element(),
+        }
     }
 
     /// Who has the folder: the owner and members (reading or writing), your devices, and
