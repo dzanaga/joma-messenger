@@ -60,6 +60,10 @@
   null device, libjami's local recorder spins like the calls do and stopping it never
   returns: voice messages cannot be recorded in the nest (Joma stops it off the UI
   thread; send a prepared `.ogg` with `joma send-file` to test the rest).
+- **Test profiles never use the real Superwhisper** (its history keeps what it hears):
+  Joma returns no transcriber under `JOMA_PROFILE` unless `JOMA_TEST_SUPERWHISPER=1`
+  with a stand-in `superwhisper` first on the PATH. On 2026-11-28 a test voice message
+  went through the user's Superwhisper after whisper.cpp was removed.
 - **Test profiles never register usernames**: the public name server cannot take a name
   back (`register_name` refuses under `JOMA_PROFILE`). On 2026-10-29 a retried onboarding
   typed into the username step and registered `arol` for a throwaway account. Check the

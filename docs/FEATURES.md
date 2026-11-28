@@ -437,6 +437,7 @@ notifications); calls, voice messages and files not yet tried. Design:
   device; your desktop shows it under new devices).
 
 ## Log
+- 0.5.3.dev13 (2026-11-28): a test profile never calls the real Superwhisper.
 - 0.5.3.dev12 (2026-11-28): keys in the files view (not tried on screen yet).
 - 0.5.3.dev11 (2026-11-28): backups keep the synced folders; after a restore, set them up
   again from files (`joma sync restored`).

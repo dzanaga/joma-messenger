@@ -192,6 +192,12 @@ pub fn installed(program: &str) -> bool {
 /// ("automatic") only when it is set to work offline; in any mode when chosen in the
 /// settings. `None`: off.
 pub fn transcriber(setting: &str) -> Option<&'static str> {
+    // A test profile never sends its audio to the user's own Superwhisper (its history
+    // would keep it): only a stand-in, given with JOMA_TEST_SUPERWHISPER=1 and found
+    // first on the PATH.
+    if std::env::var_os("JOMA_PROFILE").is_some() && std::env::var_os("JOMA_TEST_SUPERWHISPER").is_none() {
+        return None;
+    }
     match setting {
         "off" => None,
         "superwhisper" => installed("superwhisper").then_some("superwhisper"),
