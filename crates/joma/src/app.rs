@@ -1627,7 +1627,13 @@ impl Joma {
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into());
         let to = crate::shares::free_name(&dir, &name);
-        std::fs::copy(file, &to).map_err(|e| format!("{}: {e}", to.display()))?;
+        // A large video takes a while: copied off the UI thread.
+        let (from, dest) = (file.to_path_buf(), to.clone());
+        std::thread::spawn(move || {
+            if let Err(e) = std::fs::copy(&from, &dest) {
+                tracing::warn!(error = %e, to = %dest.display(), "the file did not go into the conversation's folder");
+            }
+        });
         Ok(Some(to))
     }
 
