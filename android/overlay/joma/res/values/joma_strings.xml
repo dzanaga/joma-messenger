@@ -84,4 +84,29 @@
     <string name="account_link_device_info">On a device that has the account, choose “Link a new device” (joma: Devices → paste the code) to see the QR code or the code.</string>
     <string name="account_biometry_auth_title">Unlock your account</string>
     <string name="account_biometry_enroll_auth_title">Add authentication for your account</string>
+
+    <!-- Themes (android/tools/themes.py) -->
+    <string name="joma_theme">Theme</string>
+    <string name="joma_theme_desktop">Same as my Omarchy desktop</string>
+    <string name="joma_theme_build">As built</string>
+
+    <!-- Restore from the GitHub backup (JomaRestoreActivity) -->
+    <string name="joma_restore_button">Restore from your GitHub backup</string>
+    <string name="joma_restore_title">Restore from your backup</string>
+    <string name="joma_restore_asking">Asking GitHub for a code…</string>
+    <string name="joma_restore_code_intro">On GitHub (%1$s), type this code:</string>
+    <string name="joma_restore_open">Copy the code and open GitHub</string>
+    <string name="joma_restore_scope">Joma\'s GitHub App may then read your private repo joma-backup and write your badge gist, nothing else. The phone keeps no token.</string>
+    <string name="joma_restore_waiting">Waiting for GitHub…</string>
+    <string name="joma_restore_reading">Reading your backup…</string>
+    <string name="joma_restore_no_repo">github.com/%1$s/joma-backup does not exist, or Joma\'s app was not given it: nothing backed up yet?</string>
+    <string name="joma_restore_empty">No accounts in the backup.</string>
+    <string name="joma_restore_password">The backup\'s password</string>
+    <string name="joma_restore_password_note">The one password you chose for the backup on your desktop. The account comes back with the same Jami ID, contacts and username; messages return from your contacts and other devices.</string>
+    <string name="joma_restore_go">Restore</string>
+    <string name="joma_restore_working">Decrypting (a few seconds)…</string>
+    <string name="joma_restore_wrong">Wrong password.</string>
+    <string name="joma_restore_again">Try again</string>
+    <string name="joma_restore_expired">The code expired: try again.</string>
+    <string name="joma_restore_signed_out">GitHub access was removed or expired: sign in again.</string>
 </resources>

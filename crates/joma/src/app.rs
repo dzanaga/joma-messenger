@@ -658,6 +658,9 @@ pub struct Joma {
     sync_view_at: Option<Instant>,
     /// The files view.
     pub files: FilesView,
+    /// When our devices last heard the theme (again every half hour: a phone that was
+    /// off misses account messages).
+    theme_told: Option<Instant>,
     /// Our other devices' Joma presence, by device id.
     pub my_devices: HashMap<String, crate::presence::Peer>,
     /// When we last told our other devices, and what.
@@ -705,6 +708,9 @@ pub fn media_name(name: &str) -> bool {
 const AUTO_DOWNLOAD: u64 = 200 * 1024 * 1024;
 
 /// Where received files go: `~/Downloads/joma` (the XDG download dir, if set).
+/// The Omarchy theme in use, to our own devices (joma for Android follows it).
+pub const THEME_MIME: &str = "application/x-joma-theme+json";
+
 pub fn download_dir() -> std::path::PathBuf {
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
     let base = std::process::Command::new("xdg-user-dir")
@@ -958,6 +964,7 @@ impl Joma {
             sync_view_busy: false,
             sync_view_at: None,
             files: FilesView::default(),
+            theme_told: None,
             my_devices: HashMap::new(),
             self_told: None,
             accounts: Vec::new(),
@@ -1092,6 +1099,7 @@ impl Joma {
         }
         self.load_accounts();
         self.configure_inputs(cx);
+        self.theme_told = None;
         if crate::sync::is_on(&self.model.account) {
             self.start_sync();
         }
@@ -2167,7 +2175,28 @@ impl Joma {
             self.theme_stamp = stamp;
             self.theme = Rc::new(Theme::current());
             self.configure_inputs(cx);
+            self.tell_theme();
             cx.notify();
+        }
+    }
+
+    /// Tell our other devices (joma for Android follows it when asked) the Omarchy theme
+    /// in use: at start and when it changes.
+    pub fn tell_theme(&mut self) {
+        if self.gate != Gate::Ready {
+            return;
+        }
+        self.theme_told = Some(Instant::now());
+        let Some(name) = joma_theme::name() else { return };
+        let mode = joma_theme::colors_path()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|t| t.lines().find_map(|l| l.trim().strip_prefix("mode").map(|v| v.trim_start_matches([' ', '=']).trim_matches('"').to_owned())))
+            .unwrap_or_else(|| "dark".into());
+        let mut p = joma_jami::Details::new();
+        p.insert(THEME_MIME.into(), serde_json::json!({"name": name, "mode": mode}).to_string());
+        let (acc, me) = (self.model.account.clone(), self.model.me.clone());
+        if let Err(e) = joma_jami::send_account_message(&acc, &me, &p, false) {
+            tracing::warn!(error = %e, "could not tell our devices the theme");
         }
     }
 
@@ -2211,6 +2240,9 @@ impl Joma {
             }
         }
         self.tell_presence();
+        if self.theme_told.is_none_or(|t| t.elapsed() > Duration::from_secs(30 * 60)) {
+            self.tell_theme();
+        }
         self.auto_tick();
         self.transcriber_tick(cx);
         if self.sync.st.is_some() && self.sync.last_hello.is_none_or(|t| t.elapsed() > crate::sync::HELLO_EVERY) {

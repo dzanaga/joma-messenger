@@ -52,6 +52,15 @@ def mix(a: int, b: int, t: float) -> int:
     return sum(round(ch(a, s) + (ch(b, s) - ch(a, s)) * t) << s for s in (16, 8, 0))
 
 
+def lum(c: int) -> float:
+    """Relative luminance (sRGB), 0 black to 1 white."""
+    def ch(v):
+        v /= 255
+        return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+    r, g, b = ((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF)
+    return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
+
+
 def hx(c: int, alpha: int | None = None) -> str:
     return f"#{alpha:02X}{c:06X}" if alpha is not None else f"#{c:06X}"
 
@@ -62,6 +71,11 @@ def night(p: dict) -> dict:
     hair = mix(bg, fg, 0.07)  # where two areas of one fill meet
     mine = mix(p["dark_background"], acc, 0.10)  # the desktop's `sent`: a little accent
     quiet = p["dark_foreground"]  # the desktop's `muted`
+    # Light themes (Omarchy's white, flexoki-light) give dark_foreground a colour close to
+    # the background: quiet text must stay readable.
+    contrast = lambda a, b: (max(lum(a), lum(b)) + 0.05) / (min(lum(a), lum(b)) + 0.05)
+    if min(contrast(quiet, bg), contrast(quiet, p["lighter_background"])) < 2.5:
+        quiet = mix(bg, fg, 0.6)
     bright = p["bright_foreground"]  # icons: white and crisp, like the desktop's
     return {
         "background": hx(bg),
@@ -92,6 +106,8 @@ def night(p: dict) -> dict:
         "icon_color": hx(bright),
         "edit_text_background": hx(p["lighter_background"]),
         "text_color": hx(p["bright_foreground"]),
+        # The text of your own messages (white in Jami): the bright text on `mine`.
+        "text_color_primary_dark": hx(bright),
         "text_hint": hx(quiet),
         "button_border": hx(hair),
         "chip_background": hx(p["selection"]),

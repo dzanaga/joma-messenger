@@ -89,6 +89,10 @@ prepare() {
     local theme="${JOMA_ANDROID_THEME:-$HOME/.local/state/omarchy/current/theme/colors.toml}"
     python3 -I "$HERE/tools/brand.py" "$REPO/crates/joma-theme/src/lib.rs" "$WORK/jami-android/joma/res" "$theme"
     python3 -I "$HERE/tools/square.py" "$WORK/jami-android/app/src/main/res" "$WORK/jami-android/joma/res"
+    local theme_name
+    theme_name="$(cat "$(dirname "$(dirname "$theme")")/theme.name" 2>/dev/null || true)"
+    python3 -I "$HERE/tools/themes.py" "$WORK/jami-android" "$HERE/themes" "$HERE/tools/brand.py" "$theme" "$theme_name"
+    python3 -I "$HERE/tools/restore.py" "$WORK/jami-android" "$REPO/crates/joma/github-app.json"
     for p in "$HERE"/patches/*.patch; do
         [ -e "$p" ] || continue
         patch -s -p1 --forward --no-backup-if-mismatch -d "$WORK/jami-android" < "$p"

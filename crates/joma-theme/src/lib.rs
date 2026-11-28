@@ -118,6 +118,12 @@ pub fn colors_path() -> Option<PathBuf> {
     Some(home()?.join(".local/state/omarchy/current/theme/colors.toml"))
 }
 
+/// The current Omarchy theme's name (`catppuccin`, …), when Omarchy is here.
+pub fn name() -> Option<String> {
+    let t = std::fs::read_to_string(home()?.join(".local/state/omarchy/current/theme.name")).ok()?;
+    Some(t.trim().to_owned()).filter(|t| !t.is_empty())
+}
+
 /// The theme file's modification time, to notice `omarchy-theme-set`.
 pub fn stamp() -> Option<SystemTime> {
     std::fs::metadata(colors_path()?).and_then(|m| m.modified()).ok()

@@ -412,8 +412,21 @@ has no Google push. joma's own extras (desktop share, presence, watching togethe
 not there yet. Verified in an emulator (account, a chat between two local accounts,
 notifications); calls, voice messages and files not yet tried. Design:
 `docs/design/07-android.md`.
+- **Themes** (0.1.0.dev3): Settings → appearance → **Theme** lists Omarchy's 23 themes
+  (catppuccin, nord, tokyo-night, the light ones…), **As built** (the build machine's
+  theme), and **Same as my Omarchy desktop**: your desktop Joma tells your devices its
+  theme (at start, when you change it, and every half hour), and the phone follows. Light
+  themes switch the app to light. The dark-mode switch is gone: the theme decides.
+- **Restore from your GitHub backup** (0.1.0.dev3, first screen of a new install, under
+  import from backup): sign in with Joma's GitHub App (a code to type on GitHub), pick
+  an account from your private `joma-backup`, type the backup's password; the account
+  comes back with the same Jami ID, contacts and username (the phone joins it as a new
+  device; your desktop shows it under new devices).
 
 ## Log
+- 0.5.3.dev6 (2026-11-28): the desktop tells your devices its Omarchy theme (joma for
+  Android 0.1.0.dev3 follows it); Android 0.1.0.dev3: Omarchy's themes on the phone,
+  restore from the GitHub backup.
 - 0.5.3.dev5 (2026-11-28): transcription as agreed: new messages by themselves, older ones
   with cc, video subtitles behind cc, long transcripts folded; your voice messages carry
   their transcript (a 📝 reply); a device can transcribe for all your devices; `joma
