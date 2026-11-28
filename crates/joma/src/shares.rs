@@ -316,7 +316,16 @@ mod tests {
         st.shares.insert("f".into(), s);
         assert!(!st.offered("alice", o, 3));
         assert_eq!(st.shares["f"].members.len(), 2);
-        assert_eq!(st.allowed("bob"), ["alice"]);
+        assert_eq!(st.allowed("bob"), ["alice", "carol"]);
+        // A conversation we take part in (we share our files there) joins by itself too.
+        let mut mine = share();
+        mine.id = "h".into();
+        mine.conv = Some("c2".into());
+        st.shares.insert("h".into(), mine);
+        let mut o3 = Offer::of(&share());
+        o3.folder = "k".into();
+        o3.conv = Some("c2".into());
+        assert!(st.offered("alice", o3, 4));
     }
 
     #[test]
