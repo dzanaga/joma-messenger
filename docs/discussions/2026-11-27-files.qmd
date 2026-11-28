@@ -26,7 +26,7 @@ player). Synced-folder settings move from devices to here; devices keeps a short
 A new rail entry **files**, between devices and accounts. Proposal: yes; devices keeps
 only a count that links here.
 
-- [ ] A:
+- [x] A:
 
 # 2. What it shows
 
@@ -34,7 +34,8 @@ Synced folders only, or also files from conversations? Proposal: synced folders,
 **received** group: every file of every conversation that is on this machine (from who,
 when, a click opens the message). One place to find "that PDF Marta sent".
 
-- [ ] A:
+- [x] A: conversations should get their folder. e.g. i send files to a group chat, there is a folder for the others that accept the files. now. if someone else delete the file on their device, the file stays in the folder but unsynced for them. so in conversations, the default is read-only for members and edit for whom shared the file.
+  however this can be configured, as we can do for a normal shared folder. so we can treat the conversations folders (let's have a nice folder structure for these) as normal shared folders for joma. where the admin of the group can set admins, and set permissions, e.g. who reads/writes (users or everybody). this way we can have group chats that become working groups. and also documents can be edited by multiple people working together in the same group chat. we then have one model for shared folders. the main difference is that when we create a shared folder we get to decide which folder we share (or one from joma shared folder with a suggested name...) while in a conversation, as soon as we drop files they go in  a shared folder. video and audio messages, should also go in there in sub-folders as they are not documents. a conversation might have a set of defined sub-folders e.g. images, gifs, audio, video, documents so most of the files would be put in the right spot, where audio and video would also contain the messages subfolders with the audio and video messages
 
 # 3. Choosing what syncs, per device
 
@@ -42,7 +43,7 @@ Today a folder goes to all your devices. Syncthing can share a folder with some 
 only. Proposal: each folder lists your devices with a switch each (default: all that run
 Joma); a new device gets the folders marked "all devices".
 
-- [ ] A:
+- [x] A:
 
 # 4. Browsing and selecting
 
@@ -51,7 +52,7 @@ system's app (`xdg-open`), Space previews in Joma, Delete moves to the trash (Sy
 passes the deletion on, so it asks first and says on how many devices). Keys like the
 chat list (j/k, /).
 
-- [ ] A:
+- [x] A:
 
 # 5. Drag and drop
 
@@ -64,7 +65,7 @@ manager there; (c) a small helper (`ripdrag`, AUR) started for the selected file
 which other apps can drag from. Proposal: (a) and (b) now, (c) only if you miss real
 dragging.
 
-- [ ] A:
+- [x] A: show in folder is fine, and on a folder "open in file manager..." something like that
 
 # 6. Conflicts and old versions
 
@@ -74,7 +75,7 @@ a badge on the file with "keep this / keep the other"; folders keep old versions
 days (Syncthing's "staggered" versioning) under the folder's `.stversions`, browsable
 from the file's menu.
 
-- [ ] A:
+- [x] A:
 
 # 7. The phone
 
@@ -82,7 +83,7 @@ Joma for Android has no Syncthing yet. Proposal: later, as its own discussion: b
 a home device's folder from the phone over a Jami tunnel (no full copy on the phone) is
 a better fit than syncing everything.
 
-- [ ] A:
+- [x] A: yes, we do not sync to phones. as long as the phone can see the folder content and download what it needs on demand, that's perfect
 
 # 8. Commands
 
@@ -90,4 +91,14 @@ Proposal, like the other features: `joma files` (folders and their state),
 `joma files ls <folder> [path] [--json]`, `joma files open <path>`, `joma sync share
 <folder> <device>|--all` for question 3.
 
-- [ ] A:
+- [x] A:
+
+## Built (2026-11-28, 0.5.3.dev4 to dev8)
+
+The files view (Ctrl+7) with offers, your folders, folders shared with people,
+conversations and received files; one model for shared folders (owner, members who read
+or write, admins, everybody writes); a conversation's files as one folder per member,
+sorted into images, gifs, audio (and audio/messages), video (and video/messages) and
+documents; open, show in folder, open in file manager, copy path, delete to the trash;
+conflicts with keep this / keep the other; old versions 30 days. Not yet: the keys of
+question 4 (j/k, Space to preview), browsing from the phone (question 7).

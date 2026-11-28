@@ -53,7 +53,7 @@ The private Joma conversation (lasting, reaches the phone after being off) plus 
 account message (instant). Proposal: yes. The same conversation can later carry other
 per-account Joma settings (synced folders, quick messages, favourites).
 
-- [ ] A:
+- [x] A:
 
 # 2. Who sees them
 
@@ -61,7 +61,7 @@ Only your devices. A contact never sees your transcripts unless you send them. P
 only yours by default; a later per-conversation switch "share transcripts here" posts
 them into that conversation for everyone (useful in a group where nobody transcribes).
 
-- [ ] A:
+- [x] A:
 
 # 3. Choosing the transcribers
 
@@ -71,7 +71,7 @@ device with a local engine transcribes for itself; a device marked **for all my
 devices** transcribes everything, and then the others stop doing it themselves (they
 wait for its records, and fall back to themselves after a few minutes if none comes).
 
-- [ ] A:
+- [x] A:
 
 # 4. What gets transcribed
 
@@ -80,7 +80,7 @@ When a transcriber is switched on, it also does the last 7 days. Older messages:
 demand. The phone's "transcribe" button asks the transcriber (a request record), so a
 phone can get any old message transcribed by the mini PC.
 
-- [ ] A:
+- [x] A: i don't think it's necessary to transcribe the last 7 days. it should only be on-demand if a transcriber becomes available and older messages are not trascribed, there should be an option, (Right click, long press, or an icon "cc") to transcribe or sub message. also for video messages, I would probably run the transcription in background but leave the subs options with a cc button to activate the overlay
 
 # 5. An account only on a phone
 
@@ -98,7 +98,9 @@ No other device to do the work. Options, any mix:
 Proposal: (a) by default, (c) as an opt-in setting, (b) later. The same cloud option
 can serve a desktop without a local model.
 
-- [ ] A:
+- [x] A: let's do a for now on mobile.
+  but with a twist.
+  any user that has a transcriber device could proactively ship the transcription. this could be an option that the user could turn on/off for some users or that is automatically turned on if the target user does not have a transcriber. in general I would say that if the sender has a transcriber it should default to send the voice message with the transcription already attached. ideally the transcription (both desktop and mobile) can be collapsed/expanded and for voice messages, when the vocal is played, there is a bold effect on the words that are pronounced while the vocal plays. this is an advanced feature, if it's too complex, let's keep it for later on.
 
 # 6. Language
 
@@ -106,7 +108,7 @@ Proposal: automatic everywhere (the engine decides), with an optional language p
 contact for people who always speak one ("Marta: Italian"), stored in the Joma
 conversation so every device uses it.
 
-- [ ] A:
+- [x] A:
 
 # 7. Order of work
 
@@ -120,7 +122,7 @@ Proposal:
 4. Joma for Android reads records and hides the conversation (A2 in the plan).
 5. The cloud key option, then a model on the phone.
 
-- [ ] A:
+- [x] A: we skip 5. let's just use superwhisper on desktop
 
 # 8. Commands
 
@@ -128,7 +130,7 @@ Proposal: `joma transcribe <conversation> <message>` (asks the transcriber or do
 here), `joma transcription` (the devices and their roles, `--json`), `joma
 transcription on|off|all` (this device's role).
 
-- [ ] A:
+- [x] A:
 
 ## Built (2026-11-28, 0.5.3.dev5)
 

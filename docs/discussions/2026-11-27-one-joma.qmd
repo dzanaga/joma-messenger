@@ -25,7 +25,7 @@ things that make you leave Signal: messages and groups, voice and video messages
 notifications that arrive when the phone sleeps, history on a new device, and from the
 desktop a screen share the phone can watch. Joma 1.0 = the bar on desktop and Android.
 
-- [ ] A:
+- [x] A:
 
 # 2. One layout: compact desktop = phone
 
@@ -36,7 +36,7 @@ screen. The full window is that layout with the rail and the list beside the cha
 Desktop-only actions (share, watch together, quick messages, agents) are extra icons
 the phone does not show.
 
-- [ ] A:
+- [x] A:
 
 # 3. Joma's own screens on the phone
 
@@ -46,7 +46,7 @@ replace them one at a time with Joma's (Kotlin, Jetpack Compose) on Jami Android
 service layer: the conversation list and the conversation first, then the call screen;
 Jami's stay for the account wizard and settings until their turn.
 
-- [ ] A:
+- [x] A: the objective is indeed to have a consistent experience. also in terms of themes and colors, we should bundle a bunch of omarchy themes palettes. and we should indeed rewrite all the layers to match Joma. I would not wait for later. we should have a dedicated section in the dev board for the android app. go on with a full plan and implement it fully, you should have all the information by now. lay down the plan and proceed towards the bar we set for v1
 
 # 4. Shared code for Joma's own parts
 
@@ -57,7 +57,7 @@ and iOS call through UniFFI (Mozilla's bindings generator, used by Firefox and
 Matrix's apps); each platform keeps its own interface. GPUI does not run on phones, so
 the screens stay native.
 
-- [ ] A:
+- [x] A:
 
 # 5. Notifications on a sleeping phone
 
@@ -69,7 +69,7 @@ app cannot use. Proposal: your always-on mini PC runs a DHT proxy with push
 instead of the service, Apple's push for iOS (needs Joma's own key, so a paid Apple
 developer account).
 
-- [ ] A:
+- [x] A:
 
 # 6. iOS
 
@@ -79,7 +79,7 @@ overlay. Limits: it builds only on a Mac with Xcode; installing needs an Apple a
 Questions: is there a Mac to build on (yours, a friend's, a CI runner)? A paid account?
 Proposal: after Android passes the daily bar.
 
-- [ ] A:
+- [x] A: let's keep ios for after we have a stable android
 
 # 7. Watching a desktop share from the phone
 
@@ -89,7 +89,7 @@ stream decoded by the phone's hardware, `MediaCodec`) with zoom and pan, later t
 the remote pointer. The phone shares its own screen with Jami's share, which it already
 has.
 
-- [ ] A:
+- [x] A:
 
 # 8. The Discord part
 
@@ -98,7 +98,7 @@ groups (swarms) and group calls, but no channels or standing rooms, and its grou
 meant to be small. Proposal: a discussion of its own once the daily bar holds; until
 then groups and group calls.
 
-- [ ] A:
+- [x] A: we don't need channels and rooms. I just meant for the video calls, so we are good on this
 
 # 9. The phone's look
 
@@ -107,7 +107,7 @@ theme, so the starship palette). Proposal: later the phone follows your desktop'
 theme through the Joma conversation (synced), with a light option; Jami's extras the
 desktop has not (feeds, SIP accounts, donations) are hidden.
 
-- [ ] A:
+- [x] A: ok, but also, let's have a bunch of themes cooked into the app. so if the user has an omarchy machine he gets an option on the themes page to sync theme with that device, otherwise, he can pick manually from the different options
 
 # 10. Order
 
@@ -122,7 +122,7 @@ Proposal:
 6. P6 The desktop share viewer on Android.
 7. P7 iOS.
 
-- [ ] A:
+- [x] A:
 
 # 11. Keeping them in step
 
@@ -131,4 +131,15 @@ Android, iOS); a new feature gets its row when its discussion starts, and is onl
 **done** when every platform it targets has it. Each release note says what changed
 per platform.
 
-- [ ] A:
+- [x] A: ok, but ios can catch up later, we leave it a bit behind for now
+
+## Built (2026-11-28)
+
+- Android 0.1.0.dev3: Omarchy's 23 themes chosen at runtime, and "same as my Omarchy
+  desktop" following the theme your desktop Joma announces (question 9); restore from
+  the GitHub backup (A1).
+- Desktop 0.5.3.dev7: the compact panel takes the phone's layout, the tabs along the
+  bottom (question 2); not seen on screen yet.
+- Not yet: Joma's own list and conversation on the phone (P4, question 3: "rewrite all
+  the layers"), push through the always-on device (P5), the share viewer on the phone
+  (P6), shared Rust code through UniFFI (question 4). iOS waits for a stable Android.
