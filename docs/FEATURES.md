@@ -261,15 +261,10 @@ message, or on a video's corner, transcribes it now. A video's subtitles show on
   each does (they tell each other every half hour); while one of them transcribes for
   all, the others give it three minutes before doing a new message themselves. `joma
   transcription [self|all|off|send|nosend] [--json]`.
-- **Settings → audio → voice messages** chooses the engine:
-  - **automatic** (default): superwhisper when it is installed and set to work offline
-    (nothing more to install; its language setting applies, automatic by default), else
-    whisper.cpp when `whisper-cli` is installed;
-  - **superwhisper**: in whatever mode it is set to. In a cloud mode the voice message
-    leaves this machine, so automatic never picks it then;
-  - **whisper.cpp**: on this machine, language detected. The model (`base`, about
-    150 MB) is downloaded at the first transcription into `~/.local/share/joma/models`;
-  - **off**.
+- **Settings → audio → voice messages**: Superwhisper is the engine (whisper.cpp was
+  removed, user 2026-11-28): **superwhisper offline** (default: used only when
+  Superwhisper is set to work offline, so voice messages stay here), **superwhisper,
+  any mode** (in a cloud mode the voice message leaves this machine), or **off**.
 
 ## Watching together
 Type `@youtube epic fails` (the YouTube button beside the message box writes `@youtube `
@@ -436,6 +431,7 @@ notifications); calls, voice messages and files not yet tried. Design:
   device; your desktop shows it under new devices).
 
 ## Log
+- 0.5.3.dev10 (2026-11-28): whisper.cpp removed: Superwhisper is the only engine.
 - 0.5.3.dev9 (2026-11-28): your devices tell each other what they transcribe; settings
   and `joma transcription` list them; a device that transcribes for all is waited for.
 - 0.5.3.dev8 (2026-11-28): files view: conflicts (keep this / keep the other), delete to

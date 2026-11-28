@@ -50,7 +50,7 @@ impl Joma {
                         t,
                         cx,
                         "tr",
-                        vec![("".into(), "automatic".into()), ("superwhisper".into(), "superwhisper".into()), ("whisper".into(), "whisper.cpp".into()), ("off".into(), "off".into())],
+                        vec![("".into(), "superwhisper offline".into()), ("superwhisper".into(), "superwhisper, any mode".into()), ("off".into(), "off".into())],
                         &self.quick.transcribe,
                         |j, x, cx| j.set_transcribe(x, cx),
                     ),
@@ -82,12 +82,11 @@ impl Joma {
                 ))
                 .child(note("New voice and video messages are transcribed as they arrive; older ones with cc. A device that transcribes for all your devices (an always-on one) does every conversation and brings the words to your other devices; your own voice messages then get their transcript attached even when sent from the phone. The transcript you send goes as a reply starting with 📝: every Jami app shows it, Joma shows it under the message."))
                 .child(note(match crate::media::transcriber(&self.quick.transcribe) {
-                    Some("whisper") => "Voice messages are transcribed by themselves on this machine with whisper.cpp (language detected) and kept in Joma's cache. The model (about 150 MB) is downloaded at the first one.",
-                    Some(_) if self.quick.transcribe.is_empty() => "Voice messages are transcribed by themselves with superwhisper, which is set to work offline: they stay on this machine. Language: superwhisper's (automatic by default).",
-                    Some(_) => "Transcripts are made by superwhisper in the mode it is set to: in a cloud mode the voice message leaves this machine.",
+                    Some(_) if self.quick.transcribe.is_empty() => "Voice messages are transcribed with Superwhisper, which is set to work offline: they stay on this machine. Language: Superwhisper's (automatic by default).",
+                    Some(_) => "Transcripts are made by Superwhisper in the mode it is set to: in a cloud mode the voice message leaves this machine.",
                     None if self.quick.transcribe == "off" => "Voice messages are not transcribed.",
-                    None if self.quick.transcribe.is_empty() => "Automatic uses superwhisper when it is set to work offline, or whisper.cpp (whisper-cli). Neither is ready, so voice messages are not transcribed.",
-                    None => "Not installed, so voice messages are not transcribed.",
+                    None if crate::media::installed("superwhisper") => "Superwhisper is set to a cloud mode: choose \"superwhisper, any mode\" to use it anyway, or set it to work offline.",
+                    None => "Superwhisper is not installed, so voice messages are not transcribed.",
                 }))
                 .child(note("Devices and sound processing apply to the next call.")),
             2 => page

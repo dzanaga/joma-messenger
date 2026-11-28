@@ -4324,26 +4324,18 @@ impl Joma {
         self.save_quick(cx);
     }
 
-    /// Transcribe a voice message, in the background. The first time with whisper.cpp
-    /// its model is downloaded (about 150 MB).
+    /// Transcribe a voice message, in the background (Superwhisper).
     pub fn transcribe(&mut self, file_id: &str, path: &std::path::Path, cx: &mut Context<Self>) {
         let Some(engine) = crate::media::transcriber(&self.quick.transcribe) else {
-            return self.show_flash("no transcription: install whisper.cpp (whisper-cli), or choose an engine in settings → audio", cx);
+            return self.show_flash("no transcription: Superwhisper is not installed, or not set to work offline (settings → audio → superwhisper uses it in any mode)", cx);
         };
         if matches!(self.transcripts.get(file_id), Some(None)) {
             return;
-        }
-        let model_missing = engine == "whisper" && !crate::media::whisper_model().is_file();
-        if model_missing {
-            self.show_flash("downloading the speech model (about 150 MB, once)…", cx);
         }
         self.transcripts.insert(file_id.to_owned(), None);
         let (tx, id, path) = (self.tx.clone(), file_id.to_owned(), path.to_owned());
         std::thread::spawn(move || {
             let r = (|| -> anyhow::Result<String> {
-                if model_missing {
-                    crate::media::fetch_whisper_model()?;
-                }
                 crate::media::transcribe(engine, &id, &path)
             })();
             let _ = tx.unbounded_send(AppMsg::Transcribed(id, r.map_err(|e| format!("{e:#}"))));

@@ -50,9 +50,9 @@ pub struct QuickConfig {
     pub show_version: bool,
     /// Offer pre-releases (0.5.2.dev3, 0.6.0-rc.1) as updates too; off: stable only.
     pub prereleases: bool,
-    /// What transcribes voice messages: "whisper" (whisper.cpp, on this machine),
-    /// "superwhisper" (that app, in whatever mode it is set to: it may be a cloud),
-    /// "off". Empty: whisper when `whisper-cli` is installed, else off.
+    /// What transcribes voice messages, Superwhisper only since 2026-11-28 (an old
+    /// "whisper" counts as empty): "superwhisper" in whatever mode it is set to (it may be
+    /// a cloud), "off"; empty: Superwhisper when it works offline.
     pub transcribe: String,
     /// What this device transcribes (discussion 2026-11-27-shared-transcription): ""
     /// new voice and video messages for itself, "all" for all your devices (every
