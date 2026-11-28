@@ -179,7 +179,9 @@ def main():
          "        messages[\"application/x-joma-theme+json\"]?.let { jomaTheme?.invoke(accountId, from, it); return }\n")
     edit(work / "app/src/main/java/cx/ring/services/SharedPreferencesServiceImpl.kt",
          "    override fun loadDarkMode() {\n        applyDarkMode(darkMode)\n",
-         "    override fun loadDarkMode() {\n        // joma: the theme decides light or dark.\n        applyDarkMode(cx.ring.joma.JomaPalette.isDark(context) ?: darkMode)\n")
+         "    override fun loadDarkMode() {\n        // joma: a chosen theme decides light or dark (not the system).\n"
+         "        cx.ring.joma.JomaPalette.isDark(context)?.let { AppCompatDelegate.setDefaultNightMode(if (it) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO); return }\n"
+         "        applyDarkMode(darkMode)\n")
     edit(work / "app/src/main/java/cx/ring/settings/SettingsFragment.kt",
          "            settingsDarkTheme.setOnCheckedChangeListener { _, isChecked: Boolean ->\n",
          "            cx.ring.joma.JomaPalette.bindRow(requireActivity(), jomaPaletteRow, jomaPaletteValue)\n"

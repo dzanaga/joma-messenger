@@ -87,8 +87,9 @@ look. The splash before the app starts still follows the system's light or dark.
   `application/x-joma-theme+json` `{name, mode}` to its own account; `AccountService`
   hands it to `JomaPalette.fromDesktop`, which takes it only from our own account.
   Seen in the emulator: nord, white (light), and "same as my Omarchy desktop" switching
-  to nord when a test desktop sent it. Light themes: the settings page's title stays
-  too pale (to fix).
+  to nord when a test desktop sent it. A chosen theme sets the day or night mode itself
+  (Jami's switch would follow the system for "light"). Light themes: the settings
+  page's title stays too pale, and file icons are faint (to fix).
 - **Restore from GitHub** (A1, `JomaRestoreActivity.kt`, `tools/restore.py`): device
   flow with the app's client ID (a string resource from `crates/joma/github-app.json`),
   `index.json` and the account file through the API with the token in memory, Argon2id
