@@ -257,8 +257,10 @@ message, or on a video's corner, transcribes it now. A video's subtitles show on
   my devices** (an always-on machine: every conversation's new voice and video
   messages, also without opening them; the words reach your other devices that are on,
   and your own voice messages get their transcript attached even when sent from the
-  phone), or **does not transcribe**. `joma transcription [self|all|off|send|nosend]
-  [--json]`.
+  phone), or **does not transcribe**. The page lists your devices that run Joma and what
+  each does (they tell each other every half hour); while one of them transcribes for
+  all, the others give it three minutes before doing a new message themselves. `joma
+  transcription [self|all|off|send|nosend] [--json]`.
 - **Settings → audio → voice messages** chooses the engine:
   - **automatic** (default): superwhisper when it is installed and set to work offline
     (nothing more to install; its language setting applies, automatic by default), else
@@ -434,6 +436,8 @@ notifications); calls, voice messages and files not yet tried. Design:
   device; your desktop shows it under new devices).
 
 ## Log
+- 0.5.3.dev9 (2026-11-28): your devices tell each other what they transcribe; settings
+  and `joma transcription` list them; a device that transcribes for all is waited for.
 - 0.5.3.dev8 (2026-11-28): files view: conflicts (keep this / keep the other), delete to
   the trash; folder admins and "everybody writes" (`joma sync admin`, `joma sync write
   <folder> all on`).

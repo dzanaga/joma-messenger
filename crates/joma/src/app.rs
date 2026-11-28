@@ -689,6 +689,8 @@ pub struct Joma {
     /// When our devices last heard the theme (again every half hour: a phone that was
     /// off misses account messages).
     theme_told: Option<Instant>,
+    /// Our other devices' transcription roles, by Jami device id.
+    pub transcribers: HashMap<String, TranscriberInfo>,
     /// Our other devices' Joma presence, by device id.
     pub my_devices: HashMap<String, crate::presence::Peer>,
     /// When we last told our other devices, and what.
@@ -738,6 +740,19 @@ const AUTO_DOWNLOAD: u64 = 200 * 1024 * 1024;
 /// Where received files go: `~/Downloads/joma` (the XDG download dir, if set).
 /// The Omarchy theme in use, to our own devices (joma for Android follows it).
 pub const THEME_MIME: &str = "application/x-joma-theme+json";
+
+/// What a device of ours transcribes (discussion 2026-11-27-shared-transcription, Q3).
+pub const ROLE_MIME: &str = "application/x-joma-transcriber+json";
+
+/// Another of our devices, as it describes its transcription.
+#[derive(Debug, Clone)]
+pub struct TranscriberInfo {
+    pub name: String,
+    /// "" for itself, "all", "off".
+    pub role: String,
+    pub engine: String,
+    pub heard: Instant,
+}
 
 pub fn download_dir() -> std::path::PathBuf {
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
@@ -993,6 +1008,7 @@ impl Joma {
             sync_view_at: None,
             files: FilesView::default(),
             theme_told: None,
+            transcribers: HashMap::new(),
             my_devices: HashMap::new(),
             self_told: None,
             accounts: Vec::new(),
@@ -2268,6 +2284,41 @@ impl Joma {
         }
     }
 
+    /// Tell our other devices what this one transcribes (with the theme, every half hour,
+    /// and when the role changes).
+    pub fn tell_role(&mut self) {
+        if self.gate != Gate::Ready {
+            return;
+        }
+        let engine = crate::media::transcriber(&self.quick.transcribe).unwrap_or("none");
+        let name = self.model.devices.get(&self.model.device).cloned().unwrap_or_default();
+        let mut p = joma_jami::Details::new();
+        p.insert(ROLE_MIME.into(), serde_json::json!({"dev": self.model.device, "name": name, "role": self.quick.transcriber, "engine": engine}).to_string());
+        let (acc, me) = (self.model.account.clone(), self.model.me.clone());
+        let _ = joma_jami::send_account_message(&acc, &me, &p, false);
+    }
+
+    /// Another of our devices transcribes for all and was heard lately: new messages wait
+    /// a little for its words before this device does them itself.
+    /// Our devices and what each transcribes, for settings and `joma transcription`.
+    pub fn transcription_devices(&self) -> Vec<(String, String, String)> {
+        let role = |r: &str| match r {
+            "all" => "for all my devices",
+            "off" => "does not transcribe",
+            _ => "for itself",
+        };
+        let me = self.model.devices.get(&self.model.device).cloned().unwrap_or_else(|| "this device".into());
+        let mut out = vec![(format!("{me} (this one)"), role(&self.quick.transcriber).to_owned(), crate::media::transcriber(&self.quick.transcribe).unwrap_or("none").to_owned())];
+        for t in self.transcribers.values() {
+            out.push((if t.name.is_empty() { "a device".into() } else { t.name.clone() }, role(&t.role).to_owned(), t.engine.clone()));
+        }
+        out
+    }
+
+    fn other_transcribes_for_all(&self) -> bool {
+        self.transcribers.iter().any(|(d, t)| *d != self.model.device && t.role == "all" && t.engine != "none" && t.heard.elapsed() < Duration::from_secs(40 * 60))
+    }
+
     /// The Qt client started while our daemon runs: stop it, as two daemons on the same
     /// data corrupt it. The Qt client does not check for Joma, so Joma has to.
     fn step_aside(&mut self, cx: &mut Context<Self>) {
@@ -2309,7 +2360,9 @@ impl Joma {
         }
         self.tell_presence();
         if self.theme_told.is_none_or(|t| t.elapsed() > Duration::from_secs(30 * 60)) {
+            self.theme_told = Some(Instant::now());
             self.tell_theme();
+            self.tell_role();
         }
         self.auto_tick();
         self.transcriber_tick(cx);
@@ -2783,6 +2836,25 @@ impl Joma {
                     }
                     self.after(after, cx);
                     cx.notify();
+                }
+                return;
+            }
+            Event::AccountMessage { account, from, payloads } if *account == acc && payloads.contains_key(ROLE_MIME) => {
+                if bare_uri(from) == self.model.me {
+                    if let Some(v) = payloads.get(ROLE_MIME).and_then(|p| serde_json::from_str::<serde_json::Value>(p).ok()) {
+                        if let Some(dev) = v["dev"].as_str().filter(|d| *d != self.model.device) {
+                            let known = self.transcribers.contains_key(dev);
+                            self.transcribers.insert(
+                                dev.to_owned(),
+                                TranscriberInfo { name: v["name"].as_str().unwrap_or("").to_owned(), role: v["role"].as_str().unwrap_or("").to_owned(), engine: v["engine"].as_str().unwrap_or("none").to_owned(), heard: Instant::now() },
+                            );
+                            // A device we did not know: tell it ours too.
+                            if !known {
+                                self.tell_role();
+                            }
+                            cx.notify();
+                        }
+                    }
                 }
                 return;
             }
@@ -4073,14 +4145,25 @@ impl Joma {
         let conv_id = conv.id.clone();
         self.absorb_transcripts(&conv_id);
         let Some(conv) = self.model.conversations.get(&conv_id) else { return };
-        let voices: Vec<(String, FileRef, i64)> =
-            conv.messages.iter().filter_map(|m| Some((m.id.clone(), m.file.clone()?, m.ts))).filter(|(_, f, _)| media_name(&f.name)).collect();
+        let me_uri = self.model.me.clone();
+        let voices: Vec<(String, FileRef, i64, bool)> = conv
+            .messages
+            .iter()
+            .filter_map(|m| Some((m.id.clone(), m.file.clone()?, m.ts, bare_uri(&m.author) == me_uri)))
+            .filter(|(_, f, _, _)| media_name(&f.name))
+            .collect();
         let auto = self.quick.transcriber != "off" && self.quick.transcribe != "off" && crate::media::transcriber(&self.quick.transcribe).is_some();
         let mut busy = self.transcripts.values().any(Option::is_none);
-        for (msg, f, ts) in voices {
+        for (msg, f, ts, mine) in voices {
             self.want_transcript(&f.id);
             // Only what arrives from now on is transcribed by itself; the cc button does
             // the older ones.
+            // Another device transcribes for all: give its words three minutes to arrive.
+            let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+            if !mine && self.quick.transcriber != "all" && self.other_transcribes_for_all() && now - ts < 180 {
+                self.want_transcript(&f.id);
+                continue;
+            }
             if ts < self.started_ts - 120 {
                 if self.saved_file(&conv_id, &f.id).is_none() && f.size > 0 && f.size <= AUTO_DOWNLOAD && !self.downloads.contains_key(&f.id) && self.voice_fetched.insert(f.id.clone()) {
                     self.download(&conv_id, &msg, &f, cx);
@@ -4233,6 +4316,7 @@ impl Joma {
     pub fn set_transcriber(&mut self, role: &str, cx: &mut Context<Self>) {
         self.quick.transcriber = role.to_owned();
         self.save_quick(cx);
+        self.tell_role();
     }
 
     pub fn set_send_transcripts(&mut self, on: bool, cx: &mut Context<Self>) {
@@ -6052,11 +6136,22 @@ impl Joma {
                         _ => "for itself",
                     };
                     let engine = crate::media::transcriber(&self.quick.transcribe).unwrap_or("none");
+                    let devices = self.transcription_devices();
                     return Reply::Text {
                         text: if json {
-                            serde_json::json!({"role": if self.quick.transcriber.is_empty() { "self" } else { self.quick.transcriber.as_str() }, "engine": engine, "send": self.quick.send_transcripts}).to_string()
+                            serde_json::json!({
+                                "role": if self.quick.transcriber.is_empty() { "self" } else { self.quick.transcriber.as_str() },
+                                "engine": engine,
+                                "send": self.quick.send_transcripts,
+                                "devices": devices.iter().map(|(n, r, e)| serde_json::json!({"name": n, "role": r, "engine": e})).collect::<Vec<_>>(),
+                            })
+                            .to_string()
                         } else {
-                            format!("this device transcribes {role} · engine {engine} · your voice messages {}", if self.quick.send_transcripts { "carry their transcript" } else { "go alone" })
+                            let mut t = format!("this device transcribes {role} · engine {engine} · your voice messages {}", if self.quick.send_transcripts { "carry their transcript" } else { "go alone" });
+                            for (n, r, e) in devices.iter().skip(1) {
+                                t.push_str(&format!("\n  {n}: {r} · {e}"));
+                            }
+                            t
                         },
                     };
                 }

@@ -66,6 +66,9 @@ impl Joma {
                         |j, x, cx| j.set_transcriber(x, cx),
                     ),
                 ))
+                .child(note(
+                    self.transcription_devices().iter().map(|(n, r, e)| format!("{n}: {r} · {e}")).collect::<Vec<_>>().join("\n").as_str(),
+                ))
                 .child(row(
                     label("my voice messages"),
                     chips(
