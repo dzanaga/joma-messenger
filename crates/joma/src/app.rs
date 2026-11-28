@@ -686,6 +686,13 @@ pub struct Joma {
     sync_view_at: Option<Instant>,
     /// The files view.
     pub files: FilesView,
+    /// A restore brought back this account's sync state: offered in the files view.
+    pub restored_sync: Option<crate::sync::Saved>,
+    /// "set them up again" was chosen: done once Syncthing runs.
+    restored_sync_go: bool,
+    /// When the restored sync state was last looked for (a restore writes it after the
+    /// account opens).
+    restored_seen: Option<Instant>,
     /// When our devices last heard the theme (again every half hour: a phone that was
     /// off misses account messages).
     theme_told: Option<Instant>,
@@ -1007,6 +1014,9 @@ impl Joma {
             sync_view_busy: false,
             sync_view_at: None,
             files: FilesView::default(),
+            restored_sync: None,
+            restored_sync_go: false,
+            restored_seen: None,
             theme_told: None,
             transcribers: HashMap::new(),
             my_devices: HashMap::new(),
@@ -1095,6 +1105,9 @@ impl Joma {
         self.new_devices.clear();
         self.gh = crate::github::Store::load(&account);
         self.sync.store = crate::shares::Store::load(&account);
+        self.restored_sync = None;
+        self.restored_sync_go = false;
+        self.restored_seen = None;
         self.gh_found = None;
         if self.restoring.as_ref().is_some_and(|r| r.working) {
             self.restoring = None;
@@ -1161,6 +1174,49 @@ impl Joma {
             let r = crate::sync::start_syncthing(&acc);
             let _ = tx.unbounded_send(AppMsg::SyncStarted(acc, r));
         });
+    }
+
+    /// The files view's "set them up again": sync on, then the folders and shares the
+    /// backup kept.
+    pub fn restore_sync(&mut self, yes: bool, cx: &mut Context<Self>) {
+        if !yes {
+            self.restored_sync = None;
+            if let Some(p) = crate::sync::restored_path(&self.model.me) {
+                let _ = std::fs::remove_file(p);
+            }
+            return cx.notify();
+        }
+        self.restored_sync_go = true;
+        if self.sync.st.is_some() {
+            self.apply_restored_sync(cx);
+        } else {
+            let acc = self.model.account.clone();
+            let _ = crate::sync::set_on(&acc, true);
+            self.start_sync();
+            self.show_flash("starting sync, then your folders come back…", cx);
+        }
+        cx.notify();
+    }
+
+    fn apply_restored_sync(&mut self, cx: &mut Context<Self>) {
+        self.restored_sync_go = false;
+        let Some(saved) = self.restored_sync.take() else { return };
+        let name = self.model.devices.get(&self.model.device).cloned().unwrap_or_default();
+        let (acc, me, dev) = (self.model.account.clone(), self.model.me.clone(), self.model.device.clone());
+        match self.sync.apply_saved(&acc, &me, &dev, &name, &saved) {
+            Ok(n) => {
+                self.show_flash(format!("{n} synced folders set up again; they fill from your other devices and contacts"), cx);
+                if let Some(p) = crate::sync::restored_path(&me) {
+                    let _ = std::fs::remove_file(p);
+                }
+            }
+            Err(e) => {
+                self.restored_sync = Some(saved);
+                self.show_flash(format!("could not set the folders up again: {e:#}"), cx);
+            }
+        }
+        self.refresh_sync_view();
+        cx.notify();
     }
 
     /// A message about folders shared with contacts.
@@ -2359,6 +2415,13 @@ impl Joma {
             }
         }
         self.tell_presence();
+        if self.restored_sync.is_none() && !self.model.me.is_empty() && self.restored_seen.is_none_or(|t| t.elapsed() > Duration::from_secs(5)) {
+            self.restored_seen = Some(Instant::now());
+            if let Some(s) = crate::sync::restored_path(&self.model.me).and_then(|p| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice::<crate::sync::Saved>(&b).ok()) {
+                self.restored_sync = Some(s);
+                cx.notify();
+            }
+        }
         if self.theme_told.is_none_or(|t| t.elapsed() > Duration::from_secs(30 * 60)) {
             self.theme_told = Some(Instant::now());
             self.tell_theme();
@@ -2709,6 +2772,9 @@ impl Joma {
                         let name = self.model.devices.get(&self.model.device).cloned().unwrap_or_default();
                         let (me, dev) = (self.model.me.clone(), self.model.device.clone());
                         self.sync.started(&acc, &me, &dev, &name, st);
+                        if self.restored_sync_go {
+                            self.apply_restored_sync(cx);
+                        }
                     }
                     Err(e) => {
                         self.sync.starting = false;
@@ -6266,7 +6332,7 @@ impl Joma {
                     Err(e) => Reply::Error { message: e.to_string() },
                 }
             }
-            Request::Sync { what, arg, label, json } => self.sync_request(&what, arg, label, json),
+            Request::Sync { what, arg, label, json } => self.sync_request(&what, arg, label, json, cx),
             Request::Quit => {
                 self.leave();
                 let acc = self.model.account.clone();
@@ -6339,7 +6405,7 @@ impl Joma {
         Ok(format!("{} offered to {} (they read; joma sync write gives writing)", s.label, members.iter().map(|u| self.model.name_of(u)).collect::<Vec<_>>().join(", ")))
     }
 
-    fn sync_request(&mut self, what: &str, arg: Option<String>, label: Option<String>, json: bool) -> Reply {
+    fn sync_request(&mut self, what: &str, arg: Option<String>, label: Option<String>, json: bool, cx: &mut Context<Self>) -> Reply {
         if self.gate != Gate::Ready {
             return Reply::Error { message: "Joma is not connected to Jami yet".into() };
         }
@@ -6390,6 +6456,26 @@ impl Joma {
                     Err(e) => Reply::Error { message: e },
                 }
             }
+            // joma sync restored [yes|no]: what a restore brought back, set it up or not.
+            "restored" => match arg.as_deref() {
+                None => match &self.restored_sync {
+                    Some(s) => Reply::Text {
+                        text: format!(
+                            "from your backup: sync was {} with {} folders ({}) and {} shares (joma sync restored yes|no)",
+                            if s.on { "on" } else { "off" },
+                            s.folders.len(),
+                            s.folders.iter().map(|f| f.label.as_str()).collect::<Vec<_>>().join(", "),
+                            s.shares.shares.len()
+                        ),
+                    },
+                    None => Reply::Text { text: "nothing restored to set up".into() },
+                },
+                Some(a) if self.restored_sync.is_some() => {
+                    self.restore_sync(a == "yes", cx);
+                    Reply::Done
+                }
+                _ => Reply::Error { message: "nothing restored to set up".into() },
+            },
             "offers" => {
                 let offers: Vec<&crate::shares::Offer> = self.sync.store.offers.values().collect();
                 if json {

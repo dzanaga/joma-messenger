@@ -3085,7 +3085,7 @@ dependencies = [
 
 [[package]]
 name = "joma"
-version = "0.5.3-dev.10"
+version = "0.5.3-dev.11"
 dependencies = [
  "anyhow",
  "futures",
@@ -3112,7 +3112,7 @@ dependencies = [
 
 [[package]]
 name = "joma-backup"
-version = "0.5.3-dev.10"
+version = "0.5.3-dev.11"
 dependencies = [
  "anyhow",
  "argon2",
@@ -3125,7 +3125,7 @@ dependencies = [
 
 [[package]]
 name = "joma-desk"
-version = "0.5.3-dev.10"
+version = "0.5.3-dev.11"
 dependencies = [
  "anyhow",
  "ashpd 0.11.1",
@@ -3151,7 +3151,7 @@ dependencies = [
 
 [[package]]
 name = "joma-jami"
-version = "0.5.3-dev.10"
+version = "0.5.3-dev.11"
 dependencies = [
  "anyhow",
  "cc",
@@ -3162,7 +3162,7 @@ dependencies = [
 
 [[package]]
 name = "joma-quick"
-version = "0.5.3-dev.10"
+version = "0.5.3-dev.11"
 dependencies = [
  "anyhow",
  "serde",
@@ -3172,7 +3172,7 @@ dependencies = [
 
 [[package]]
 name = "joma-sync"
-version = "0.5.3-dev.10"
+version = "0.5.3-dev.11"
 dependencies = [
  "anyhow",
  "serde",
@@ -3181,7 +3181,7 @@ dependencies = [
 
 [[package]]
 name = "joma-theme"
-version = "0.5.3-dev.10"
+version = "0.5.3-dev.11"
 
 [[package]]
 name = "js-sys"

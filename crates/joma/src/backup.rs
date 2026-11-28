@@ -45,6 +45,24 @@ fn file_name(a: &Account) -> String {
     format!("{}.{EXT}", a.uri)
 }
 
+/// The account's sync state beside its archive (the archive's format stays Jami's own,
+/// which the phone reads too).
+fn sync_name(uri: &str) -> String {
+    format!("{uri}.sync.{EXT}")
+}
+
+/// Keep a restored account's sync state for Joma to offer.
+fn keep_sync_state(uri: &str, data: &[u8], password: &str) {
+    if let Ok((_, plain)) = joma_backup::open(data, password) {
+        if let Some(p) = crate::sync::restored_path(uri) {
+            if let Some(d) = p.parent() {
+                let _ = std::fs::create_dir_all(d);
+            }
+            let _ = std::fs::write(p, plain);
+        }
+    }
+}
+
 fn sealed(a: &Account, password: &str) -> Result<Vec<u8>> {
     let tmp = Scratch::new(&format!("{}.gz", a.uri))?;
     joma_jami::export_archive(&a.id, &tmp.0.to_string_lossy())?;
@@ -67,6 +85,9 @@ pub fn backup(accounts: &[Account], password: &str, file: Option<&Path>) -> Resu
                 std::fs::create_dir_all(d)?;
             }
             std::fs::write(&path, data).with_context(|| format!("cannot write {}", path.display()))?;
+            if let (Some(state), Some(dir)) = (crate::sync::saved(&a.id), path.parent()) {
+                std::fs::write(dir.join(sync_name(&a.uri)), joma_backup::seal(&state, password, &a.uri, "sync", now())?)?;
+            }
             done.push(format!("{} → {}", a.label, path.display()));
         }
         return Ok(done.join("\n"));
@@ -89,6 +110,9 @@ pub fn backup(accounts: &[Account], password: &str, file: Option<&Path>) -> Resu
         let data = sealed(a, password)?;
         let name = file_name(a);
         gh::put(&login, &name, &data, &format!("backup of {}", a.label))?;
+        if let Some(state) = crate::sync::saved(&a.id) {
+            gh::put(&login, &sync_name(&a.uri), &joma_backup::seal(&state, password, &a.uri, "sync", now())?, &format!("synced folders of {}", a.label))?;
+        }
         index.upsert(Entry { jami: a.uri.clone(), label: a.label.clone(), file: name, created: now(), size: data.len() as u64 });
         done.push(a.label.clone());
     }
@@ -104,7 +128,7 @@ pub fn restore(wanted: &[String], password: &str, file: Option<&Path>, present: 
     match file {
         Some(p) if p.is_dir() => {
             for e in std::fs::read_dir(p)?.flatten() {
-                if e.path().extension().is_some_and(|x| x == EXT) {
+                if e.path().extension().is_some_and(|x| x == EXT) && !e.file_name().to_string_lossy().contains(".sync.") {
                     sources.push((e.path().display().to_string(), std::fs::read(e.path())?));
                 }
             }
@@ -144,6 +168,14 @@ pub fn restore(wanted: &[String], password: &str, file: Option<&Path>, present: 
         let tmp = Scratch::new(&format!("{}.gz", h.account))?;
         std::fs::write(&tmp.0, &archive)?;
         joma_jami::import_archive(&tmp.0.to_string_lossy())?;
+        // Its synced folders, to offer setting them up again.
+        let state = match file {
+            Some(p) => std::fs::read(if p.is_dir() { p.join(sync_name(&h.account)) } else { p.with_file_name(sync_name(&h.account)) }).ok(),
+            None => gh::login().ok().and_then(|l| gh::get(&l, &sync_name(&h.account)).ok().flatten()).map(|(d, _)| d),
+        };
+        if let Some(d) = state {
+            keep_sync_state(&h.account, &d, password);
+        }
         // The daemon reads the archive while it loads the account.
         std::thread::sleep(std::time::Duration::from_secs(3));
         done.push(format!("{}: restored", h.label));

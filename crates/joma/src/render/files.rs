@@ -18,6 +18,9 @@ impl Joma {
     pub(super) fn files_list(&self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let mut list = div().id("files").flex().flex_col().flex_1().overflow_y_scroll();
         if self.sync.st.is_none() {
+            if let Some(s) = &self.restored_sync {
+                list = list.child(self.restored_card(t, s, cx));
+            }
             return list
                 .child(head(t, "synced folders"))
                 .child(
@@ -34,6 +37,9 @@ impl Joma {
                 .into_any_element();
         }
         let Some(r) = &self.sync_view else { return list.child(head(t, "synced folders")).child(div().px(px(10.)).child(small(t, "reading…", t.muted))).into_any_element() };
+        if let Some(s) = &self.restored_sync {
+            list = list.child(self.restored_card(t, s, cx));
+        }
         if !r.offers.is_empty() {
             list = list.child(head(t, "offered to you"));
             for o in &r.offers {
@@ -124,6 +130,28 @@ impl Joma {
             }
         }
         list.child(self.files_received_row(t, cx)).into_any_element()
+    }
+
+    /// After a restore: the folders the backup kept, to set up again.
+    fn restored_card(&self, t: &Theme, s: &crate::sync::Saved, cx: &mut Context<Self>) -> gpui::Div {
+        let names: Vec<&str> = s.folders.iter().map(|f| f.label.as_str()).collect();
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.))
+            .mx(px(10.))
+            .my(px(6.))
+            .p(px(8.))
+            .bg(t.raised)
+            .child(div().text_color(t.bright).child("From your backup"))
+            .child(small(t, format!("{} synced folders: {}", names.len(), names.join(", ")), t.muted))
+            .child(
+                div()
+                    .flex()
+                    .gap(px(6.))
+                    .child(button("restored-yes", G_CHECK, "set them up again", t, true).on_click(cx.listener(|this, _, _, cx| this.restore_sync(true, cx))))
+                    .child(button("restored-no", G_TIMES, "not now", t, false).on_click(cx.listener(|this, _, _, cx| this.restore_sync(false, cx)))),
+            )
     }
 
     fn files_received_row(&self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {

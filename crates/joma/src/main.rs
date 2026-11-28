@@ -87,6 +87,9 @@ const USAGE: &str = "usage: joma [--hidden]           open Joma (or raise it); -
                                  offer a folder to a contact or a conversation's members
                                  (they read it; the owner writes)
        joma sync offers [--json] folders offered to you
+       joma sync restored [yes|no]
+                                 after a restore: the folders your backup kept, set them
+                                 up again or not
        joma files [--json]       synced folders: yours, shared, conversations', offered
        joma files ls <folder> [path] [--json]
                                  a folder's files (folder: its name, id or conversation)
@@ -209,6 +212,7 @@ fn cli(args: &[String]) -> Option<i32> {
                 label: Some(args[3].clone()),
                 json: false,
             },
+            (Some("restored"), 2 | 3) => Request::Sync { what: "restored".into(), arg: args.get(2).cloned(), label: None, json: false },
             (Some("offers"), _) => Request::Sync { what: "offers".into(), arg: None, label: None, json: args.iter().any(|a| a == "--json") },
             (Some("join"), 3 | 4) => Request::Sync {
                 what: "join".into(),

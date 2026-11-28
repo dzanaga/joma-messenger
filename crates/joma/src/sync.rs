@@ -110,6 +110,65 @@ pub fn home(account: &str) -> PathBuf {
     data.join("joma/syncthing").join(account)
 }
 
+/// What a backup keeps of sync (discussion 2026-11-24-folder-sync, question 8): whether
+/// it was on, the folders (id, label, path, type) and the shares with contacts, so a
+/// restored machine offers to set them up again.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Saved {
+    pub on: bool,
+    /// The home folder of the machine that made the backup: paths under it move under
+    /// the new machine's home.
+    #[serde(default)]
+    pub home: String,
+    pub folders: Vec<SavedFolder>,
+    #[serde(default)]
+    pub shares: crate::shares::Store,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SavedFolder {
+    pub id: String,
+    pub label: String,
+    pub path: String,
+    pub kind: String,
+}
+
+fn unescape(s: &str) -> String {
+    s.replace("&#39;", "'").replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
+}
+
+/// The folders in an account's Syncthing config (read from its file: Syncthing need not run).
+pub fn saved_folders(account: &str) -> Vec<SavedFolder> {
+    let Ok(xml) = std::fs::read_to_string(home(account).join("config.xml")) else { return Vec::new() };
+    let attr = |tag: &str, name: &str| -> String {
+        let key = format!(" {name}=\"");
+        tag.find(&key).and_then(|i| tag[i + key.len()..].split('"').next()).map(unescape).unwrap_or_default()
+    };
+    xml.match_indices("<folder ")
+        .filter_map(|(i, _)| {
+            let tag = &xml[i..i + xml[i..].find('>')?];
+            Some(SavedFolder { id: attr(tag, "id"), label: attr(tag, "label"), path: attr(tag, "path"), kind: attr(tag, "type") })
+        })
+        .filter(|f| !f.id.is_empty() && !f.path.is_empty())
+        .collect()
+}
+
+/// This account's sync state for the backup, or None when there is nothing to keep.
+pub fn saved(account: &str) -> Option<Vec<u8>> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let s = Saved { on: is_on(account), home, folders: saved_folders(account), shares: crate::shares::Store::load(account) };
+    if !s.on && s.folders.is_empty() && s.shares.shares.is_empty() {
+        return None;
+    }
+    serde_json::to_vec(&s).ok()
+}
+
+/// Where a restore leaves the sync state of an account, until the user answers.
+pub fn restored_path(uri: &str) -> Option<PathBuf> {
+    let data = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
+    Some(data.join("joma/restored-sync").join(format!("{uri}.json")))
+}
+
 /// Where folders from your other devices appear.
 pub fn default_dir() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp")).join("joma-sync")
@@ -242,6 +301,38 @@ impl Sync {
             Self::send(account, u, &offer);
         }
         Ok(share)
+    }
+
+    /// Set up again what a backup kept (after a restore): the folders at their paths and
+    /// the shares with contacts, who hear from us again.
+    pub fn apply_saved(&mut self, account: &str, me: &str, device: &str, name: &str, saved: &Saved) -> Result<usize> {
+        let st = self.st.as_ref().ok_or_else(|| anyhow::anyhow!("sync is not running"))?;
+        let own = self.own();
+        let here = std::env::var("HOME").unwrap_or_default();
+        let moved = |p: &str| -> String {
+            match p.strip_prefix(saved.home.as_str()).filter(|r| !saved.home.is_empty() && here != saved.home && (r.is_empty() || r.starts_with('/'))) {
+                Some(rest) => format!("{here}{rest}"),
+                None => p.to_owned(),
+            }
+        };
+        let mut n = 0;
+        for f in &saved.folders {
+            let moved_path = moved(&f.path);
+            let path = Path::new(&moved_path);
+            std::fs::create_dir_all(path)?;
+            st.set_folder_as(&f.id, &f.label, path, &own, if f.kind.is_empty() { "sendreceive" } else { &f.kind })?;
+            n += 1;
+        }
+        for (id, s) in &saved.shares.shares {
+            let mut s = s.clone();
+            s.path = moved(&s.path);
+            self.store.shares.entry(id.clone()).or_insert(s);
+        }
+        self.store.convs.extend(saved.shares.convs.iter().cloned());
+        self.store.save(account);
+        self.expose_peers(account, me);
+        self.announce(account, me, device, name);
+        Ok(n)
     }
 
     /// Accept an offer: the folder goes to `path` (default `~/joma-sync/<label>`, or the

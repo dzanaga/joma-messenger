@@ -161,6 +161,11 @@ password makes the backup useless. `joma backup list`, `joma github status`.
 - **On a fresh install** (or Accounts → new account): **restore from your backup** on
   the welcome screen lists the accounts in your backup repo; pick them, type the
   password once, and the account opens. `joma restore` works there too.
+- **Synced folders come back too**: a backup also keeps, encrypted beside the account
+  (`<id>.sync.jomabk`), whether sync was on, the folders and the folders shared with
+  contacts. After a restore, files shows **From your backup · set them up again** (or
+  `joma sync restored [yes|no]`): the folders return at their places (moved under the new
+  home folder if it differs) and fill from your other devices and contacts.
 - **An account that still runs elsewhere** gets this machine as a new device. Your other
   devices then show "new device … joined your account" in Devices with **keep** and
   **revoke** (also for a device linked from another of your devices), until you choose.
@@ -431,6 +436,8 @@ notifications); calls, voice messages and files not yet tried. Design:
   device; your desktop shows it under new devices).
 
 ## Log
+- 0.5.3.dev11 (2026-11-28): backups keep the synced folders; after a restore, set them up
+  again from files (`joma sync restored`).
 - 0.5.3.dev10 (2026-11-28): whisper.cpp removed: Superwhisper is the only engine.
 - 0.5.3.dev9 (2026-11-28): your devices tell each other what they transcribe; settings
   and `joma transcription` list them; a device that transcribes for all is waited for.

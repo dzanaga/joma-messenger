@@ -51,5 +51,14 @@ D-23, discussion `docs/discussions/2026-11-24-folder-sync.qmd`.
   (once the fix that auto-joins conversations we take part in was in); a plain folder
   shared with the contact (`joma sync share`) arrived as `receiveonly`. The files view
   was not seen on screen (the host's screen was off at night).
-- **Not yet.** Tailscale straight to the other Syncthing without a tunnel, the folder
-  list in the GitHub backup, agents, the phone browsing a home device's folder.
+- **In the backup** (question 8, 0.5.3.dev11): `sync::Saved` (on, the backing-up
+  machine's home, the folders read from Syncthing's `config.xml`, the shares store),
+  sealed with the backup password as `<jami id>.sync.jomabk` beside the account's file
+  (the account file stays Jami's archive, which the phone reads). A restore keeps it in
+  `$XDG_DATA_HOME/joma/restored-sync/<jami id>.json`; "set them up again" turns sync on,
+  recreates each folder with its id and type (paths under the old home move under the
+  new one), merges the shares and announces them. Tested: `fb` backed up to files,
+  restored into an empty profile, set up again: the three folders filled from the
+  contact `fa` (4 MB over a Jami tunnel).
+- **Not yet.** Tailscale straight to the other Syncthing without a tunnel, agents, the
+  phone browsing a home device's folder.
